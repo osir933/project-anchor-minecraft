@@ -103,19 +103,32 @@ public final class Scheduler {
      * @return what happened
      */
     public TickReport tick(PhysicalWorld world) {
+        return tick(world, SimulationScope.everywhere());
+    }
+
+    /**
+     * Simulates one tick within a scope: runs the models that fit the budget, advances the world's clock,
+     * and audits conservation if this tick is due.
+     *
+     * @param world the world
+     * @param scope where each domain is simulated
+     * @return what happened
+     */
+    public TickReport tick(PhysicalWorld world, SimulationScope scope) {
         balance = Math.min(balance + budgetPerTick, budgetPerTick * MAX_SAVED_TICKS);
         List<TickReport.ModelRun> runs = new ArrayList<>(models.size());
         List<ValidityIssue> issues = new ArrayList<>();
         for (PhysicsModel model : models) {
             String id = model.id();
             double owed = owedSeconds.get(id) + tickSeconds;
-            long cost = Math.max(0, model.estimateCost(world, owed));
+            DeterministicRandom random = DeterministicRandom.forKeys(world.settings().seed(), world.tick(),
+                    id.hashCode());
+            StepContext context = new StepContext(world, owed, random, scope);
+            long cost = Math.max(0, model.estimateCost(context));
             boolean starved = deferredTicks.get(id) >= maxDeferredTicks;
             if (cost <= balance || starved) {
                 TickReport.Status status = cost <= balance ? TickReport.Status.RAN : TickReport.Status.RAN_ON_CREDIT;
-                DeterministicRandom random = DeterministicRandom.forKeys(world.settings().seed(), world.tick(),
-                        id.hashCode());
-                model.step(new StepContext(world, owed, random));
+                model.step(context);
                 balance -= cost;
                 owedSeconds.put(id, 0.0);
                 deferredTicks.put(id, 0);
