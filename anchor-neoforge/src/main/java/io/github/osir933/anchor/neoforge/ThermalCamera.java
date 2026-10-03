@@ -197,7 +197,8 @@ final class ThermalCamera {
         Vec3 right = new Vec3(-Math.cos(yaw), 0.0, -Math.sin(yaw));
         Vec3 up = right.cross(forward);
         BlockHitResult centre = look(level, eye, forward);
-        double spot = centre.getType() == HitResult.Type.BLOCK ? heat.temperature(centre.getBlockPos()) : Double.NaN;
+        double spot = centre.getType() == HitResult.Type.BLOCK
+                ? heat.temperatureAt(centre.getBlockPos(), centre.getLocation()) : Double.NaN;
         Extremes extremes = new Extremes();
         List<Dot> dots = new ArrayList<>();
         TreeMap<Long, Double> air = new TreeMap<>();
@@ -216,7 +217,7 @@ final class ThermalCamera {
                                 key -> level.getBlockState(pos).isAir() ? heat.temperature(pos) : Double.NaN);
                     }
                 } else if (blocked && distance >= NEAREST) {
-                    double kelvin = heat.temperature(hit.getBlockPos());
+                    double kelvin = heat.temperatureAt(hit.getBlockPos(), hit.getLocation());
                     if (!Double.isNaN(kelvin)) {
                         Vec3 off = hit.getDirection().getUnitVec3().scale(SURFACE_OFFSET);
                         dots.add(new Dot(hit.getLocation().add(off), kelvin));

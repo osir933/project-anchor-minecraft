@@ -88,7 +88,30 @@ view factor to it, and rays that get no further reach surroundings at the weathe
 declared. When both blocks of a pair radiate, each estimates their exchange and counts half. A face keeps its
 rays until a block on their way changes whether it lets radiation through, so a steady scene casts none. The
 exchange takes as many substeps as the hottest, smallest blocks need, up to 64; blocks that would need more
-are damped, which keeps them stable but slow, and reported. Refined blocks do not radiate yet.
+are damped, which keeps them stable but slow, and reported.
+
+Where much heat flows through a face, a whole block cannot show it: a cell has one temperature and passes heat
+on as if from its centre, so heat taken in at one face warms the whole cubic metre at once. **Thermal
+refinement** (`physics.thermal.ThermalRefinement`) splits such blocks. Conduction and radiation report the
+temperature drop each cell needs between its centre and a face: the heat through the face times the cell's
+resistance to it, half its edge over its conductivity. A cell whose drop exceeds 50 K splits into eight, one
+level a step, down to level 2 (25 cm cells), the largest drops first, at most 256 a step and 16 384 cells in
+all. Radiation only counts where it brings more than 5 kW/m², five times strong sunlight, so sunlight and
+distant glow never refine anything. Gas never splits, because convection rather than its cell size sets how it
+passes heat on, and neither do blocks a heat source holds. The cells of a refined block merge back eight at a
+time once every drop in the block is below 12.5 K and the eight agree within 5 K, in the same phase and at the
+same stage of any phase change, so a melting front keeps its cells; each step looks at a few refined blocks in
+turn. A merged cell's drops are about twice those of its children, well below the split drop, so cells do not
+split and merge in turn. Measured at Anchor's default clock, a block of ice beside lava melts in 19 game
+minutes with whole blocks, 14 with 50 cm cells, 12 with 25 cm cells and 11 with 12.5 cm cells, which cost three
+times as much as 25 cm ones.
+
+Refined blocks radiate from their outer cells. Each face of a block casts its rays once, and the cells on that
+face share what it sends and takes in by their emissivity and area. Opacity follows the whole block, so
+refining a block changes no rays. A refined block counts as calm when its matter as a whole changes more slowly
+than the calm rate, its cells' net changes added regardless of sign over the whole block's heat capacity, so a
+refined room still falls asleep. Snapshots store refined blocks' totals, so a block is saved and restored whole
+and splits again if its heat is still steep.
 
 Three models connect the simulated region to the rest of the world, and all declare the energy they exchange:
 
@@ -170,11 +193,11 @@ the game's block there; a block that changed while the section was not simulated
   carries on.
 - **Thermal camera.** While a player holds one, `ThermalCamera` takes an image of what they look at every ten
   game ticks: 24 by 14 rays across 48° stop at the first block outline or fluid within 24 blocks, and each hit
-  becomes a dot on that face, or in the air view the air along the rays that differs from the typical air in
-  view. Dots are vanilla trail particles sent to that player alone, which stay where they are put until the
-  next image, so the client needs no mod code for them. `ThermalScale` maps temperatures to colours that
-  brighten from violet to near white and follows the view with a span that widens at once and narrows
-  slowly.
+  becomes a dot on that face showing the temperature of the cell it hit, or in the air view the air along the
+  rays that differs from the typical air in view. Dots are vanilla trail particles sent to that player alone,
+  which stay where they are put until the next image, so the client needs no mod code for them. `ThermalScale`
+  maps temperatures to colours that brighten from violet to near white and follows the view with a span that
+  widens at once and narrows slowly.
 
 The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
 (`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
@@ -182,8 +205,9 @@ below it becomes ice, water heated past boiling leaves air, a block placed and h
 the temperature, a torch warms the air above it, a section written into its chunk and brought in again comes
 back exactly, the save format keeps every number, a thermal camera reads a hot iron block at its crosshair and
 shows it among the cold floor, its air view shows the warm air above the iron and none of the still air, its
-tooltip says how to use it, and an iron block at 1500 K warms a stone block across two blocks of air. The game
-tests load the mod from the build directories, so CI also installs a
+tooltip says how to use it, an iron block at 1500 K warms a stone block across two blocks of air, and the stone
+walls of a lava pool are refined so that their faces read hotter than the stone behind, on the thermometer
+too. The game tests load the mod from the build directories, so CI also installs a
 NeoForge server the way players do, starts it with the released jar and checks that the mod loads, its
 self-test passes, heat runs, the server stops cleanly and nothing is logged as an error
 (`.github/scripts/smoke_test.py`).
@@ -214,7 +238,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 ## Roadmap
 
 Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces
-radiate, and temperatures are saved with the world. Next for heat: sunlight and the night sky, convection in
-liquids, and refining blocks where temperatures change steeply. After that come structure and fracture; rigid bodies, contact and emergent
+radiate, temperatures are saved with the world, and blocks refine where temperatures change steeply. Next for
+heat: sunlight and the night sky, and convection in liquids, which will let lava pass its heat on as fast as
+real lava does. After that come structure and fracture; rigid bodies, contact and emergent
 tools; materials processing and microstructure; fluids and chemistry; electricity and control; causal
 targeting and molecular dynamics; and finally life and society, on the way to 1.0.

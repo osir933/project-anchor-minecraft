@@ -19,6 +19,11 @@ Java 25, on both the client and the server.
 - **Matter melts, freezes and boils.** Ice melts into water, water freezes or boils away and snow melts when
   its matter reaches the melting or boiling point and has taken in or given up the latent heat.
 - **Heat sources.** Torches, lanterns, candles, campfires, fire, lit furnaces, magma and lava give off heat.
+- **Blocks refine where heat is steep.** Where temperatures change steeply across a block, as in stone beside
+  lava, the block splits into smaller cells, down to 25 cm, so heat soaks in from the face first, and the cells
+  merge back once they even out. Ice beside lava melts in twelve minutes instead of nineteen. The thermometer
+  and the thermal camera read the cell they touch, and `/anchor heat inspect` shows the range of a refined
+  block's cells.
 - **Saved with the world.** The blocks heat has changed are saved with their chunk and come back exactly.
 - **Tools for experiments.** `/anchor heat inspect` shows what the simulation knows about a block,
   `/anchor heat status` how the simulation is doing, and operators can set a block's temperature with
@@ -31,8 +36,9 @@ Known limits of this alpha:
 
 - Vanilla's own rules still run: ice melts near bright light and water freezes in cold biomes as usual.
 - Big changes take time: Anchor's clock follows the day (a day is 24 simulated hours) and a block is a full
-  cubic metre. A snow layer beside a fire melts in about five minutes of play, a block of ice beside lava in
-  about fifty.
+  cubic metre. Two layers of snow beside a fire melt in about four and a half minutes of play, a block of ice
+  beside lava in about twelve.
 - Burning and flowing liquids are not simulated yet, and the sun does not warm anything. Flames and torches
-  heat the air around them but do not radiate.
+  heat the air around them but do not radiate, and lava passes its heat on as if it were still, so it melts
+  ice more slowly than real lava would.
 - Land nobody is near is paused, not cooled: it carries on from where it was when a player returns.

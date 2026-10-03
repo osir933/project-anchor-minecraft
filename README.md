@@ -29,11 +29,16 @@ rises through the air and drains away into the weather, and blocks change when t
 Heat is simulated in the land around each player: the player's 16-block section and two more in every
 direction. Anchor's clock follows the day: a 20-minute Minecraft day is 24 simulated hours, so each game tick
 is 3.6 simulated seconds. Heat moves at its real pace on that clock and a block is a full cubic metre, so big
-changes take a while. A snow layer beside a fire melts in about five minutes of play; a block of ice beside
-lava takes about fifty. That second one is too slow: at block scale, heat crosses each block as if it had to
-travel the full metre, which undersells how fast a hot block heats its neighbour at first. Refining blocks
-where temperatures change steeply will fix it. Until then, `/anchor heat set` changes a temperature directly
-when an experiment cannot wait.
+changes take a while: two layers of snow beside a fire melt in about four and a half minutes of play, and a
+block of ice beside lava in about twelve.
+
+Where temperatures change steeply across a block, as in stone beside lava, Anchor refines the block into eight
+smaller cells, and the cells nearest the heat into eight again, down to 25 cm. Heat then soaks in from the face,
+as it does in reality, instead of spreading through the whole cubic metre at once. With whole blocks the ice
+would take nineteen minutes, and the snow would still be melting after an hour. Once the cells even out they
+merge back into one block, and a block is always saved as one. Most of the ice's wait is now the lava's: lava
+passes heat on as if through half a metre of still molten rock, where real lava churns and keeps its surface
+hot. Until liquids move, `/anchor heat set` changes a temperature directly when an experiment cannot wait.
 
 Temperatures are saved with the world. Anchor stores, with each chunk, the blocks heat has changed, exactly
 as the simulation has them; blocks heat never touched need nothing, because they come back from the block
@@ -47,15 +52,16 @@ stands still in land nobody is near: a warm room you walk away from is just as w
 
 | Command | What it does |
 | --- | --- |
-| `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy and where the value came from. Operators can name any block with `/anchor heat inspect <pos>`. |
-| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks came back as they were saved, and whether energy and mass balanced at the last audit. |
+| `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy, where the value came from and, for a refined block, how warm its coolest and hottest cells are. Operators can name any block with `/anchor heat inspect <pos>`. |
+| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks are refined into how many cells, how many blocks came back as they were saved, and whether energy and mass balanced at the last audit. |
 | `/anchor heat set <pos> <celsius>` | For operators: sets a block's temperature, keeping its matter, to start an experiment. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
 ### Thermometer
 
 Craft a thermometer from a glass pane, redstone and a copper ingot stacked in a column, glass on top. Use it
-on a block to read the block's temperature, or in the air to read the air around your head.
+on a block to read the block's temperature where you touch it, which on a refined block is the cell there, or
+in the air to read the air around your head.
 
 ### Thermal camera
 
@@ -63,7 +69,8 @@ Craft a thermal camera from a spyglass on top, a thermometer between two copper 
 copper ingots around a redstone dust in the bottom row. Hold it in either hand and it shows the temperatures of
 what you look at as coloured dots, twice a second: dark violet for the coldest in view, through red and orange,
 to near white for the hottest. Above the hotbar it shows the temperature at your crosshair and the scale, which
-follows what is in view the way a real thermal camera's automatic range does. Use it to switch to the air
+follows what is in view the way a real thermal camera's automatic range does. Each dot reads the spot it marks,
+so the face of stone beside lava shows hotter than the stone behind it. Use it to switch to the air
 view, which shows the air that is warmer or colder than the rest, such as the plume above a torch. Sneak and use
 it to lock the scale, so that what you see later compares with what you see now. Like a real thermal camera, it
 cannot see through glass or water. Only you see your camera's images.
@@ -72,7 +79,8 @@ cannot see through glass or water. Only you see your camera's images.
 
 Anchor's settings are kept with each world, under `[heat]` in its config file, and each is described there:
 `enabled`, `secondsPerGameTick` (3.6), `gameTicksPerStep` (4), `radius` and `verticalRadius` (2 sections),
-`sectionsLoadedPerStep` (8), `calmKelvinPerHour` (1.0) and `showPhaseChanges` (true).
+`sectionsLoadedPerStep` (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns
+refinement off), `maxRefinedCells` (16384 in each dimension) and `showPhaseChanges` (true).
 
 ### Describing blocks in a data pack
 

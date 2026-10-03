@@ -17,6 +17,8 @@ final class AnchorConfig {
     static final ModConfigSpec.IntValue VERTICAL_RADIUS;
     static final ModConfigSpec.IntValue SECTIONS_LOADED_PER_STEP;
     static final ModConfigSpec.DoubleValue CALM_KELVIN_PER_HOUR;
+    static final ModConfigSpec.IntValue REFINEMENT_LEVELS;
+    static final ModConfigSpec.IntValue MAX_REFINED_CELLS;
     static final ModConfigSpec.BooleanValue SHOW_PHASE_CHANGES;
 
     static {
@@ -48,6 +50,16 @@ final class AnchorConfig {
                         + "more accurate and cost more.")
                 .worldRestart()
                 .defineInRange("calmKelvinPerHour", 1.0, 0.0, 1000.0);
+        REFINEMENT_LEVELS = b.comment("How many times a block may be halved where its temperature changes steeply, "
+                        + "such as stone beside lava: 0 never, 1 into 50 cm cells, 2 into 25 cm cells, 3 into "
+                        + "12.5 cm cells. Finer cells follow heat near very hot and very cold things more truly and "
+                        + "cost more.")
+                .worldRestart()
+                .defineInRange("refinementLevels", 2, 0, 3);
+        MAX_REFINED_CELLS = b.comment("The most cells refined blocks may hold in each dimension. Once it is "
+                        + "reached, no more blocks are split until others even out and merge back.")
+                .worldRestart()
+                .defineInRange("maxRefinedCells", 16384, 0, 262144);
         SHOW_PHASE_CHANGES = b.comment("Whether melting, freezing and boiling change blocks, such as ice melting "
                         + "into water or water boiling away. Takes effect at once.")
                 .define("showPhaseChanges", true);

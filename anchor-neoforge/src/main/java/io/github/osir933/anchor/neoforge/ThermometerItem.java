@@ -12,10 +12,12 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 
 /**
- * Measures temperature. Used on a block it reads that block; used in the air it reads the air around the
- * player's head. The reading appears above the hotbar.
+ * Measures temperature. Used on a block it reads that block where it touches it, which for a block refined into
+ * smaller cells is the cell there; used in the air it reads the air around the player's head. The reading appears
+ * above the hotbar.
  */
 final class ThermometerItem extends Item {
 
@@ -31,7 +33,7 @@ final class ThermometerItem extends Item {
     @Override
     public InteractionResult useOn(UseOnContext context) {
         if (context.getLevel() instanceof ServerLevel level && context.getPlayer() instanceof ServerPlayer player) {
-            player.sendOverlayMessage(reading(level, context.getClickedPos()));
+            player.sendOverlayMessage(reading(level, context.getClickedPos(), context.getClickLocation()));
         }
         return InteractionResult.SUCCESS;
     }
@@ -39,13 +41,21 @@ final class ThermometerItem extends Item {
     @Override
     public InteractionResult use(Level level, Player player, InteractionHand hand) {
         if (level instanceof ServerLevel serverLevel && player instanceof ServerPlayer serverPlayer) {
-            serverPlayer.sendOverlayMessage(reading(serverLevel, BlockPos.containing(player.getEyePosition())));
+            Vec3 eye = player.getEyePosition();
+            serverPlayer.sendOverlayMessage(reading(serverLevel, BlockPos.containing(eye), eye));
         }
         return InteractionResult.SUCCESS;
     }
 
-    /** Reads the temperature of a block. */
-    static Component reading(ServerLevel level, BlockPos pos) {
+    /**
+     * Reads the temperature of a block where the thermometer touches it.
+     *
+     * @param level the level
+     * @param pos the block
+     * @param at where the thermometer touches it
+     * @return the reading
+     */
+    static Component reading(ServerLevel level, BlockPos pos, Vec3 at) {
         Optional<LevelHeat> heat = HeatEvents.of(level);
         if (heat.isEmpty()) {
             return Component.translatableWithFallback("message.anchor.thermometer.off",
@@ -56,7 +66,7 @@ final class ThermometerItem extends Item {
             return Component.translatableWithFallback("message.anchor.thermometer.waiting",
                     "No reading yet: this area is still being loaded into the simulation");
         }
-        double kelvin = found.get().temperatureK();
+        double kelvin = found.get().refined() ? heat.get().temperatureAt(pos, at) : found.get().temperatureK();
         if (Double.isNaN(kelvin)) {
             return Component.translatableWithFallback("message.anchor.thermometer.empty", "Nothing here to measure");
         }

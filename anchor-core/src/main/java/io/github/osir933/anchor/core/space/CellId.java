@@ -226,12 +226,13 @@ public record CellId(GridPos block, int level, int subX, int subY, int subZ) imp
         return spread(subX << shift) | (spread(subY << shift) << 1) | (spread(subZ << shift) << 2);
     }
 
+    /** Moves bit {@code k} of a 10-bit number to bit {@code 3k}. */
     private static int spread(int v) {
-        int r = 0;
-        for (int i = 0; i < MAX_LEVEL; i++) {
-            r |= ((v >> i) & 1) << (3 * i);
-        }
-        return r;
+        int r = v & 0x3FF;
+        r = (r | (r << 16)) & 0x030000FF;
+        r = (r | (r << 8)) & 0x0300F00F;
+        r = (r | (r << 4)) & 0x030C30C3;
+        return (r | (r << 2)) & 0x09249249;
     }
 
     /**
@@ -243,7 +244,7 @@ public record CellId(GridPos block, int level, int subX, int subY, int subZ) imp
      */
     @Override
     public int compareTo(CellId other) {
-        int c = block.compareTo(other.block);
+        int c = block.equals(other.block) ? 0 : block.compareTo(other.block);
         if (c != 0) {
             return c;
         }

@@ -430,8 +430,8 @@ class PhysicalWorldTest {
         world.placeMaterial(fine.block(), MaterialLibrary.COPPER, 300.0);
         world.refine(fine);
         List<String> seen = new ArrayList<>();
-        PhysicalWorld.WriteListener listener = (key, block, before, after) -> seen.add(GridPos.of(key, block)
-                + ": " + (after.enthalpy() - before.enthalpy()));
+        PhysicalWorld.WriteListener listener = (key, block, cell, before, after) -> seen.add(GridPos.of(key, block)
+                + (cell == null ? "" : " " + cell) + ": " + (after.enthalpy() - before.enthalpy()));
         world.addWriteListener(listener);
         CellState block = world.readBlock(ORIGIN);
         world.writeLeaf(CellId.of(ORIGIN), new CellState(block.material(), block.mass(), block.enthalpy() + 5,
@@ -440,7 +440,7 @@ class PhysicalWorldTest {
         world.writeLeaf(fine, new CellState(leaf.material(), leaf.mass(), leaf.enthalpy() - 5, 0,
                 Provenance.SIMULATED));
         world.placeMaterial(ORIGIN.offset(2, 0, 0), MaterialLibrary.GRANITE, 300.0);
-        assertEquals(List.of(ORIGIN + ": 5.0", fine.block() + ": -5.0"), seen);
+        assertEquals(List.of(ORIGIN + ": 5.0", fine.block() + " " + fine + ": -5.0"), seen);
         world.removeWriteListener(listener);
         world.writeLeaf(CellId.of(ORIGIN), block);
         assertEquals(2, seen.size());

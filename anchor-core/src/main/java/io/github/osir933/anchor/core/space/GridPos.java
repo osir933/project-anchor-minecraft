@@ -76,6 +76,9 @@ public record GridPos(int x, int y, int z) implements Comparable<GridPos> {
      */
     @Override
     public int compareTo(GridPos other) {
+        if (x == other.x && y == other.y && z == other.z) {
+            return 0;
+        }
         int bySection = Long.compare(sectionKey(), other.sectionKey());
         return bySection != 0 ? bySection : Integer.compare(indexInSection(), other.indexInSection());
     }

@@ -136,6 +136,17 @@ public final class RefinedBlock {
     }
 
     /**
+     * Returns a leaf's enthalpy, for readers that need nothing else and should not copy its state.
+     *
+     * @param cell a cell of this block
+     * @return the enthalpy in joules, or {@link Double#NaN} if the cell is not a leaf
+     */
+    public double leafEnthalpy(CellId cell) {
+        Located at = locate(cell);
+        return at.level == cell.level() && at.node.isLeaf() ? at.node.state.enthalpy() : Double.NaN;
+    }
+
+    /**
      * Visits every leaf, depth first in octant order.
      *
      * @param visitor receives each leaf and a view of its state that is only valid during the call
@@ -187,9 +198,9 @@ public final class RefinedBlock {
         return at.node.state;
     }
 
-    /** Replaces the state of an existing leaf. */
-    void writeLeaf(CellId leaf, CellState state) {
-        liveLeaf(leaf).set(state);
+    /** Replaces the state of a leaf, given its live state from {@link #liveLeaf}. */
+    void writeLive(CellState live, CellState state) {
+        live.set(state);
         aggregate = null;
     }
 

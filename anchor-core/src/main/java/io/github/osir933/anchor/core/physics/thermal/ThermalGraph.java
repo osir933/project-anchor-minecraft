@@ -49,6 +49,8 @@ final class ThermalGraph {
     int[] leafBlock = new int[0];
     /** For each leaf of a refined block, its cell id; {@code null} where the leaf is a whole block. */
     CellId[] cells = new CellId[0];
+    /** For each leaf of a refined block, its place in the block's leaf order, quicker to search than its id. */
+    private long[] order = new long[0];
     int[] material = new int[0];
     double[] mass = new double[0];
     double[] enthalpy = new double[0];
@@ -203,7 +205,7 @@ final class ThermalGraph {
             return;
         }
         int to = si.firstLeaf[b + 1];
-        int found = Arrays.binarySearch(cells, from, to, adjacent);
+        int found = Arrays.binarySearch(order, from, to, orderKey(adjacent));
         if (found >= 0) {
             addFace(leaf, found, area, axis);
             return;
@@ -222,6 +224,11 @@ final class ThermalGraph {
         }
     }
 
+    /** Returns a key that orders the cells of one block as {@link CellId#compareTo} does. */
+    private static long orderKey(CellId cell) {
+        return ((long) cell.mortonCode() << 4) | cell.level();
+    }
+
     private void resizeLeaves(int needed) {
         int size = capacity(leafSection.length, needed);
         if (size == leafSection.length) {
@@ -230,6 +237,7 @@ final class ThermalGraph {
         leafSection = new int[size];
         leafBlock = new int[size];
         cells = new CellId[size];
+        order = new long[size];
         material = new int[size];
         mass = new double[size];
         enthalpy = new double[size];
@@ -243,6 +251,7 @@ final class ThermalGraph {
         leafSection[i] = sectionNumber;
         leafBlock[i] = blockIndex;
         cells[i] = id;
+        order[i] = id == null ? 0 : orderKey(id);
         material[i] = materialIndex;
         mass[i] = leafMass;
         enthalpy[i] = leafEnthalpy;
