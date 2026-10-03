@@ -70,9 +70,10 @@ report where they are being used outside their assumptions; those reports go to 
 ## Heat
 
 Heat moves by **conduction** (`physics.thermal.ConductionModel`): Fourier's law between touching cells,
-solved with explicit finite volumes in substeps short enough to be stable. Every face moves the same heat out
-of one cell and into the other, so energy is conserved to rounding, and phase changes happen by themselves as
-enthalpy crosses a material's latent heat. Until the fluid model exists, two correlations stand in for moving
+solved with explicit finite volumes. Every face moves the same heat out of one cell and into the other, so
+energy is conserved to rounding, and phase changes happen by themselves as enthalpy crosses a material's
+latent heat. Each cell takes substeps short enough to be stable for it alone, the step halved as often as it
+needs: a hot plume above a flame may take hundreds of substeps while the rock around it takes one. Until the fluid model exists, two correlations stand in for moving
 air: surfaces in gas exchange heat with a natural-convection coefficient of 10 W/(m²·K), and warm gas below
 cooler gas mixes with a coefficient that grows with the square root of the temperature difference, so heat
 rises.
@@ -90,7 +91,59 @@ one temperature is skipped (`physics.thermal.Isotherms` caches each section's te
 overall and per face). On top of that, `physics.thermal.ThermalActivity` keeps only sections where something
 changes awake: an edit or a new source wakes a section, each step simulates the awake sections and their
 neighbours, a neighbour that starts changing faster than the calm rate wakes in turn, and a section that has
-changed slower than one kelvin per hour for a while falls asleep. Sleeping sections are paused, not cooled.
+changed slower than one kelvin per hour for a while falls asleep. Change is measured net over a step, so a
+room that a torch heats exactly as fast as it loses heat counts as calm and sleeps in that steady state.
+Sleeping sections are paused, not cooled.
+
+## Hosting
+
+The engine runs inside a game through `host.HostedWorld`, which knows nothing about Minecraft. The game names
+its blocks by integer ids of its own and describes each id once as a `host.BlockAppearance`: a material, the
+fraction of the block it fills, the phase the game shows, a temperature of its own (lava's) and a heat source
+for processes the engine does not model yet, such as burning. It also names the block to show instead once
+the shown phase has gone completely, so ice turns into water only when it has melted through.
+
+The game imports the sections it wants simulated, each with the temperature of its surroundings, and
+reports every block that changes. A change that leaves the same matter in a block, such as water the engine
+froze now shown as ice, keeps the block's physical state; anything else replaces it, declared like any edit.
+Each step the hosted world runs heat where something is happening and returns the blocks the game should
+now show differently. `host.ImportPlanner` picks the sections around the players, nearest first and a few
+per tick, and lets them go a margin further out.
+
+## In Minecraft
+
+`anchor-neoforge` connects a hosted world to each Minecraft dimension and holds no physical rules of its own.
+
+- **Blocks.** `BlockMapper` describes each block state the first time the simulation meets its id. The
+  `anchor:materials` data map comes first, so data packs can describe any block. Built-in rules cover the
+  blocks whose heat or phase matters: water, ice, snow, lava, magma, fire, torches, lanterns, candles,
+  campfires and lit furnaces. Everything else is guessed from its name (`MaterialGuess`) or its sound, with
+  its fill from its collision shape. A block filling less than a fifth of its space counts as the air or
+  water around it, so a torch is a heat source in air. Reloading tags or data packs describes every block
+  again.
+- **Dimensions.** `LevelHeat` runs one hosted world per dimension, started when the dimension first ticks.
+  Block changes arrive through NeoForge's neighbour notifications and are taken in, in sorted order, at the
+  start of the next tick. Every few game ticks it imports the sections players have come near, lets go of
+  those they have left, compares one imported section with the level to catch any change nobody reported,
+  and steps the simulation. Unloading a chunk lets go of its sections. Frozen time (`/tick freeze`) pauses
+  heat with everything else.
+- **Phase changes.** A step returns the blocks whose matter now shows a different phase. `LevelHeat` checks
+  that block and matter still agree with the step, then places the replacement the appearance names. Ice
+  holds the same matter as water, so the block keeps its exact state: water frozen at −5 °C becomes ice at
+  −5 °C. Steam leaves in a puff of cloud, and the air that takes its place starts at the steam's
+  temperature.
+- **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
+  snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
+  vanilla does, and the result is held between −30 and 45 °C (`Climate`).
+- **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
+  simulation steps every four game ticks. Both are settings.
+- **Failure.** An error stops heat in that dimension, logs it and shows it in `/anchor heat status`; the game
+  carries on.
+
+The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
+(`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
+below it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes
+the temperature, and a torch warms the air above it.
 
 ## Requests
 
@@ -117,7 +170,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 
 ## Roadmap
 
-Phase 0 (this foundation) is followed by: heat and phase change with the first playable alpha; structure and
-fracture; rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and
-chemistry; electricity and control; causal targeting and molecular dynamics; and finally life and society,
-on the way to 1.0.
+Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in. Next for heat:
+saving temperatures with the world, radiation, convection in liquids, and refining blocks where
+temperatures change steeply. After that come structure and fracture; rigid bodies, contact and emergent
+tools; materials processing and microstructure; fluids and chemistry; electricity and control; causal
+targeting and molecular dynamics; and finally life and society, on the way to 1.0.

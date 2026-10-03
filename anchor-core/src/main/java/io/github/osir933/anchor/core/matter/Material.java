@@ -26,6 +26,7 @@ public final class Material {
     private final EnthalpyCurve thermal;
     private final String notes;
     private final double minSpecificHeat;
+    private final Phase onlyPhase;
 
     private Material(Builder builder) {
         this.id = builder.id;
@@ -42,6 +43,14 @@ public final class Material {
             }
         }
         this.minSpecificHeat = min;
+        Phase only = thermal.regions().get(0).phase();
+        for (PhaseRegion r : thermal.regions()) {
+            if (r.phase() != only) {
+                only = null;
+                break;
+            }
+        }
+        this.onlyPhase = only;
     }
 
     /**
@@ -188,6 +197,16 @@ public final class Material {
      */
     public double minSpecificHeat() {
         return minSpecificHeat;
+    }
+
+    /**
+     * Returns the phase the material is always in, if it has only one, so that callers can skip working out
+     * the state of each cell.
+     *
+     * @return the phase of every region, or {@code null} if the material can change phase
+     */
+    public Phase onlyPhase() {
+        return onlyPhase;
     }
 
     /**

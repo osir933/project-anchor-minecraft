@@ -234,6 +234,55 @@ class ConductionModelTest {
     }
 
     @Test
+    void aHotPlumeTakesShortStepsWithoutSlowingTheRock() {
+        PhysicalWorld world = vacuumWorld();
+        GridPos flame = new GridPos(0, 4, 0);
+        world.placeMaterial(flame, MaterialLibrary.AIR, 1300.0);
+        world.placeMaterial(flame.offset(0, 1, 0), MaterialLibrary.AIR, 300.0);
+        world.fill(new GridPos(0, 0, 8), new GridPos(15, 0, 8), MaterialLibrary.GRANITE, 300.0);
+        GridPos warm = new GridPos(0, 0, 8);
+        world.placeMaterial(warm, MaterialLibrary.GRANITE, 400.0);
+        double before = world.readBlock(warm).enthalpy();
+        ConductionModel model = new ConductionModel();
+        double dt = 14.4;
+        step(world, model, dt);
+
+        double conductance = 1.0 / (0.5 / 2.79 + 0.5 / 2.79);
+        assertEquals(-conductance * 100.0 * dt, world.readBlock(warm).enthalpy() - before,
+                1e-9 * conductance * 100.0 * dt, "the rock takes one step of the full length");
+        long plume = model.lastFaceUpdates - 15;
+        assertEquals(1, Long.bitCount(plume), "the plume's face moves heat 2^k times: " + plume);
+        assertTrue(plume >= 64, "and k is large: " + plume);
+        double low = temperature(world, flame);
+        double high = temperature(world, flame.offset(0, 1, 0));
+        assertTrue(low < 1300.0 && high > 300.0 && low >= high - 1e-9, low + " K below, " + high + " K above");
+        assertTrue(world.audit().balanced(), () -> world.audit().toString());
+    }
+
+    @Test
+    void cellsOnDifferentLevelsStayWithinTheirStartingRange() {
+        PhysicalWorld world = vacuumWorld();
+        GridPos flame = new GridPos(4, 4, 4);
+        world.fill(new GridPos(2, 2, 2), new GridPos(6, 8, 6), MaterialLibrary.AIR, 300.0);
+        world.placeMaterial(flame, MaterialLibrary.AIR, 1500.0);
+        world.placeMaterial(flame.offset(1, 0, 0), MaterialLibrary.GRANITE, 300.0);
+        world.placeMaterial(flame.offset(0, -1, 0), MaterialLibrary.COPPER, 300.0);
+        ConductionModel model = new ConductionModel();
+        for (int i = 0; i < 20; i++) {
+            step(world, model, 14.4);
+            world.forEachLeaf((cell, state) -> {
+                if (state.mass() > 0) {
+                    double t = temperature(world, state);
+                    assertTrue(t >= 300.0 - 1e-6 && t <= 1500.0 + 1e-6, cell + " at " + t + " K");
+                }
+            });
+            assertTrue(world.audit().balanced(), () -> world.audit().toString());
+        }
+        assertTrue(temperature(world, flame.offset(0, 2, 0)) > 300.0, "heat rose");
+        assertTrue(temperature(world, flame.offset(1, 0, 0)) > 300.0, "the rock beside the flame warmed");
+    }
+
+    @Test
     void theSchedulerRunsConductionDeterministically() {
         assertEquals(run(), run());
     }

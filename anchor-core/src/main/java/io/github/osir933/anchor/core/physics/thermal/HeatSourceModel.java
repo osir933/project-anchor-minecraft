@@ -8,6 +8,7 @@ import io.github.osir933.anchor.core.model.StepContext;
 import io.github.osir933.anchor.core.model.ValidityIssue;
 import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.GridPos;
+import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
@@ -65,6 +66,7 @@ public final class HeatSourceModel implements PhysicsModel {
     private List<ValidityIssue> issues = List.of();
     private double lastEnergy;
     private int lastHeated;
+    private double stepEnergy;
 
     /** Creates the model with no sources. */
     public HeatSourceModel() {
@@ -95,7 +97,12 @@ public final class HeatSourceModel implements PhysicsModel {
      * @param sectionKey the packed section position
      */
     public void removeSection(long sectionKey) {
-        sources.keySet().removeIf(pos -> pos.sectionKey() == sectionKey);
+        inSection(sectionKey).clear();
+    }
+
+    /** Returns the sources of one section; block order keeps them together. */
+    private SortedMap<GridPos, Source> inSection(long sectionKey) {
+        return sources.subMap(GridPos.of(sectionKey, 0), true, GridPos.of(sectionKey, SectionPos.BLOCKS - 1), true);
     }
 
     /**
@@ -137,63 +144,19 @@ public final class HeatSourceModel implements PhysicsModel {
     public void step(StepContext context) {
         PhysicalWorld world = context.world();
         SortedSet<Long> scope = context.sections(Domain.THERMAL);
-        MaterialRegistry registry = world.materials();
-        double added = 0;
         int heated = 0;
         List<ValidityIssue> found = new ArrayList<>();
-        for (var entry : sources.entrySet()) {
-            GridPos pos = entry.getKey();
-            if (!scope.contains(pos.sectionKey())) {
-                continue;
-            }
-            Section section = world.section(pos.sectionKey());
+        for (long key : scope) {
+            Section section = world.section(key);
             if (section == null) {
                 continue;
             }
-            Source source = entry.getValue();
-            List<CellId> leaves = new ArrayList<>();
-            List<CellState> states = new ArrayList<>();
-            RefinedBlock block = section.refinedBlock(pos.indexInSection());
-            if (block == null) {
-                leaves.add(CellId.of(pos));
-                states.add(section.blockState(pos.indexInSection()));
-            } else {
-                block.forEachLeaf((cell, state) -> {
-                    leaves.add(cell);
-                    states.add(state.copy());
-                });
+            for (var entry : inSection(key).entrySet()) {
+                heated += heat(context, section, entry.getKey(), entry.getValue(), found);
             }
-            double[] deficit = new double[leaves.size()];
-            double totalDeficit = 0;
-            for (int i = 0; i < leaves.size(); i++) {
-                CellState s = states.get(i);
-                if (s.material() == MaterialRegistry.VACUUM || s.mass() == 0) {
-                    continue;
-                }
-                Material m = registry.get(s.material());
-                double target = s.mass() * m.specificEnthalpy(source.temperatureK());
-                deficit[i] = Math.max(0, target - s.enthalpy());
-                totalDeficit += deficit[i];
-                if (!m.isDescribedAt(source.temperatureK())) {
-                    found.add(new ValidityIssue(ID, leaves.get(i), "the source temperature "
-                            + source.temperatureK() + " K is outside what the data for " + m.id() + " covers"));
-                }
-            }
-            if (!(totalDeficit > 0)) {
-                continue;
-            }
-            double share = Math.min(1.0, source.powerW() * context.dt() / totalDeficit);
-            for (int i = 0; i < leaves.size(); i++) {
-                if (deficit[i] > 0) {
-                    CellState s = states.get(i);
-                    double gain = deficit[i] * share;
-                    world.writeLeaf(leaves.get(i), new CellState(s.material(), s.mass(), s.enthalpy() + gain,
-                            s.owner(), Provenance.SIMULATED));
-                    added += gain;
-                }
-            }
-            heated++;
         }
+        double added = stepEnergy;
+        stepEnergy = 0;
         if (added > 0) {
             // Declared every step, so not logged as an event; lastStep() reports it.
             world.recordExchange(new Totals(0, added, added, new EnumMap<>(Element.class)), null);
@@ -201,6 +164,54 @@ public final class HeatSourceModel implements PhysicsModel {
         lastEnergy = added;
         lastHeated = heated;
         issues = found;
+    }
+
+    /** Heats one source's block, and returns 1 if it took any heat. */
+    private int heat(StepContext context, Section section, GridPos pos, Source source, List<ValidityIssue> found) {
+        PhysicalWorld world = context.world();
+        MaterialRegistry registry = world.materials();
+        List<CellId> leaves = new ArrayList<>();
+        List<CellState> states = new ArrayList<>();
+        RefinedBlock block = section.refinedBlock(pos.indexInSection());
+        if (block == null) {
+            leaves.add(CellId.of(pos));
+            states.add(section.blockState(pos.indexInSection()));
+        } else {
+            block.forEachLeaf((cell, state) -> {
+                leaves.add(cell);
+                states.add(state.copy());
+            });
+        }
+        double[] deficit = new double[leaves.size()];
+        double totalDeficit = 0;
+        for (int i = 0; i < leaves.size(); i++) {
+            CellState s = states.get(i);
+            if (s.material() == MaterialRegistry.VACUUM || s.mass() == 0) {
+                continue;
+            }
+            Material m = registry.get(s.material());
+            double target = s.mass() * m.specificEnthalpy(source.temperatureK());
+            deficit[i] = Math.max(0, target - s.enthalpy());
+            totalDeficit += deficit[i];
+            if (!m.isDescribedAt(source.temperatureK())) {
+                found.add(new ValidityIssue(ID, leaves.get(i), "the source temperature "
+                        + source.temperatureK() + " K is outside what the data for " + m.id() + " covers"));
+            }
+        }
+        if (!(totalDeficit > 0)) {
+            return 0;
+        }
+        double share = Math.min(1.0, source.powerW() * context.dt() / totalDeficit);
+        for (int i = 0; i < leaves.size(); i++) {
+            if (deficit[i] > 0) {
+                CellState s = states.get(i);
+                double gain = deficit[i] * share;
+                world.writeLeaf(leaves.get(i), new CellState(s.material(), s.mass(), s.enthalpy() + gain,
+                        s.owner(), Provenance.SIMULATED));
+                stepEnergy += gain;
+            }
+        }
+        return 1;
     }
 
     /**

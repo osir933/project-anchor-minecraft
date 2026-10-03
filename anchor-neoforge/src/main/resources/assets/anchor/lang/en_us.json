@@ -1,0 +1,7 @@
+{
+  "item.anchor.thermometer": "Thermometer",
+  "message.anchor.thermometer.off": "Temperatures are not simulated here",
+  "message.anchor.thermometer.waiting": "No reading yet: this area is still being loaded into the simulation",
+  "message.anchor.thermometer.empty": "Nothing here to measure",
+  "message.anchor.thermometer.reading": "%s: %s"
+}
