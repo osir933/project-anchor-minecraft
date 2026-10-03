@@ -5,6 +5,16 @@ import io.github.osir933.anchor.core.matter.Material;
 import io.github.osir933.anchor.core.matter.MaterialLibrary;
 import io.github.osir933.anchor.core.matter.PhaseTransition;
 import io.github.osir933.anchor.core.matter.ThermalState;
+import io.github.osir933.anchor.core.space.CellId;
+import io.github.osir933.anchor.core.space.GridPos;
+import io.github.osir933.anchor.core.world.CellState;
+import io.github.osir933.anchor.core.world.CoarseningRule;
+import io.github.osir933.anchor.core.world.ConservationLedger;
+import io.github.osir933.anchor.core.world.MaterialRegistry;
+import io.github.osir933.anchor.core.world.PhysicalWorld;
+import io.github.osir933.anchor.core.world.TransitionReport;
+import io.github.osir933.anchor.core.world.WorldSettings;
+import io.github.osir933.anchor.core.world.WorldSnapshot;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +41,7 @@ public final class SelfTest {
     public static Report run() {
         SelfTest test = new SelfTest();
         test.materials();
+        test.world();
         List<String> lines = new ArrayList<>();
         if (test.failures.isEmpty()) {
             lines.add("Anchor self-test passed: " + test.checks + " checks.");
@@ -66,6 +77,29 @@ public final class SelfTest {
             }
             check(Math.abs(sum - 1.0) <= 1e-9, m.id() + ": element mass fractions sum to " + sum);
         }
+    }
+
+    private void world() {
+        PhysicalWorld world = new PhysicalWorld(WorldSettings.airAt20C(0), MaterialRegistry.withLibrary());
+        GridPos pos = new GridPos(0, 0, 0);
+        world.placeMaterial(pos, MaterialLibrary.GRANITE, 300.0);
+        CellState before = world.readBlock(pos);
+        TransitionReport refine = world.refine(new CellId(pos, 4, 3, 5, 7));
+        check(refine.applied(), "refining a granite block was refused: " + refine.reason());
+        CellState refined = world.readBlock(pos);
+        check(refined.mass() == before.mass() && refined.enthalpy() == before.enthalpy(),
+                "refinement changed the block's mass or energy");
+        TransitionReport coarsen = world.coarsen(CellId.of(pos), CoarseningRule.DEFAULT);
+        check(coarsen.applied(), "merging an untouched block was refused: " + coarsen.reason());
+        CellState merged = world.readBlock(pos);
+        check(merged.mass() == before.mass() && merged.enthalpy() == before.enthalpy(),
+                "refining and merging did not give back the original block");
+        ConservationLedger.Audit audit = world.audit();
+        check(audit.balanced(), "conservation audit failed: " + audit.discrepancies());
+        WorldSnapshot snapshot = world.snapshot();
+        world.clearBlock(pos);
+        world.restore(snapshot);
+        check(world.stateHash().equals(snapshot.stateHash()), "restoring a snapshot did not reproduce the world");
     }
 
     private void check(boolean ok, String failure) {

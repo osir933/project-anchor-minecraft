@@ -399,7 +399,7 @@ public final class PhysicalWorld {
     public void recordExchange(Totals change, String reason) {
         ledger.recordExchange(change);
         if (reason != null) {
-            events.add(new WorldEvent(tick, WorldEvent.Kind.EDIT, "boundary", reason));
+            events.add(new WorldEvent(tick, WorldEvent.Kind.EXCHANGE, "boundary", reason));
         }
     }
 
@@ -578,7 +578,24 @@ public final class PhysicalWorld {
      * @return the audit
      */
     public ConservationLedger.Audit audit() {
-        ConservationLedger.Audit audit = ledger.audit(totals());
+        return audit(totals());
+    }
+
+    /**
+     * Audits conservation, logs any discrepancy, and starts a new accounting period from the current totals
+     * so that each discrepancy is reported once.
+     *
+     * @return the audit
+     */
+    public ConservationLedger.Audit auditAndRebase() {
+        Totals totals = totals();
+        ConservationLedger.Audit audit = audit(totals);
+        ledger.rebase(totals);
+        return audit;
+    }
+
+    private ConservationLedger.Audit audit(Totals totals) {
+        ConservationLedger.Audit audit = ledger.audit(totals);
         for (ConservationLedger.Discrepancy d : audit.discrepancies()) {
             events.add(new WorldEvent(tick, WorldEvent.Kind.CONSERVATION, d.quantity(), d.toString()));
         }

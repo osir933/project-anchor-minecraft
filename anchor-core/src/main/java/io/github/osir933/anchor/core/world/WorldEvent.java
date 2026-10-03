@@ -17,6 +17,8 @@ public record WorldEvent(long tick, Kind kind, String subject, String detail) {
     public enum Kind {
         /** Matter placed, removed or replaced from outside the simulation. */
         EDIT,
+        /** Matter or energy a model sent across the world's boundary, such as heat radiated to the sky. */
+        EXCHANGE,
         /** A section entered the simulated region, filled from what was known about it. */
         SECTION_ADDED,
         /** A section left the simulated region. */
@@ -28,7 +30,9 @@ public record WorldEvent(long tick, Kind kind, String subject, String detail) {
         /** The world was rewound to a snapshot. */
         RESTORE,
         /** A conservation audit found an unexplained gain or loss. */
-        CONSERVATION
+        CONSERVATION,
+        /** A model reported that it ran outside the conditions it was built for. */
+        VALIDITY
     }
 
     /**
