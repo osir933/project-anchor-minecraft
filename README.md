@@ -5,7 +5,8 @@ tools, machines and industry emerge from physics instead of recipes. It is meant
 experiments, inspect what the simulation knows and how sure it is, and watch societies grow on top of it.
 
 **Status: first alpha.** Heat is the first physics in the game; everything else above is still ahead (see
-the [roadmap](docs/architecture.md#roadmap)).
+the [roadmap](docs/architecture.md#roadmap) and the [changelog](CHANGELOG.md)). Anchor needs Minecraft 26.3
+with NeoForge 26.3 and Java 25, installed on both the game and the server.
 
 ## Heat in the game
 
@@ -125,6 +126,14 @@ engine:
 ```sh
 ./gradlew :anchor-core:build -Panchor.coreOnly=true
 ```
+
+## Releasing
+
+Set `mod_version` in `gradle.properties`, describe the version under its own heading in
+[CHANGELOG.md](CHANGELOG.md), and push the tag `v<mod_version>`. The release workflow builds and tests the
+mod, publishes a GitHub release with the jar and those notes, and uploads the jar to CurseForge when
+`curseforge_project_id` is set and the repository has a `CURSEFORGE_TOKEN` secret. Running the workflow by
+hand checks the CurseForge settings without publishing anything.
 
 ## Licence
 

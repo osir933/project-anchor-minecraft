@@ -28,6 +28,9 @@ jobs:
       # v5 is the last MIT-licensed major; v6 moved caching under Gradle's proprietary terms.
       - uses: gradle/actions/setup-gradle@v5
 
+      - name: Release script tests
+        run: python3 -m unittest discover -s .github/scripts
+
       - name: Build and test
         run: ./gradlew build --stacktrace --warning-mode all
 
