@@ -36,6 +36,8 @@ final class AnchorGameTests {
             new Case("ice_melts_when_warmed", 400, AnchorGameTests::iceMeltsWhenWarmed),
             new Case("water_freezes_when_chilled", 400, AnchorGameTests::waterFreezesWhenChilled),
             new Case("water_boils_away", 400, AnchorGameTests::waterBoilsAway),
+            new Case("block_placed_this_tick_takes_the_temperature", 400,
+                    AnchorGameTests::blockPlacedThisTickTakesTheTemperature),
             new Case("torch_warms_the_air", 800, AnchorGameTests::torchWarmsTheAir));
 
     private AnchorGameTests() {
@@ -82,6 +84,33 @@ final class AnchorGameTests {
     private static void waterBoilsAway(GameTestHelper helper) {
         BlockPos water = pool(helper);
         setTemperatureThenExpect(helper, water, 400.0, Blocks.AIR);
+    }
+
+    /**
+     * A temperature set on a block placed earlier in the same tick goes to that block, not to the air that
+     * was there before, even though block changes normally reach the simulation a tick later.
+     */
+    private static void blockPlacedThisTickTakesTheTemperature(GameTestHelper helper) {
+        BlockPos relative = new BlockPos(2, 1, 2);
+        BlockPos pos = helper.absolutePos(relative);
+        int[] stage = {0};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (stage[0] == 0) {
+                heat.keepSimulated(pos);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (heat.inspect(pos).isEmpty()) {
+                    throw helper.assertionException(Component.literal("waiting for the air to be simulated"));
+                }
+                helper.setBlock(relative, Blocks.PACKED_ICE);
+                helper.assertTrue(heat.setTemperature(pos, 290.0), "the new ice could not be warmed");
+                stage[0] = 2;
+            }
+            helper.assertBlockPresent(Blocks.WATER, relative);
+            heat.release(pos);
+        });
     }
 
     /** A torch warms the air above it, and a thermometer can read it. */

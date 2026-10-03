@@ -142,7 +142,8 @@ per tick, and lets them go a margin further out.
 
 The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
 (`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
-below it becomes ice, water heated past boiling leaves air, and a torch warms the air above it.
+below it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes
+the temperature, and a torch warms the air above it.
 
 ## Requests
 
