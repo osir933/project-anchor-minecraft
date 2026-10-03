@@ -8,14 +8,15 @@ import io.github.osir933.anchor.core.model.PhysicsModel;
 import io.github.osir933.anchor.core.model.StepContext;
 import io.github.osir933.anchor.core.model.ValidityIssue;
 import io.github.osir933.anchor.core.space.CellId;
+import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
 import io.github.osir933.anchor.core.world.Provenance;
-import io.github.osir933.anchor.core.world.RefinedBlock;
 import io.github.osir933.anchor.core.world.Section;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeMap;
@@ -46,6 +47,10 @@ import java.util.TreeMap;
  *   L the face's edge in metres, an order-of-magnitude estimate for the exchange a rising plume drives.</li>
  * </ul>
  * Each applies only where it conducts better than the gas itself. Both are evaluated once per step.
+ *
+ * <p>Given a {@link ThermalRefinement}, the model reports the temperature drop each cell needs between its
+ * centre and its faces to pass on the heat that flows through them, so that cells too coarse for the
+ * gradient around them can be split.
  */
 public final class ConductionModel implements PhysicsModel {
 
@@ -71,14 +76,9 @@ public final class ConductionModel implements PhysicsModel {
      */
     public static final double BUOYANT_MIXING_COEFFICIENT = 30.0;
 
-    /**
-     * Thermal diffusivity no starter material exceeds by much, in m²/s, with margin. Diamond leads at about
-     * 1.3e-3 m²/s; most metals are below 1.7e-4.
-     */
-    private static final double MAX_DIFFUSIVITY = 1.5e-3;
-
     private final Isotherms isotherms = new Isotherms();
     private final ThermalGraph g = new ThermalGraph();
+    private final ThermalRefinement refinement;
     private List<ValidityIssue> issues = List.of();
 
     // Work arrays, kept from step to step so a steady simulation allocates almost nothing.
@@ -91,6 +91,7 @@ public final class ConductionModel implements PhysicsModel {
     private double[] working = new double[0];
     private byte[] level = new byte[0];
     private int[] cellOrder = new int[0];
+    private double[] drop = new double[0];
     private double[] conductance = new double[0];
     private byte[] faceLevel = new byte[0];
     private int[] faceOrder = new int[0];
@@ -98,9 +99,22 @@ public final class ConductionModel implements PhysicsModel {
     /** Face transfers and temperature updates in the last step, for tests of the time stepping. */
     long lastFaceUpdates;
     long lastCellUpdates;
+    /** The work the last step did and the time it covered, from which the next step's cost is estimated. */
+    private long lastWork;
+    private double lastDt;
 
-    /** Creates the model. */
+    /** Creates the model, reporting to no refinement. */
     public ConductionModel() {
+        this(null);
+    }
+
+    /**
+     * Creates the model.
+     *
+     * @param refinement where to report the drops cells need, or {@code null} for nowhere
+     */
+    public ConductionModel(ThermalRefinement refinement) {
+        this.refinement = refinement;
     }
 
     @Override
@@ -124,25 +138,30 @@ public final class ConductionModel implements PhysicsModel {
                 + "idle sections.";
     }
 
+    /**
+     * Estimates the work of a step: four units per cell for a single substep, or, once the model has run, the
+     * substeps the last step actually took, scaled to the time this step covers. Cells take as many substeps
+     * as their own size and material need, so the last step is a far better guide than a bound for the
+     * finest, most conductive cell would be.
+     */
     @Override
     public long estimateCost(StepContext context) {
         PhysicalWorld world = context.world();
         SortedSet<Long> scope = context.sections(Domain.THERMAL);
         long cells = 0;
-        int finest = 0;
         for (long key : scope) {
             Section s = world.section(key);
             if (s == null || isotherms.isQuiet(world, scope, s)) {
                 continue;
             }
             cells += SectionPos.BLOCKS - s.refinedBlocks().size() + s.leafCount();
-            for (RefinedBlock block : s.refinedBlocks()) {
-                finest = Math.max(finest, block.depth());
-            }
         }
-        double e = CellId.edgeLength(finest);
-        long substeps = substeps(context.dt(), e * e / (6 * MAX_DIFFUSIVITY));
-        return cells * 4 * substeps;
+        long single = cells * 4;
+        if (lastDt > 0 && lastWork > single) {
+            double scaled = lastWork * Math.max(1.0, context.dt() / lastDt);
+            return scaled >= Long.MAX_VALUE / 2 ? Long.MAX_VALUE / 2 : Math.max(single, (long) scaled);
+        }
+        return single;
     }
 
     @Override
@@ -172,6 +191,10 @@ public final class ConductionModel implements PhysicsModel {
                 extrapolated.merge(m.id(), 1, Integer::sum);
             }
         }
+        boolean reporting = refinement != null && refinement.settings().enabled();
+        if (reporting) {
+            Arrays.fill(drop, 0, n, 0.0);
+        }
         for (int f = 0; f < g.faceCount; f++) {
             int a = g.faceA[f];
             int b = g.faceB[f];
@@ -196,15 +219,30 @@ public final class ConductionModel implements PhysicsModel {
                     rb = Math.min(rb, 1 / CONVECTION_COEFFICIENT);
                 }
                 resistance = ra + rb;
+                if (reporting) {
+                    // The drop inside each side is its share of the resistance times the whole difference.
+                    double difference = Math.abs(temperature[a] - temperature[b]);
+                    if (!gas[a]) {
+                        drop[a] = Math.max(drop[a], difference * ra / resistance);
+                    }
+                    if (!gas[b]) {
+                        drop[b] = Math.max(drop[b], difference * rb / resistance);
+                    }
+                }
             }
             conductance[f] = g.faceArea[f] / resistance;
             conductanceSum[a] += conductance[f];
             conductanceSum[b] += conductance[f];
         }
+        if (reporting) {
+            reportDrops(n);
+        }
         List<ValidityIssue> found = new ArrayList<>();
         double[] enthalpy = working;
         System.arraycopy(g.enthalpy, 0, enthalpy, 0, n);
         integrate(context.dt(), n, enthalpy, found);
+        lastWork = lastFaceUpdates + lastCellUpdates;
+        lastDt = context.dt();
         CellState written = CellState.vacuum(Provenance.SIMULATED);
         for (int i = 0; i < n; i++) {
             if (Double.doubleToRawLongBits(enthalpy[i]) != Double.doubleToRawLongBits(g.enthalpy[i])) {
@@ -227,6 +265,35 @@ public final class ConductionModel implements PhysicsModel {
     @Override
     public List<ValidityIssue> checkValidity(PhysicalWorld world) {
         return issues;
+    }
+
+    /**
+     * Hands the drops found this step to the refinement: every cell of a whole block whose drop calls for a
+     * split, and for each refined block the largest drop of any of its cells, with its cells that call for a
+     * split. The cells of a refined block are next to each other in the graph.
+     */
+    private void reportDrops(int n) {
+        double threshold = refinement.threshold();
+        int i = 0;
+        while (i < n) {
+            if (g.cells[i] == null) {
+                if (drop[i] > threshold && materials[i] != null) {
+                    refinement.suggestSplit(CellId.of(g.sections[g.leafSection[i]].blockPos(g.leafBlock[i])), drop[i]);
+                }
+                i++;
+                continue;
+            }
+            GridPos block = g.cells[i].block();
+            double largest = 0;
+            while (i < n && g.cells[i] != null && g.cells[i].block().equals(block)) {
+                largest = Math.max(largest, drop[i]);
+                if (drop[i] > threshold && materials[i] != null) {
+                    refinement.suggestSplit(g.cells[i], drop[i]);
+                }
+                i++;
+            }
+            refinement.reportBlockDrop(block, largest);
+        }
     }
 
     /**
@@ -337,6 +404,7 @@ public final class ConductionModel implements PhysicsModel {
             working = new double[size];
             level = new byte[size];
             cellOrder = new int[size];
+            drop = new double[size];
         }
         int faceSize = ThermalGraph.capacity(conductance.length, faces);
         if (faceSize != conductance.length) {
@@ -344,10 +412,5 @@ public final class ConductionModel implements PhysicsModel {
             faceLevel = new byte[faceSize];
             faceOrder = new int[faceSize];
         }
-    }
-
-    private static long substeps(double dt, double stable) {
-        double count = Math.ceil(dt / (SAFETY * stable));
-        return count < 1 ? 1 : count > Long.MAX_VALUE / 2 ? Long.MAX_VALUE / 2 : (long) count;
     }
 }

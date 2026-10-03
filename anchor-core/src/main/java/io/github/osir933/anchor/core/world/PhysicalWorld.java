@@ -44,10 +44,11 @@ public final class PhysicalWorld {
          *
          * @param sectionKey the packed position of the leaf's section
          * @param block the index of the leaf's block in the section
+         * @param leaf the leaf, if its block is refined; {@code null} if the leaf is the whole block
          * @param before the leaf's state before the write; a view that is only valid during the call
          * @param after the state written; a view that is only valid during the call
          */
-        void leafWritten(long sectionKey, int block, CellState before, CellState after);
+        void leafWritten(long sectionKey, int block, CellId leaf, CellState before, CellState after);
     }
 
     private final WorldSettings settings;
@@ -452,14 +453,15 @@ public final class PhysicalWorld {
         }
         checkMaterial(state.material());
         boolean listened = !writeListeners.isEmpty();
+        CellState live = block.liveLeaf(leaf);
         if (listened) {
-            writeScratch.set(block.liveLeaf(leaf));
+            writeScratch.set(live);
         }
-        block.writeLeaf(leaf, state);
+        block.writeLive(live, state);
         s.invalidateTotals();
         if (listened) {
             for (WriteListener listener : writeListeners) {
-                listener.leafWritten(key, index, writeScratch, state);
+                listener.leafWritten(key, index, leaf, writeScratch, state);
             }
         }
     }
@@ -489,7 +491,7 @@ public final class PhysicalWorld {
         s.setBlock(index, state);
         if (listened) {
             for (WriteListener listener : writeListeners) {
-                listener.leafWritten(sectionKey, index, writeScratch, state);
+                listener.leafWritten(sectionKey, index, null, writeScratch, state);
             }
         }
     }

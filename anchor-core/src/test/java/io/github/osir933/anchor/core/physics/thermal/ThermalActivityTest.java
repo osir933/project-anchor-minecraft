@@ -164,6 +164,27 @@ class ThermalActivityTest {
     }
 
     @Test
+    void aRefinedBlockChangesByTheAverageChangeOfItsMatter() {
+        // Heat moving between a refined block's cells counts, however it nets out, but measured against the
+        // whole block, so refining a block does not keep its section awake longer than the whole block would.
+        PhysicalWorld world = vacuumWorld();
+        long key = SectionPos.pack(0, 0, 0);
+        GridPos pos = new GridPos(1, 1, 1);
+        world.placeMaterial(pos, MaterialLibrary.GRANITE, 300.0);
+        world.refine(CellId.of(pos).child(0));
+        double capacity = world.readBlock(pos).mass() * MaterialLibrary.GRANITE.minSpecificHeat();
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 1);
+        world.addWriteListener(activity);
+        heatLeaf(world, CellId.of(pos).child(0), 0.6e-3 * capacity);
+        heatLeaf(world, CellId.of(pos).child(7), -0.6e-3 * capacity);
+        activity.endStep(world, 1.0);
+        assertTrue(activity.isAwake(key), "1.2 mK moved inside the block in a second");
+        heatLeaf(world, CellId.of(pos).child(3), 0.8e-3 * capacity);
+        activity.endStep(world, 1.0);
+        assertFalse(activity.isAwake(key), "6.4 mK in an eighth of the block is 0.8 mK for the block as a whole");
+    }
+
+    @Test
     void nonsenseSettingsAreRejected() {
         PhysicalWorld world = vacuumWorld();
         MaterialRegistry materials = world.materials();
@@ -178,6 +199,12 @@ class ThermalActivityTest {
         CellState s = world.readBlock(pos);
         world.writeLeaf(CellId.of(pos), new CellState(s.material(), s.mass(), s.enthalpy() + joules, 0,
                 Provenance.SIMULATED));
+    }
+
+    /** Adds heat to a cell of a refined block the way a model would. */
+    private static void heatLeaf(PhysicalWorld world, CellId cell, double joules) {
+        CellState s = world.readLeaf(cell);
+        world.writeLeaf(cell, new CellState(s.material(), s.mass(), s.enthalpy() + joules, 0, Provenance.SIMULATED));
     }
 
     private static double temperature(PhysicalWorld world, GridPos pos) {

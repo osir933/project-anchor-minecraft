@@ -11,6 +11,8 @@ import io.github.osir933.anchor.core.physics.thermal.ConductionModel;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.physics.thermal.RadiationModel;
 import io.github.osir933.anchor.core.physics.thermal.ThermalActivity;
+import io.github.osir933.anchor.core.physics.thermal.ThermalRefinement;
+import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.Direction;
 import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.space.SectionPos;
@@ -18,6 +20,7 @@ import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
 import io.github.osir933.anchor.core.world.Provenance;
+import io.github.osir933.anchor.core.world.RefinedBlock;
 import io.github.osir933.anchor.core.world.Section;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -25,6 +28,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -52,6 +56,10 @@ import java.util.function.IntUnaryOperator;
  * different temperatures, or a neighbour with a different climate. A change wakes its section, and heat runs
  * only where {@link ThermalActivity} keeps sections awake, so the cost follows what is happening rather than
  * how much of the world is loaded.
+ *
+ * <p>Where temperatures change too steeply across a block for it to follow them as a whole, as under a face
+ * that lava glows on, {@link ThermalRefinement} splits it into smaller cells, and merges them back once they
+ * have evened out. The host never sees the cells: it reads, and saves, each block's totals.
  */
 public final class HostedWorld {
 
@@ -78,9 +86,11 @@ public final class HostedWorld {
      * @param calmRate the rate of change below which a section counts as calm, in kelvin per second
      * @param calmSteps how many calm steps in a row put a section to sleep
      * @param auditInterval audit conservation every this many ticks
+     * @param refinement when blocks are split into smaller cells, and merged back
      */
     public record Settings(double tickSeconds, long budgetPerTick, double relaxationSeconds,
-            double defaultEnvironmentK, double calmRate, int calmSteps, int auditInterval) {
+            double defaultEnvironmentK, double calmRate, int calmSteps, int auditInterval,
+            ThermalRefinement.Settings refinement) {
 
         /**
          * Validates the settings.
@@ -92,8 +102,10 @@ public final class HostedWorld {
          * @param calmRate the calm rate
          * @param calmSteps the calm steps
          * @param auditInterval the audit interval
+         * @param refinement the refinement settings
          */
         public Settings {
+            Objects.requireNonNull(refinement, "refinement");
             if (!(tickSeconds > 0) || !Double.isFinite(tickSeconds)) {
                 throw new IllegalArgumentException("tick length must be positive: " + tickSeconds);
             }
@@ -110,7 +122,8 @@ public final class HostedWorld {
          */
         public static Settings defaults() {
             return new Settings(3.6, 50_000_000L, AtmosphereModel.DEFAULT_RELAXATION_SECONDS, 288.15,
-                    ThermalActivity.DEFAULT_CALM_RATE, ThermalActivity.DEFAULT_CALM_STEPS, 20);
+                    ThermalActivity.DEFAULT_CALM_RATE, ThermalActivity.DEFAULT_CALM_STEPS, 20,
+                    ThermalRefinement.Settings.DEFAULT);
         }
 
         /**
@@ -121,7 +134,19 @@ public final class HostedWorld {
          */
         public Settings withTickSeconds(double seconds) {
             return new Settings(seconds, budgetPerTick, relaxationSeconds, defaultEnvironmentK, calmRate, calmSteps,
-                    auditInterval);
+                    auditInterval, refinement);
+        }
+
+        /**
+         * Returns these settings with different refinement.
+         *
+         * @param settings when blocks are split into smaller cells; {@link ThermalRefinement.Settings#OFF} for
+         *     never
+         * @return the new settings
+         */
+        public Settings withRefinement(ThermalRefinement.Settings settings) {
+            return new Settings(tickSeconds, budgetPerTick, relaxationSeconds, defaultEnvironmentK, calmRate,
+                    calmSteps, auditInterval, settings);
         }
     }
 
@@ -161,6 +186,9 @@ public final class HostedWorld {
      * @param phase the phase most of the matter is in, or {@code null} for an empty block
      * @param provenance where the state came from
      * @param refined whether the block is refined into smaller cells; the other values are then totals
+     * @param coolestK the temperature of the block's coolest cell, in kelvin: its temperature unless it is
+     *     refined, or {@link Double#NaN} if it holds no matter
+     * @param hottestK the temperature of the block's hottest cell, in kelvin, likewise
      * @param awake whether the block's section is awake
      * @param simulated whether heat ran in the block's section in the last tick
      * @param environmentK the climate of the block's section, in kelvin
@@ -168,8 +196,9 @@ public final class HostedWorld {
      * @param appearance how the host describes the block
      */
     public record Inspection(GridPos pos, String material, String materialName, double massKg, double enthalpyJ,
-            ThermalState state, Phase phase, Provenance provenance, boolean refined, boolean awake,
-            boolean simulated, double environmentK, HeatSourceModel.Source source, BlockAppearance appearance) {
+            ThermalState state, Phase phase, Provenance provenance, boolean refined, double coolestK,
+            double hottestK, boolean awake, boolean simulated, double environmentK, HeatSourceModel.Source source,
+            BlockAppearance appearance) {
 
         /**
          * Returns the temperature.
@@ -189,6 +218,8 @@ public final class HostedWorld {
      * @param simulatedSections sections heat ran in during the last tick
      * @param sources heat sources
      * @param radiatingFaces block faces that radiated the last time radiation ran
+     * @param refinedBlocks blocks split into smaller cells
+     * @param refinedCells the cells those blocks are split into
      * @param tick ticks simulated
      * @param simulatedSeconds simulated time in seconds
      * @param phaseChanges phase changes handed to the host so far
@@ -196,7 +227,8 @@ public final class HostedWorld {
      * @param conserved whether the last conservation audit balanced
      */
     public record Status(int sections, int awakeSections, int simulatedSections, int sources, int radiatingFaces,
-            long tick, double simulatedSeconds, long phaseChanges, long reconciled, boolean conserved) {
+            int refinedBlocks, int refinedCells, long tick, double simulatedSeconds, long phaseChanges,
+            long reconciled, boolean conserved) {
     }
 
     /** The host's ids for the blocks of one imported section. */
@@ -243,6 +275,7 @@ public final class HostedWorld {
     private final HeatSourceModel sources = new HeatSourceModel();
     private final AtmosphereModel atmosphere;
     private final RadiationModel radiation;
+    private final ThermalRefinement refinement;
     private final ThermalActivity activity;
     private final TreeMap<Long, Hosted> hosted = new TreeMap<>();
     private Resolved[] resolvedById = new Resolved[0];
@@ -265,12 +298,13 @@ public final class HostedWorld {
         this.appearances = Objects.requireNonNull(appearances, "appearances");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.atmosphere = new AtmosphereModel(settings.relaxationSeconds(), settings.defaultEnvironmentK());
-        this.radiation = new RadiationModel(atmosphere::environment);
+        this.refinement = new ThermalRefinement(settings.refinement());
+        this.radiation = new RadiationModel(atmosphere::environment, refinement);
         this.activity = new ThermalActivity(world.materials(), settings.calmRate(), settings.calmSteps());
         world.addWriteListener(activity);
         this.scheduler = new Scheduler(settings.tickSeconds(), settings.budgetPerTick(), 4, settings.auditInterval());
         scheduler.register(sources);
-        scheduler.register(new ConductionModel());
+        scheduler.register(new ConductionModel(refinement));
         scheduler.register(radiation);
         scheduler.register(atmosphere);
     }
@@ -622,18 +656,22 @@ public final class HostedWorld {
     }
 
     /**
-     * Simulates one step: heat runs in the awake sections and their neighbours, sections fall asleep or wake
-     * up, and blocks whose shown phase has gone are reported.
+     * Simulates one step: blocks are split or merged as the last step found them to need, heat runs in the
+     * awake sections and their neighbours, sections fall asleep or wake up, and blocks whose shown phase has
+     * gone are reported.
      *
      * @return what happened
      */
     public TickResult tick() {
         SortedSet<Long> scope = activity.scope(world);
+        SortedMap<GridPos, HeatSourceModel.Source> held = sources.sources();
+        refinement.update(world, scope, held::containsKey);
         TickReport report = scheduler.tick(world, (w, domain) -> domain == Domain.THERMAL ? scope : NOWHERE);
         boolean ran = true;
         for (TickReport.ModelRun run : report.runs()) {
             ran &= run.status() != TickReport.Status.DEFERRED;
         }
+        refinement.endStep(ran);
         if (ran) {
             activity.endStep(world, settings.tickSeconds());
         }
@@ -671,8 +709,22 @@ public final class HostedWorld {
                 phase = m.dominantPhase(state);
             }
         }
+        double[] range = {Double.NaN, Double.NaN};
+        RefinedBlock block = world.refinedBlock(pos);
+        if (block == null) {
+            range[0] = state == null ? Double.NaN : state.temperatureK();
+            range[1] = range[0];
+        } else {
+            block.forEachLeaf((cell, leaf) -> {
+                double t = temperature(leaf);
+                if (!Double.isNaN(t)) {
+                    range[0] = Double.isNaN(range[0]) ? t : Math.min(range[0], t);
+                    range[1] = Double.isNaN(range[1]) ? t : Math.max(range[1], t);
+                }
+            });
+        }
         return Optional.of(new Inspection(pos, registry.id(c.material()), name, c.mass(), c.enthalpy(), state, phase,
-                c.provenance(), world.isRefined(pos), activity.isAwake(key), lastScope.contains(key),
+                c.provenance(), block != null, range[0], range[1], activity.isAwake(key), lastScope.contains(key),
                 atmosphere.environment(key), sources.sources().get(pos), resolve(ids.get(pos.indexInSection()))
                         .appearance()));
     }
@@ -688,14 +740,57 @@ public final class HostedWorld {
     }
 
     /**
+     * Returns the temperature at a point: that of the block holding it or, if the block is refined, of its
+     * cell there, so a refined block's face shows where it is hotter or colder.
+     *
+     * @param x the point's x coordinate, in blocks
+     * @param y the point's y coordinate, in blocks
+     * @param z the point's z coordinate, in blocks
+     * @return the temperature in kelvin, or {@link Double#NaN} if the matter there is empty or not imported
+     */
+    public double temperatureAt(double x, double y, double z) {
+        GridPos pos = new GridPos((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
+        RefinedBlock block = hosted.containsKey(pos.sectionKey()) ? world.refinedBlock(pos) : null;
+        if (block == null) {
+            return temperature(pos);
+        }
+        int level = block.depth();
+        int size = 1 << level;
+        CellId finest = new CellId(pos, level, cellIndex(x - pos.x(), size), cellIndex(y - pos.y(), size),
+                cellIndex(z - pos.z(), size));
+        return temperature(world.readLeaf(block.leafCovering(finest)));
+    }
+
+    /** Returns which of {@code size} cells along an edge a position within a block, from 0 to 1, falls in. */
+    private static int cellIndex(double within, int size) {
+        return Math.max(0, Math.min(size - 1, (int) (within * size)));
+    }
+
+    /**
      * Returns a summary of the world.
      *
      * @return the status
      */
     public Status status() {
+        int refinedBlocks = 0;
+        for (long key : hosted.keySet()) {
+            Section s = world.section(key);
+            if (s != null) {
+                refinedBlocks += s.refinedBlocks().size();
+            }
+        }
         return new Status(hosted.size(), activity.awakeSections().size(), lastScope.size(), sources.sources().size(),
-                radiation.lastRadiatingFaces(), world.tick(), world.tick() * settings.tickSeconds(), phaseChanges,
-                reconciled, conserved);
+                radiation.lastRadiatingFaces(), refinedBlocks, world.leafCount(), world.tick(),
+                world.tick() * settings.tickSeconds(), phaseChanges, reconciled, conserved);
+    }
+
+    /**
+     * Returns what splitting and merging cells did at the start of the last tick.
+     *
+     * @return the report
+     */
+    public ThermalRefinement.Report lastRefinement() {
+        return refinement.lastReport();
     }
 
     // ---- internals ----

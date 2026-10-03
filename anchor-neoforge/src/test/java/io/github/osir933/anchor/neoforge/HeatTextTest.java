@@ -56,6 +56,35 @@ class HeatTextTest {
     }
 
     @Test
+    void aRefinedBlockSaysHowFarApartItsCellsAre() {
+        BlockAppearance[] looks = {
+            BlockAppearance.of("anchor:air"),
+            BlockAppearance.of("anchor:granite"),
+            BlockAppearance.of("anchor:basalt").shownAs(Phase.LIQUID).startingAt(1450.0)
+                    .heatedBy(new HeatSourceModel.Source(1450.0, 1.5e6)),
+        };
+        PhysicalWorld world = new PhysicalWorld(WorldSettings.airAt20C(1), MaterialRegistry.withLibrary());
+        HostedWorld hosted = new HostedWorld(world, id -> looks[id], HostedWorld.Settings.defaults());
+        // Lava with granite on its east side, in the air.
+        hosted.importSection(SectionPos.pack(0, 0, 0), i -> i == 0 ? 2 : i == 1 ? 1 : 0, 290.0);
+        for (int i = 0; i < 5; i++) {
+            hosted.tick();
+        }
+        HostedWorld.Inspection granite = hosted.inspect(new GridPos(1, 0, 0)).orElseThrow();
+        assertTrue(granite.refined(), granite.toString());
+        List<String> lines = HeatText.describe(granite, "minecraft:granite");
+        assertTrue(lines.contains("  Refined into smaller cells from " + HeatText.celsius(granite.coolestK())
+                + " to " + HeatText.celsius(granite.hottestK()) + "; the figures above are for the whole block"),
+                lines.toString());
+
+        HostedWorld.Status status = hosted.status();
+        List<String> summary = HeatText.status("minecraft:overworld",
+                new HeatReport(status, 14.4, 1.0, 1.0, 0L, 0L, 0, null));
+        assertTrue(summary.contains("  " + status.refinedBlocks() + " blocks refined into " + status.refinedCells()
+                + " smaller cells where temperatures change steeply"), summary.toString());
+    }
+
+    @Test
     void theStatusSummarisesTheWorld() {
         PhysicalWorld world = new PhysicalWorld(WorldSettings.airAt20C(1), MaterialRegistry.withLibrary());
         HostedWorld hosted = new HostedWorld(world, id -> BlockAppearance.of("anchor:air"),

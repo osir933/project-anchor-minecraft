@@ -1,10 +1,12 @@
 package io.github.osir933.anchor.core.physics.thermal;
 
+import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.Direction;
 import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
+import io.github.osir933.anchor.core.world.RefinedBlock;
 import io.github.osir933.anchor.core.world.Section;
 import java.util.Arrays;
 import java.util.Collections;
@@ -29,8 +31,9 @@ import java.util.TreeSet;
  * block of ice that absorbs latent heat at a constant 0 °C counts as changing, while a block that a flame
  * heats exactly as fast as its surroundings cool it counts as calm, and can sleep in that steady state. The
  * capacity uses the material's lowest specific heat, which errs towards staying awake. A model write that
- * changes a cell's material or mass always counts as fast. Leaves of refined blocks are judged by their
- * largest single write instead of their net change.
+ * changes a cell's material or mass always counts as fast. A refined block's rate is the net changes of its
+ * cells, added up regardless of sign, divided by the whole block's capacity: the average change of its matter,
+ * so heat moving inside the block counts but refining a block does not change when its section sleeps.
  *
  * <p>Register the tracker with {@link PhysicalWorld#addWriteListener} so it sees what the models write, take
  * the scope for each step from {@link #scope}, and call {@link #endStep} after the models have run.
@@ -56,22 +59,29 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
     private long lastKey;
     private Written last;
 
+    /** A written leaf and its enthalpy before its first write in the step. */
+    private record LeafStart(CellId leaf, double enthalpy) {
+    }
+
     /** The writes to one section during a step. */
     private static final class Written {
         /** Each written block's enthalpy before its first write in the step. */
         final double[] start = new double[SectionPos.BLOCKS];
         /** Which blocks were written, one bit each. */
         final long[] touched = new long[SectionPos.BLOCKS / 64];
+        /**
+         * Each written leaf of a refined block, with its enthalpy before its first write in the step, by a key
+         * that orders leaves block by block in cell order and compares quickly.
+         */
+        final TreeMap<Long, LeafStart> leafStart = new TreeMap<>();
         boolean any;
-        /** The largest temperature-equivalent change of a single write, for leaves of refined blocks. */
-        double largestWrite;
         /** Set when a write changed some cell's material or mass. */
         boolean structural;
 
         void reset() {
             Arrays.fill(touched, 0L);
+            leafStart.clear();
             any = false;
-            largestWrite = 0;
             structural = false;
         }
     }
@@ -166,7 +176,7 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
     }
 
     @Override
-    public void leafWritten(long sectionKey, int block, CellState before, CellState after) {
+    public void leafWritten(long sectionKey, int block, CellId leaf, CellState before, CellState after) {
         Written w = last;
         if (w == null || lastKey != sectionKey) {
             w = written.computeIfAbsent(sectionKey, k -> new Written());
@@ -182,31 +192,38 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
         if (after.material() == MaterialRegistry.VACUUM || after.mass() == 0) {
             return;
         }
+        if (leaf != null) {
+            long key = ((long) block << 34) | ((long) leaf.mortonCode() << 4) | leaf.level();
+            if (!w.leafStart.containsKey(key)) {
+                w.leafStart.put(key, new LeafStart(leaf, before.enthalpy()));
+            }
+            return;
+        }
         int word = block >>> 6;
         long bit = 1L << (block & 63);
         if ((w.touched[word] & bit) == 0) {
             w.touched[word] |= bit;
             w.start[block] = before.enthalpy();
         }
-        double capacity = after.mass() * materials.get(after.material()).minSpecificHeat();
-        w.largestWrite = Math.max(w.largestWrite, Math.abs(after.enthalpy() - before.enthalpy()) / capacity);
     }
 
-    /** Returns the largest temperature-equivalent net change of any block a step wrote in a section. */
+    /**
+     * Returns the largest temperature-equivalent net change of any block a step wrote in a section, counting
+     * a refined block's cells together.
+     */
     private double change(Section section, Written w) {
         if (w.structural) {
             return Double.POSITIVE_INFINITY;
         }
         double largest = 0;
-        boolean refined = false;
         for (int word = 0; word < w.touched.length; word++) {
             long bits = w.touched[word];
             while (bits != 0) {
                 int b = (word << 6) | Long.numberOfTrailingZeros(bits);
                 bits &= bits - 1;
                 if (section.isRefined(b)) {
-                    refined = true;
-                    continue;
+                    // Refined since the write, so its matter moved into leaves: count it as changing.
+                    return Double.POSITIVE_INFINITY;
                 }
                 int material = section.material(b);
                 double mass = section.mass(b);
@@ -217,7 +234,39 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
                 largest = Math.max(largest, Math.abs(section.enthalpy(b) - w.start[b]) / capacity);
             }
         }
-        return refined ? Math.max(largest, w.largestWrite) : largest;
+        // Leaves come block by block, in cell order.
+        int block = -1;
+        RefinedBlock refined = null;
+        double moved = 0;
+        for (LeafStart start : w.leafStart.values()) {
+            int b = start.leaf().block().indexInSection();
+            if (b != block) {
+                largest = Math.max(largest, blockChange(section, block, moved));
+                block = b;
+                refined = section.refinedBlock(b);
+                moved = 0;
+            }
+            double now = refined == null ? Double.NaN : refined.leafEnthalpy(start.leaf());
+            if (Double.isNaN(now)) {
+                // Merged or replaced since the write.
+                return Double.POSITIVE_INFINITY;
+            }
+            moved += Math.abs(now - start.enthalpy());
+        }
+        return Math.max(largest, blockChange(section, block, moved));
+    }
+
+    /** Returns the change of a refined block whose cells' net changes add up to some joules. */
+    private double blockChange(Section section, int block, double joules) {
+        if (block < 0 || joules == 0) {
+            return 0;
+        }
+        int material = section.material(block);
+        double mass = section.mass(block);
+        if (material == MaterialRegistry.VACUUM || mass == 0) {
+            return 0;
+        }
+        return joules / (mass * materials.get(material).minSpecificHeat());
     }
 
     /**

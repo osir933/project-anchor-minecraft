@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.osir933.anchor.core.math.DeterministicRandom;
+import io.github.osir933.anchor.core.matter.Element;
 import io.github.osir933.anchor.core.matter.Material;
 import io.github.osir933.anchor.core.matter.MaterialLibrary;
 import io.github.osir933.anchor.core.matter.Phase;
@@ -20,9 +21,14 @@ import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
 import io.github.osir933.anchor.core.world.Provenance;
+import io.github.osir933.anchor.core.world.Totals;
 import io.github.osir933.anchor.core.world.WorldSettings;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 
 class RadiationModelTest {
@@ -369,11 +375,26 @@ class RadiationModelTest {
         assertEquals(faceRays, model.lastRaysCast(), "a new block on the way means casting again");
         assertEquals(farBefore, enthalpy(world, far), "the new block shades the old one");
 
-        world.refine(new CellId(new GridPos(2, 0, 0), 1, 0, 0, 0));
-        CellState shaded = world.readBlock(new GridPos(2, 0, 0));
+        GridPos shade = new GridPos(2, 0, 0);
+        world.refine(CellId.of(shade).child(0));
+        Map<CellId, Double> before = new TreeMap<>();
+        world.refinedBlock(shade).forEachLeaf((cell, state) -> before.put(cell, state.enthalpy()));
         step(world, model, 1.0);
-        assertEquals(faceRays, model.lastRaysCast(), "refining the block it stopped at means casting again");
-        assertEquals(shaded, world.readBlock(new GridPos(2, 0, 0)), "refined blocks take no radiation yet");
+        assertEquals(0, model.lastRaysCast(), "refining a block changes none of the rays");
+        assertEquals(farBefore, enthalpy(world, far), "the refined block still shades the old one");
+        double[] warmed = {Double.NaN};
+        world.refinedBlock(shade).forEachLeaf((cell, state) -> {
+            if (cell.subX() == 0) {
+                double gain = state.enthalpy() - before.get(cell);
+                assertTrue(gain > 0, cell + " faces the hot block");
+                if (!Double.isNaN(warmed[0])) {
+                    assertEquals(warmed[0], gain, "the cells on the face share what it takes in by area");
+                }
+                warmed[0] = gain;
+            } else {
+                assertEquals(before.get(cell), state.enthalpy(), cell + " is out of sight of the hot block");
+            }
+        });
         assertTrue(world.audit().balanced(), () -> world.audit().toString());
     }
 
@@ -405,6 +426,8 @@ class RadiationModelTest {
         world.placeMaterial(new GridPos(-1, 0, 1), MaterialLibrary.BASALT, 900.0);
         world.placeMaterial(new GridPos(2, 1, -1), MaterialLibrary.GLASS, 350.0);
         world.placeMaterial(new GridPos(-2, 0, -2), MaterialLibrary.WATER, 260.0);
+        world.refine(CellId.of(new GridPos(0, 0, 0)).child(3));
+        world.refine(CellId.of(new GridPos(4, 0, 0)).child(0).child(7));
         return world;
     }
 
@@ -437,7 +460,7 @@ class RadiationModelTest {
         RadiationModel model = model();
         step(world, model, 100.0);
         assertEquals(1, model.checkValidity(world).size());
-        assertTrue(model.checkValidity(world).get(0).message().startsWith("1 blocks need more than"),
+        assertTrue(model.checkValidity(world).get(0).message().startsWith("1 cells need more than"),
                 () -> model.checkValidity(world).toString());
         double last = temperature(world, pos);
         assertTrue(last < 1400.0 && last > ENVIRONMENT_K, last + " K");
@@ -464,5 +487,131 @@ class RadiationModelTest {
         double boiling = RadiationModel.gasAbove(water);
         assertEquals(Phase.LIQUID, water.dominantPhase(water.stateFor(boiling - 1.0)));
         assertEquals(Phase.GAS, water.dominantPhase(water.stateFor(boiling + 1.0)));
+    }
+
+    /** Sets a cell's temperature, declaring the heat that takes so that audits still balance. */
+    private static void setTemperature(PhysicalWorld world, CellId cell, double temperatureK) {
+        CellState s = world.readLeaf(cell);
+        Material material = world.materials().get(s.material());
+        double enthalpy = s.mass() * material.specificEnthalpy(temperatureK);
+        world.writeLeaf(cell, new CellState(s.material(), s.mass(), enthalpy, s.owner(), Provenance.SIMULATED));
+        double added = enthalpy - s.enthalpy();
+        world.recordExchange(new Totals(0, added, Math.abs(added), new EnumMap<>(Element.class)), "test");
+    }
+
+    @Test
+    void aRefinedFaceTakesInWhatTheWholeBlockWould() {
+        // The same scene twice, once with the block that takes in the radiation refined, unevenly. The cells
+        // on its face are at one temperature, so together they take in what the whole block does, to within
+        // rounding, and the hot block gives as much.
+        GridPos hot = new GridPos(0, 0, 0);
+        GridPos cold = new GridPos(2, 0, 0);
+        PhysicalWorld whole = vacuumWorld();
+        PhysicalWorld refined = vacuumWorld();
+        for (PhysicalWorld world : List.of(whole, refined)) {
+            world.placeMaterial(hot, MaterialLibrary.IRON, 1000.0);
+            world.placeMaterial(cold, MaterialLibrary.GRANITE, ENVIRONMENT_K);
+        }
+        refined.refine(CellId.of(cold).child(0).child(0));
+        double hotBefore = enthalpy(whole, hot);
+        double coldBefore = enthalpy(whole, cold);
+        step(whole, model(), 1.0);
+        step(refined, model(), 1.0);
+        double taken = enthalpy(whole, cold) - coldBefore;
+        assertTrue(taken > 0, "the cold block warmed");
+        assertEquals(taken, enthalpy(refined, cold) - coldBefore, taken * 1e-9);
+        assertEquals(enthalpy(whole, hot) - hotBefore, enthalpy(refined, hot) - hotBefore, taken * 1e-9);
+        assertTrue(refined.audit().balanced(), () -> refined.audit().toString());
+    }
+
+    @Test
+    void aRefinedBlockRadiatesFromTheCellsOnItsFaces() {
+        // A refined block hot in its east half only. What lies east of it warms; what lies west of it, as
+        // warm as the block's west half, takes in nothing, and neither does that half.
+        PhysicalWorld world = vacuumWorld();
+        GridPos block = new GridPos(0, 0, 0);
+        GridPos east = new GridPos(2, 0, 0);
+        GridPos west = new GridPos(-2, 0, 0);
+        for (GridPos pos : List.of(block, east, west)) {
+            world.placeMaterial(pos, MaterialLibrary.GRANITE, ENVIRONMENT_K);
+        }
+        world.refine(CellId.of(block).child(0));
+        for (int octant = 1; octant < 8; octant += 2) {
+            setTemperature(world, CellId.of(block).child(octant), 900.0);
+        }
+        Map<CellId, Double> before = new TreeMap<>();
+        world.refinedBlock(block).forEachLeaf((cell, state) -> before.put(cell, state.enthalpy()));
+        double eastBefore = enthalpy(world, east);
+        double westBefore = enthalpy(world, west);
+        RadiationModel model = model();
+        step(world, model, 10.0);
+        double gain = enthalpy(world, east) - eastBefore;
+        assertTrue(gain > 0, "the hot half faces east");
+        assertEquals(0.0, enthalpy(world, west) - westBefore, gain * 1e-9, "the west half is as warm as it");
+        world.refinedBlock(block).forEachLeaf((cell, state) -> {
+            double change = state.enthalpy() - before.get(cell);
+            if (cell.subX() == 0) {
+                assertEquals(0.0, change, gain * 1e-9, cell + " is at its surroundings' temperature");
+            } else {
+                assertTrue(change < -gain, cell + " radiates east and to the surroundings");
+            }
+        });
+        assertTrue(world.audit().balanced(), () -> world.audit().toString());
+    }
+
+    @Test
+    void aCavityWithRefinedBlocksKeepsItsHeat() {
+        PhysicalWorld world = vacuumWorld();
+        shell(world, 3, 2, MaterialLibrary.GRANITE, ENVIRONMENT_K);
+        shell(world, 2, 1, MaterialLibrary.GRANITE, 400.0);
+        GridPos hot = new GridPos(0, 0, 0);
+        GridPos wall = new GridPos(2, 0, 0);
+        world.placeMaterial(hot, MaterialLibrary.IRON, 1000.0);
+        world.refine(CellId.of(hot).child(5));
+        world.refine(CellId.of(wall).child(0).child(1));
+        world.refine(CellId.of(new GridPos(0, 2, 0)).child(3));
+        Map<CellId, Double> before = new TreeMap<>();
+        world.refinedBlock(wall).forEachLeaf((cell, state) -> before.put(cell, state.enthalpy()));
+        double total = world.totals().enthalpy();
+        RadiationModel model = model();
+        for (int i = 0; i < 20; i++) {
+            step(world, model, 60.0);
+            assertEquals(0.0, model.lastStepEnergy(), 0.0, "nothing reaches the surroundings");
+            assertTrue(world.audit().balanced(), () -> world.audit().toString());
+        }
+        assertEquals(total, world.totals().enthalpy(), Math.abs(total) * 1e-12);
+        world.refinedBlock(wall).forEachLeaf((cell, state) -> {
+            if (cell.subX() == 0) {
+                assertTrue(state.enthalpy() > before.get(cell), cell + " faces the hot block");
+            } else {
+                assertEquals(before.get(cell), state.enthalpy(), cell + " is inside the wall");
+            }
+        });
+    }
+
+    @Test
+    void cellsTooCoarseForTheRadiationOnThemAreSplit() {
+        // Granite facing white-hot iron takes in tens of kilowatts per square metre, which a whole block cannot
+        // carry inwards without a steep drop under its face: it is split, and while the radiation keeps up its
+        // cells do not merge back but split further on the face.
+        PhysicalWorld world = vacuumWorld();
+        GridPos hot = new GridPos(0, 0, 0);
+        GridPos cold = new GridPos(2, 0, 0);
+        world.placeMaterial(hot, MaterialLibrary.IRON, 1500.0);
+        world.placeMaterial(cold, MaterialLibrary.GRANITE, ENVIRONMENT_K);
+        ThermalRefinement refinement = new ThermalRefinement(ThermalRefinement.Settings.DEFAULT);
+        RadiationModel model = new RadiationModel(key -> ENVIRONMENT_K, refinement);
+        SortedSet<Long> scope = new TreeSet<>(List.of(hot.sectionKey()));
+        step(world, model, 1.0);
+        refinement.endStep(true);
+        refinement.update(world, scope, pos -> false);
+        assertTrue(world.isRefined(cold), "the granite is split");
+        assertTrue(world.isRefined(hot), "so is the iron, which radiates hundreds of kilowatts per square metre");
+        int leaves = world.refinedBlock(cold).leafCount();
+        step(world, model, 1.0);
+        refinement.endStep(true);
+        refinement.update(world, scope, pos -> false);
+        assertTrue(world.refinedBlock(cold).leafCount() > leaves, "its cells on the face split again");
+        assertTrue(world.audit().balanced(), () -> world.audit().toString());
     }
 }

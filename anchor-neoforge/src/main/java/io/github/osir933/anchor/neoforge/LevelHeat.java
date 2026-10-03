@@ -9,6 +9,7 @@ import io.github.osir933.anchor.core.host.SectionSnapshot;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
 import io.github.osir933.anchor.core.physics.thermal.ThermalActivity;
+import io.github.osir933.anchor.core.physics.thermal.ThermalRefinement;
 import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
@@ -34,6 +35,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 
 /**
@@ -108,9 +110,12 @@ final class LevelHeat {
         MaterialRegistry materials = MaterialRegistry.withLibrary();
         this.mapper = new BlockMapper(materials);
         PhysicalWorld world = new PhysicalWorld(WorldSettings.airAt20C(level.getSeed()), materials);
+        ThermalRefinement.Settings refinement = ThermalRefinement.Settings.DEFAULT
+                .withMaxLevel(AnchorConfig.get(AnchorConfig.REFINEMENT_LEVELS))
+                .withMaxLeaves(AnchorConfig.get(AnchorConfig.MAX_REFINED_CELLS));
         HostedWorld.Settings settings = new HostedWorld.Settings(stepSeconds, WORK_PER_STEP,
                 AtmosphereModel.DEFAULT_RELAXATION_SECONDS, Climate.kelvin(0.8, 64), calmRate,
-                ThermalActivity.DEFAULT_CALM_STEPS, AUDIT_INTERVAL);
+                ThermalActivity.DEFAULT_CALM_STEPS, AUDIT_INTERVAL, refinement);
         this.hosted = new HostedWorld(world, mapper::forStateId, settings);
         this.planner = new ImportPlanner(AnchorConfig.get(AnchorConfig.RADIUS),
                 AnchorConfig.get(AnchorConfig.VERTICAL_RADIUS), MARGIN);
@@ -301,6 +306,27 @@ final class LevelHeat {
      */
     double temperature(BlockPos pos) {
         return failure == null ? hosted.temperature(grid(pos)) : Double.NaN;
+    }
+
+    /**
+     * Returns the temperature at a point of a block as the simulation has it: the block's or, where the block
+     * is refined into smaller cells, that of its cell there, so a point on a face reads that face. Like
+     * {@link #temperature}, it takes in no changes first.
+     *
+     * @param pos the block
+     * @param at the point; one outside the block, such as a point on the outline of a block larger than a
+     *     cube, is moved to the block's nearest side
+     * @return the temperature in kelvin, or {@link Double#NaN} if the matter there is empty or not simulated, or
+     *     heat has stopped
+     */
+    double temperatureAt(BlockPos pos, Vec3 at) {
+        return failure == null ? hosted.temperatureAt(within(at.x(), pos.getX()), within(at.y(), pos.getY()),
+                within(at.z(), pos.getZ())) : Double.NaN;
+    }
+
+    /** Moves a coordinate into the block that starts at {@code start} along its axis. */
+    private static double within(double coordinate, int start) {
+        return Math.max(start, Math.min(Math.nextDown(start + 1.0), coordinate));
     }
 
     /**

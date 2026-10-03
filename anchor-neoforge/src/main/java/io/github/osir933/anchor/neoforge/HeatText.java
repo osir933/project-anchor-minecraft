@@ -127,8 +127,11 @@ final class HeatText {
                 temperature += " (beyond the measured range of its data)";
             }
             lines.add(temperature);
-            lines.add(String.format(Locale.ROOT, "  Mass %.1f kg, enthalpy %s%s", i.massKg(), energy(i.enthalpyJ()),
-                    i.refined() ? ", totals over finer cells" : ""));
+            lines.add(String.format(Locale.ROOT, "  Mass %.1f kg, enthalpy %s", i.massKg(), energy(i.enthalpyJ())));
+            if (i.refined()) {
+                lines.add("  Refined into smaller cells from " + celsius(i.coolestK()) + " to " + celsius(i.hottestK())
+                        + "; the figures above are for the whole block");
+            }
         }
         BlockAppearance a = i.appearance();
         if (a.presentable()) {
@@ -173,6 +176,8 @@ final class HeatText {
         lines.add(String.format(Locale.ROOT, "  %s simulated in %d steps of %s; the last took %.2f ms, on average"
                 + " %.2f ms", duration(w.simulatedSeconds()), w.tick(), duration(s.stepSeconds()),
                 s.lastStepMillis(), s.averageStepMillis()));
+        lines.add(String.format(Locale.ROOT, "  %d blocks refined into %d smaller cells where temperatures change "
+                + "steeply", w.refinedBlocks(), w.refinedCells()));
         lines.add(String.format(Locale.ROOT, "  %d block changes followed; %d blocks changed to show melting, "
                 + "freezing or boiling", w.reconciled(), s.shownPhaseChanges()));
         if (s.restoredBlocks() > 0) {

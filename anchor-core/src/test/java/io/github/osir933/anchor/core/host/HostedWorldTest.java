@@ -11,6 +11,7 @@ import io.github.osir933.anchor.core.matter.Material;
 import io.github.osir933.anchor.core.matter.MaterialLibrary;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
+import io.github.osir933.anchor.core.physics.thermal.ThermalRefinement;
 import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.CellState;
@@ -129,6 +130,64 @@ class HostedWorldTest {
         assertTrue(h.world().audit().balanced(), () -> h.world().audit().toString());
     }
 
+    /** Lava set into the ground, ticked long enough for the stone around it to start warming. */
+    private static HostedWorld lavaInTheGround(HostedWorld.Settings settings, GridPos lava) {
+        HostedWorld h = hosted(settings);
+        h.importSection(ORIGIN, terrain(Map.of(lava, LAVA)), 290.0);
+        for (int i = 0; i < 20; i++) {
+            h.tick();
+        }
+        return h;
+    }
+
+    @Test
+    void stoneBesideLavaIsRefinedSoItsFaceShowsTheHeatSoakingIn() {
+        GridPos lava = new GridPos(5, 7, 5);
+        HostedWorld h = lavaInTheGround(HostedWorld.Settings.defaults(), lava);
+        List<GridPos> touching = List.of(lava.offset(1, 0, 0), lava.offset(-1, 0, 0), lava.offset(0, 0, 1),
+                lava.offset(0, 0, -1), lava.offset(0, -1, 0));
+        for (GridPos stone : touching) {
+            assertTrue(h.inspect(stone).orElseThrow().refined(), () -> stone + " touches the lava");
+        }
+        assertFalse(h.inspect(lava).orElseThrow().refined(), "the source keeps the lava whole");
+        assertFalse(h.inspect(lava.offset(0, 1, 0)).orElseThrow().refined(), "air is never refined");
+        HostedWorld.Status status = h.status();
+        assertEquals(touching.size(), status.refinedBlocks());
+        assertTrue(status.refinedCells() > 8 * touching.size(),
+                () -> status.refinedCells() + " cells: those against the lava are split again");
+
+        GridPos stone = lava.offset(1, 0, 0);
+        HostedWorld.Inspection inspection = h.inspect(stone).orElseThrow();
+        assertTrue(inspection.coolestK() < inspection.temperatureK()
+                && inspection.temperatureK() < inspection.hottestK(), () -> inspection.toString());
+        double face = h.temperatureAt(stone.x() + 0.1, stone.y() + 0.5, stone.z() + 0.5);
+        double back = h.temperatureAt(stone.x() + 0.9, stone.y() + 0.5, stone.z() + 0.5);
+        assertTrue(back < inspection.temperatureK() && inspection.temperatureK() < face,
+                () -> face + " K at the lava, " + back + " K at the back");
+        assertTrue(h.world().audit().balanced(), () -> h.world().audit().toString());
+    }
+
+    @Test
+    void withoutRefinementEveryBlockStaysWholeAndTakesInHeatMoreSlowly() {
+        GridPos lava = new GridPos(5, 7, 5);
+        GridPos stone = lava.offset(1, 0, 0);
+        HostedWorld h = lavaInTheGround(HostedWorld.Settings.defaults()
+                .withRefinement(ThermalRefinement.Settings.OFF), lava);
+        assertEquals(0, h.status().refinedBlocks());
+        assertEquals(0, h.status().refinedCells());
+        HostedWorld.Inspection inspection = h.inspect(stone).orElseThrow();
+        assertFalse(inspection.refined());
+        assertEquals(inspection.temperatureK(), inspection.coolestK());
+        assertEquals(inspection.temperatureK(), inspection.hottestK());
+        assertEquals(h.temperature(stone), h.temperatureAt(stone.x() + 0.1, stone.y() + 0.5, stone.z() + 0.5));
+
+        double refined = lavaInTheGround(HostedWorld.Settings.defaults(), lava).temperature(stone);
+        assertTrue(inspection.temperatureK() > 290.0, "a whole block still warms");
+        // A whole block's heat has half a block of stone to cross; cells against the lava take it in nearer the face.
+        assertTrue(refined > inspection.temperatureK(),
+                () -> "refined stone " + refined + " K, whole stone " + inspection.temperatureK() + " K");
+    }
+
     @Test
     void aNeighbourWithAnotherClimateWakesANewSection() {
         HostedWorld h = hosted();
@@ -193,7 +252,8 @@ class HostedWorldTest {
     @Test
     void waterFreezesInTheColdAndIsThenShownAsIceWithoutLosingItsState() {
         // Freezing through takes weeks, slower than the calm rate, so this world never lets sections sleep.
-        HostedWorld h = hosted(new HostedWorld.Settings(3600.0, 50_000_000L, 300.0, 288.15, 0.0, 20, 20));
+        HostedWorld h = hosted(new HostedWorld.Settings(3600.0, 50_000_000L, 300.0, 288.15, 0.0, 20, 20,
+                ThermalRefinement.Settings.DEFAULT));
         GridPos water = new GridPos(8, 9, 8);
         h.importSection(ORIGIN, terrain(Map.of(water, WATER)), 250.0);
         assertEquals(273.15, h.temperature(water), 1e-9, "water in the cold starts at its freezing point");
@@ -388,11 +448,13 @@ class HostedWorldTest {
         for (int i = 0; i < 20; i++) {
             h.tick();
         }
+        assertTrue(h.inspect(new GridPos(3, 2, 3)).orElseThrow().refined(), "the hot stone is split into cells");
         SectionSnapshot saved = h.snapshot(ORIGIN).orElseThrow();
         assertTrue(saved.size() > 1 && saved.size() < SectionPos.BLOCKS, () -> saved.size() + " blocks saved");
 
         HostedWorld again = hosted();
         assertEquals(saved.size(), again.importSection(ORIGIN, blocks, 290.0, saved));
+        assertFalse(again.inspect(new GridPos(3, 2, 3)).orElseThrow().refined(), "cells are saved as block totals");
         for (int i = 0; i < SectionPos.BLOCKS; i++) {
             GridPos p = GridPos.of(ORIGIN, i);
             CellState was = h.world().readBlock(p);

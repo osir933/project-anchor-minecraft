@@ -57,7 +57,8 @@ final class AnchorGameTests {
             new Case("thermal_camera_sees_a_hot_block", 200, AnchorGameTests::thermalCameraSeesAHotBlock),
             new Case("thermal_camera_sees_warm_air", 600, AnchorGameTests::thermalCameraSeesWarmAir),
             new Case("thermal_camera_explains_itself", 20, AnchorGameTests::thermalCameraExplainsItself),
-            new Case("hot_iron_warms_stone_across_air", 600, AnchorGameTests::hotIronWarmsStoneAcrossAir));
+            new Case("hot_iron_warms_stone_across_air", 600, AnchorGameTests::hotIronWarmsStoneAcrossAir),
+            new Case("stone_beside_lava_is_refined", 200, AnchorGameTests::stoneBesideLavaIsRefined));
 
     private AnchorGameTests() {
     }
@@ -149,7 +150,7 @@ final class AnchorGameTests {
             helper.assertTrue(air.temperatureK() > air.environmentK() + 0.5, "the air above the torch is "
                     + HeatText.temperature(air.temperatureK()) + ", no warmer than its surroundings at "
                     + HeatText.temperature(air.environmentK()));
-            Component reading = ThermometerItem.reading(helper.getLevel(), above);
+            Component reading = ThermometerItem.reading(helper.getLevel(), above, Vec3.atCenterOf(above));
             helper.assertTrue(reading.getString().contains("°C"), "the thermometer says: " + reading.getString());
             heat.release(above);
         });
@@ -347,6 +348,45 @@ final class AnchorGameTests {
             }
             heat.release(iron);
             heat.release(stone);
+        });
+    }
+
+    /**
+     * The stone walls of a lava pool are refined into smaller cells, so the face against the lava warms ahead of
+     * the rest of the stone, and a thermometer touching that face reads it.
+     */
+    private static void stoneBesideLavaIsRefined(GameTestHelper helper) {
+        BlockPos lavaAt = new BlockPos(2, 1, 2);
+        for (BlockPos wall : List.of(lavaAt.north(), lavaAt.south(), lavaAt.east(), lavaAt.west())) {
+            helper.setBlock(wall, Blocks.STONE);
+        }
+        helper.setBlock(lavaAt, Blocks.LAVA);
+        BlockPos lava = helper.absolutePos(lavaAt);
+        BlockPos stone = lava.east();
+        boolean[] pinned = {false};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (!pinned[0]) {
+                heat.keepSimulated(lava);
+                pinned[0] = true;
+            }
+            HostedWorld.Inspection is = heat.inspect(stone).orElseThrow(
+                    () -> helper.assertionException(Component.literal("waiting for the stone to be simulated")));
+            if (!is.refined() || !(is.hottestK() > is.coolestK())) {
+                throw helper.assertionException(Component.literal("waiting for the stone to be refined"));
+            }
+            // The stone's west face touches the lava.
+            Vec3 face = new Vec3(stone.getX(), stone.getY() + 0.5, stone.getZ() + 0.5);
+            Vec3 back = face.add(0.99, 0.0, 0.0);
+            double faceK = heat.temperatureAt(stone, face);
+            double backK = heat.temperatureAt(stone, back);
+            helper.assertTrue(faceK > is.temperatureK() && is.temperatureK() > backK, "the stone is at "
+                    + HeatText.temperature(is.temperatureK()) + ", its face against the lava at "
+                    + HeatText.temperature(faceK) + " and its back at " + HeatText.temperature(backK));
+            Component reading = ThermometerItem.reading(helper.getLevel(), stone, face);
+            helper.assertTrue(reading.getString().contains(HeatText.celsius(faceK)),
+                    "the thermometer touching the face says: " + reading.getString());
+            heat.release(lava);
         });
     }
 
