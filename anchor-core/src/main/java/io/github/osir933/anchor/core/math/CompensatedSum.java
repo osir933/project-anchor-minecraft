@@ -42,6 +42,17 @@ public final class CompensatedSum {
     }
 
     /**
+     * Empties the sum.
+     *
+     * @return this sum, for chaining
+     */
+    public CompensatedSum reset() {
+        sum = 0.0;
+        compensation = 0.0;
+        return this;
+    }
+
+    /**
      * Sums an array in index order.
      *
      * @param values the values
