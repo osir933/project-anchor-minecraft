@@ -42,6 +42,11 @@ class ConductionModelTest {
         return temperature(world, world.readBlock(pos));
     }
 
+    private static ThermalGraph graph(PhysicalWorld world) {
+        return ThermalGraph.build(world, SimulationScope.everywhere().sections(world, Domain.THERMAL),
+                new Isotherms());
+    }
+
     private static void step(PhysicalWorld world, ConductionModel model, double dt) {
         step(world, model, dt, SimulationScope.everywhere());
     }
@@ -160,34 +165,72 @@ class ConductionModelTest {
     void quietSectionsAreSkipped() {
         PhysicalWorld world = vacuumWorld();
         world.fill(new GridPos(0, 0, 0), new GridPos(47, 15, 15), MaterialLibrary.GRANITE, 280.0);
-        assertEquals(0, ThermalGraph.build(world, SimulationScope.everywhere().sections(world, Domain.THERMAL))
-                .leafCount);
+        assertEquals(0, graph(world).leafCount);
         world.placeMaterial(new GridPos(40, 5, 5), MaterialLibrary.GRANITE, 300.0);
-        ThermalGraph g = ThermalGraph.build(world, SimulationScope.everywhere().sections(world, Domain.THERMAL));
-        assertEquals(2 * 4096, g.leafCount, "the edited section and its uniform neighbour at the same "
-                + "temperature are simulated; the far section stays quiet");
+        assertEquals(4096, graph(world).leafCount, "only the edited section is simulated: its neighbour "
+                + "touches it where it is still at 280 K");
+        world.placeMaterial(new GridPos(32, 5, 5), MaterialLibrary.GRANITE, 300.0);
+        assertEquals(2 * 4096, graph(world).leafCount, "a warm block on the shared face brings the neighbour in");
     }
 
     @Test
     void facesAreFoundOnceAcrossLevels() {
         PhysicalWorld world = vacuumWorld();
-        world.placeMaterial(A, MaterialLibrary.IRON, 300.0);
+        world.placeMaterial(A, MaterialLibrary.IRON, 310.0);
         world.placeMaterial(B, MaterialLibrary.IRON, 300.0);
         world.refine(new CellId(B, 2, 0, 0, 0));
-        ThermalGraph g = ThermalGraph.build(world, SimulationScope.everywhere().sections(world, Domain.THERMAL));
+        ThermalGraph g = graph(world);
         double areaAB = 0;
         int ia = -1;
         for (int i = 0; i < g.leafCount; i++) {
-            if (g.cells[i].equals(CellId.of(A))) {
+            if (g.cell(i).equals(CellId.of(A))) {
                 ia = i;
             }
         }
         for (int f = 0; f < g.faceCount; f++) {
-            if (g.faceA[f] == ia && g.cells[g.faceB[f]].block().equals(B)) {
+            if (g.faceA[f] == ia && g.cell(g.faceB[f]).block().equals(B)) {
                 areaAB += g.faceArea[f];
             }
         }
         assertEquals(1.0, areaAB, 1e-15, "A's east face is fully covered by B's west leaves");
+    }
+
+    @Test
+    void surfacesInGasLoseHeatByConvection() {
+        PhysicalWorld world = vacuumWorld();
+        world.placeMaterial(A, MaterialLibrary.GRANITE, 350.0);
+        world.placeMaterial(B, MaterialLibrary.AIR, 300.0);
+        double before = world.readBlock(A).enthalpy();
+        step(world, new ConductionModel(), 1.0);
+        double conductance = 1.0 / (1.0 / ConductionModel.CONVECTION_COEFFICIENT + 0.5 / 2.79);
+        assertEquals(-conductance * 50.0, world.readBlock(A).enthalpy() - before, 1e-9 * conductance * 50.0);
+        assertTrue(world.audit().balanced(), () -> world.audit().toString());
+    }
+
+    @Test
+    void warmGasRisesButDoesNotSink() {
+        GridPos above = A.offset(0, 1, 0);
+        double rising = heatGoingUp(330.0, 300.0, above);
+        double sinking = heatGoingUp(300.0, 330.0, above);
+        double sideways = heatGoingUp(330.0, 300.0, B);
+        double mixing = ConductionModel.BUOYANT_MIXING_COEFFICIENT * Math.sqrt(30.0);
+        assertEquals(mixing * 30.0, rising, 1e-9 * mixing * 30.0);
+        Material air = MaterialLibrary.AIR;
+        double still = 1.0 / (0.5 / air.conductivity(air.stateFor(air.specificEnthalpy(330.0)))
+                + 0.5 / air.conductivity(air.stateFor(air.specificEnthalpy(300.0))));
+        assertEquals(-still * 30.0, sinking, 1e-9 * still * 30.0);
+        assertEquals(still * 30.0, sideways, 1e-9 * still * 30.0);
+    }
+
+    /** Puts warm air at A and cooler air at a neighbour, and returns the heat A loses in one second. */
+    private static double heatGoingUp(double lowerK, double upperK, GridPos other) {
+        PhysicalWorld world = vacuumWorld();
+        world.placeMaterial(A, MaterialLibrary.AIR, lowerK);
+        world.placeMaterial(other, MaterialLibrary.AIR, upperK);
+        double before = world.readBlock(A).enthalpy();
+        step(world, new ConductionModel(), 1.0);
+        assertTrue(world.audit().balanced(), () -> world.audit().toString());
+        return before - world.readBlock(A).enthalpy();
     }
 
     @Test

@@ -1,0 +1,167 @@
+package io.github.osir933.anchor.core.physics.thermal;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import io.github.osir933.anchor.core.math.DeterministicRandom;
+import io.github.osir933.anchor.core.matter.MaterialLibrary;
+import io.github.osir933.anchor.core.model.Domain;
+import io.github.osir933.anchor.core.model.SimulationScope;
+import io.github.osir933.anchor.core.model.StepContext;
+import io.github.osir933.anchor.core.space.CellId;
+import io.github.osir933.anchor.core.space.GridPos;
+import io.github.osir933.anchor.core.space.SectionPos;
+import io.github.osir933.anchor.core.world.CellState;
+import io.github.osir933.anchor.core.world.MaterialRegistry;
+import io.github.osir933.anchor.core.world.PhysicalWorld;
+import io.github.osir933.anchor.core.world.Provenance;
+import io.github.osir933.anchor.core.world.WorldSettings;
+import java.util.List;
+import java.util.Map;
+import java.util.SortedSet;
+import org.junit.jupiter.api.Test;
+
+class ThermalActivityTest {
+
+    private static PhysicalWorld vacuumWorld() {
+        return new PhysicalWorld(WorldSettings.vacuum(7), MaterialRegistry.withLibrary());
+    }
+
+    @Test
+    void anAwakeSectionBringsItsNeighboursIntoScope() {
+        PhysicalWorld world = vacuumWorld();
+        long centre = SectionPos.pack(0, 0, 0);
+        long east = SectionPos.pack(1, 0, 0);
+        long up = SectionPos.pack(0, 1, 0);
+        long diagonal = SectionPos.pack(1, 1, 0);
+        for (long key : List.of(centre, east, up, diagonal)) {
+            world.addSection(key);
+        }
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 3);
+        assertTrue(activity.scope(world).isEmpty());
+        activity.wake(centre);
+        assertTrue(activity.isAwake(centre));
+        assertEquals(List.of(centre, up, east), List.copyOf(activity.scope(world)));
+        activity.wake(SectionPos.pack(50, 0, 0));
+        assertEquals(3, activity.scope(world).size(), "sections that do not exist stay out of scope");
+    }
+
+    @Test
+    void calmSectionsFallAsleepAfterTheirCalmSteps() {
+        PhysicalWorld world = vacuumWorld();
+        long key = SectionPos.pack(0, 0, 0);
+        world.addSection(key);
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 3);
+        activity.wake(key);
+        activity.endStep(1.0);
+        activity.endStep(1.0);
+        assertTrue(activity.isAwake(key));
+        activity.endStep(1.0);
+        assertFalse(activity.isAwake(key));
+        assertTrue(activity.awakeSections().isEmpty());
+    }
+
+    @Test
+    void changeFasterThanTheCalmRateKeepsSectionsAwakeAndWakesOthers() {
+        PhysicalWorld world = vacuumWorld();
+        GridPos a = new GridPos(0, 0, 0);
+        GridPos b = new GridPos(40, 0, 0);
+        world.placeMaterial(a, MaterialLibrary.GRANITE, 300.0);
+        world.placeMaterial(b, MaterialLibrary.GRANITE, 300.0);
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 2);
+        world.addWriteListener(activity);
+        activity.wake(a.sectionKey());
+        double capacity = 2630.0 * 775.0;
+        heat(world, a, 0.5e-3 * capacity);
+        heat(world, b, 2e-3 * capacity);
+        activity.endStep(1.0);
+        assertTrue(activity.isAwake(a.sectionKey()), "0.5 mK in a second is calm, but one calm step is not enough");
+        assertTrue(activity.isAwake(b.sectionKey()), "2 mK in a second wakes a sleeping section");
+        heat(world, b, 2e-3 * capacity);
+        activity.endStep(1.0);
+        assertFalse(activity.isAwake(a.sectionKey()));
+        assertTrue(activity.isAwake(b.sectionKey()));
+    }
+
+    @Test
+    void latentHeatCountsAsChangeAndSoDoesNewMatter() {
+        PhysicalWorld world = vacuumWorld();
+        GridPos ice = new GridPos(0, 0, 0);
+        GridPos other = new GridPos(40, 0, 0);
+        world.placeMaterial(ice, MaterialLibrary.WATER, 273.15);
+        world.placeMaterial(other, MaterialLibrary.GRANITE, 300.0);
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 5);
+        world.addWriteListener(activity);
+        heat(world, ice, 1e4);
+        CellState s = world.readBlock(other);
+        world.writeLeaf(CellId.of(other), new CellState(s.material(), s.mass() * 0.5, s.enthalpy() * 0.5, 0,
+                Provenance.SIMULATED));
+        activity.endStep(1.0);
+        assertTrue(activity.isAwake(ice.sectionKey()), "melting at a constant temperature is still change");
+        assertTrue(activity.isAwake(other.sectionKey()), "matter appearing or vanishing always wakes");
+    }
+
+    @Test
+    void forgettingASectionPutsItToSleep() {
+        PhysicalWorld world = vacuumWorld();
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 5);
+        activity.wake(1L);
+        activity.wake(2L);
+        activity.forget(1L);
+        assertEquals(List.of(2L), List.copyOf(activity.awakeSections()));
+        activity.clear();
+        assertTrue(activity.awakeSections().isEmpty());
+    }
+
+    @Test
+    void aHotSpotWakesWhatItHeatsAndEverythingSleepsOnceItHasSpread() {
+        PhysicalWorld world = vacuumWorld();
+        world.fill(new GridPos(12, 0, 0), new GridPos(19, 0, 0), MaterialLibrary.COPPER, 300.0);
+        GridPos hot = new GridPos(15, 0, 0);
+        world.placeMaterial(hot, MaterialLibrary.COPPER, 400.0);
+        long west = hot.sectionKey();
+        long east = new GridPos(16, 0, 0).sectionKey();
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-4, 5);
+        world.addWriteListener(activity);
+        activity.wake(west);
+        ConductionModel conduction = new ConductionModel();
+        boolean eastWoke = false;
+        int steps = 0;
+        while (!activity.awakeSections().isEmpty() && steps < 5000) {
+            SortedSet<Long> scope = activity.scope(world);
+            conduction.step(new StepContext(world, 100.0, new DeterministicRandom(1),
+                    SimulationScope.of(Map.of(Domain.THERMAL, scope))));
+            activity.endStep(100.0);
+            eastWoke |= activity.isAwake(east);
+            assertTrue(world.audit().balanced(), () -> world.audit().toString());
+            steps++;
+        }
+        assertTrue(eastWoke, "heat crossing into the next section wakes it");
+        assertTrue(activity.awakeSections().isEmpty(), "everything falls asleep once the heat has spread");
+        double t = temperature(world, new GridPos(19, 0, 0));
+        assertTrue(t > 300.0 + 1.0, "the far end warmed up: " + t);
+    }
+
+    @Test
+    void nonsenseSettingsAreRejected() {
+        MaterialRegistry materials = MaterialRegistry.withLibrary();
+        assertThrows(IllegalArgumentException.class, () -> new ThermalActivity(materials, -1.0, 5));
+        assertThrows(IllegalArgumentException.class, () -> new ThermalActivity(materials, 1e-3, 0));
+        ThermalActivity activity = new ThermalActivity(materials, 1e-3, 5);
+        assertThrows(IllegalArgumentException.class, () -> activity.endStep(0.0));
+    }
+
+    /** Adds heat to a block the way a model would. */
+    private static void heat(PhysicalWorld world, GridPos pos, double joules) {
+        CellState s = world.readBlock(pos);
+        world.writeLeaf(CellId.of(pos), new CellState(s.material(), s.mass(), s.enthalpy() + joules, 0,
+                Provenance.SIMULATED));
+    }
+
+    private static double temperature(PhysicalWorld world, GridPos pos) {
+        CellState s = world.readBlock(pos);
+        return world.materials().get(s.material()).stateFor(s.specificEnthalpy()).temperatureK();
+    }
+}

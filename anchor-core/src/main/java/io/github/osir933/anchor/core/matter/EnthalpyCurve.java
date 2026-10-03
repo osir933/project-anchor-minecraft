@@ -160,7 +160,25 @@ public final class EnthalpyCurve {
      * @return the temperature in kelvin
      */
     public double temperatureFor(double specificEnthalpy) {
-        return stateFor(specificEnthalpy).temperatureK();
+        // The same search as stateFor, without building the state; the two must agree exactly.
+        int n = regions.size();
+        double[] first = enthalpyAt[0];
+        if (specificEnthalpy < first[0]) {
+            return breakpointsK[0][0] - (first[0] - specificEnthalpy) / specificHeatAt[0][0];
+        }
+        for (int i = 0; i < n; i++) {
+            double[] hs = enthalpyAt[i];
+            if (specificEnthalpy <= hs[hs.length - 1]) {
+                return solveInRegion(i, specificEnthalpy);
+            }
+            if (i < n - 1 && specificEnthalpy < enthalpyAt[i + 1][0]) {
+                return transitions.get(i).temperatureK();
+            }
+        }
+        int last = n - 1;
+        double[] hs = enthalpyAt[last];
+        double[] cps = specificHeatAt[last];
+        return breakpointsK[last][hs.length - 1] + (specificEnthalpy - hs[hs.length - 1]) / cps[cps.length - 1];
     }
 
     /**
@@ -179,6 +197,29 @@ public final class EnthalpyCurve {
      */
     public List<PhaseTransition> transitions() {
         return transitions;
+    }
+
+    /**
+     * Returns the specific enthalpy at the cold end of a phase region, after the latent heat of the
+     * transition into it.
+     *
+     * @param region the region index
+     * @return the specific enthalpy in J/kg
+     */
+    public double regionStartEnthalpy(int region) {
+        return enthalpyAt[region][0];
+    }
+
+    /**
+     * Returns the specific enthalpy at the hot end of a phase region, before the latent heat of the
+     * transition out of it.
+     *
+     * @param region the region index
+     * @return the specific enthalpy in J/kg
+     */
+    public double regionEndEnthalpy(int region) {
+        double[] hs = enthalpyAt[region];
+        return hs[hs.length - 1];
     }
 
     /**

@@ -57,6 +57,17 @@ public final class SpeciesCatalog {
     public static final Species HEMICELLULOSE = Species.of("anchor:hemicellulose", "hemicellulose", "C5H8O4");
     /** Lignin, written per coniferyl alcohol unit. */
     public static final Species LIGNIN = Species.of("anchor:lignin", "lignin", "C10H12O3");
+    /** Calcite, the mineral of limestone and marble. */
+    public static final Species CALCITE = Species.of("anchor:caco3", "calcite", "CaCO3");
+    /** Kaolinite, the most common clay mineral. */
+    public static final Species KAOLINITE = Species.of("anchor:kaolinite", "kaolinite", "Al2Si2O5(OH)4");
+    /** Carbon, as in diamond, graphite or the bulk of coal. */
+    public static final Species CARBON = Species.of("anchor:c", "carbon", "C");
+    /**
+     * Keratin, the protein of wool, as a representative formula unit whose element mass fractions (about
+     * 49 % C, 7 % H, 16 % N, 23 % O, 5 % S) match typical analyses.
+     */
+    public static final Species KERATIN = Species.of("anchor:keratin", "keratin", "C28H48N8O10S");
 
     private static final Map<String, Species> REGISTRY = new LinkedHashMap<>();
 
@@ -64,7 +75,8 @@ public final class SpeciesCatalog {
         for (Species s : new Species[] {
                 WATER, NITROGEN, OXYGEN, ARGON, CARBON_DIOXIDE, IRON, COPPER, ALUMINIUM, GOLD, SILICA,
                 ORTHOCLASE, ALBITE, ANORTHITE, DIOPSIDE, FORSTERITE, MAGNETITE, HEMATITE, SODIUM_OXIDE,
-                CALCIUM_OXIDE, MAGNESIUM_OXIDE, CELLULOSE, HEMICELLULOSE, LIGNIN}) {
+                CALCIUM_OXIDE, MAGNESIUM_OXIDE, CELLULOSE, HEMICELLULOSE, LIGNIN, CALCITE, KAOLINITE, CARBON,
+                KERATIN}) {
             register(s);
         }
     }

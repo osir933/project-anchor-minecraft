@@ -25,6 +25,7 @@ public final class Material {
     private final Composition composition;
     private final EnthalpyCurve thermal;
     private final String notes;
+    private final double minSpecificHeat;
 
     private Material(Builder builder) {
         this.id = builder.id;
@@ -32,6 +33,15 @@ public final class Material {
         this.composition = Objects.requireNonNull(builder.composition, "composition");
         this.thermal = new EnthalpyCurve(builder.regions, builder.transitions);
         this.notes = builder.notes;
+        double min = Double.POSITIVE_INFINITY;
+        for (PhaseRegion r : thermal.regions()) {
+            PropertyCurve c = r.specificHeat();
+            min = Math.min(min, Math.min(c.at(r.fromK()), c.at(r.toK())));
+            for (double t : c.breakpointsBetween(r.fromK(), r.toK())) {
+                min = Math.min(min, c.at(t));
+            }
+        }
+        this.minSpecificHeat = min;
     }
 
     /**
@@ -111,6 +121,17 @@ public final class Material {
     }
 
     /**
+     * Returns the temperature for a specific enthalpy, the same as {@code stateFor(h).temperatureK()} but
+     * without building the state.
+     *
+     * @param specificEnthalpy the specific enthalpy in J/kg
+     * @return the temperature in kelvin
+     */
+    public double temperatureFor(double specificEnthalpy) {
+        return thermal.temperatureFor(specificEnthalpy);
+    }
+
+    /**
      * Returns the thermal conductivity in a state. During a transition the two phases are combined in
      * proportion to their mass fractions, a first approximation that ignores their geometry.
      *
@@ -160,6 +181,16 @@ public final class Material {
     }
 
     /**
+     * Returns the lowest specific heat of any phase within the described temperatures, for quick estimates
+     * that should err towards larger temperature changes.
+     *
+     * @return the specific heat in J/(kg·K)
+     */
+    public double minSpecificHeat() {
+        return minSpecificHeat;
+    }
+
+    /**
      * Returns the mass fraction of matter in each state of aggregation.
      *
      * @param state the thermal state
@@ -174,6 +205,77 @@ public final class Material {
             fractions[next.phase().ordinal()] += state.transitionFraction();
         }
         return fractions;
+    }
+
+    /**
+     * Returns the phase that holds most of the mass in a state. Exactly halfway through a transition the
+     * phase being left still counts.
+     *
+     * @param state the thermal state
+     * @return the dominant phase
+     */
+    public Phase dominantPhase(ThermalState state) {
+        List<PhaseRegion> regions = thermal.regions();
+        if (state.inTransition() && state.transitionFraction() > 0.5) {
+            return regions.get(state.region() + 1).phase();
+        }
+        return regions.get(state.region()).phase();
+    }
+
+    /**
+     * Tells whether matter in a state may be shown as a phase: it is entirely in that phase, or somewhere in
+     * a transition into or out of it. A block of melting ice may be shown as ice or as water.
+     *
+     * @param state the thermal state
+     * @param phase the phase
+     * @return {@code true} if the state is compatible with the phase
+     */
+    public boolean canAppearAs(ThermalState state, Phase phase) {
+        List<PhaseRegion> regions = thermal.regions();
+        if (regions.get(state.region()).phase() == phase) {
+            return true;
+        }
+        return state.inTransition() && regions.get(state.region() + 1).phase() == phase;
+    }
+
+    /**
+     * Returns the specific enthalpy closest to a given one at which the matter is entirely in a phase. Below
+     * the coldest region and above the hottest the phase is taken to continue.
+     *
+     * @param phase the phase
+     * @param specificEnthalpy the specific enthalpy in J/kg
+     * @return the given value if it already lies in the phase, the nearest value that does, or
+     *     {@link Double#NaN} if the material has no region of that phase
+     */
+    public double nearestSpecificEnthalpyIn(Phase phase, double specificEnthalpy) {
+        List<PhaseRegion> regions = thermal.regions();
+        int last = regions.size() - 1;
+        double best = Double.NaN;
+        double bestDistance = Double.POSITIVE_INFINITY;
+        int i = 0;
+        while (i <= last) {
+            if (regions.get(i).phase() != phase) {
+                i++;
+                continue;
+            }
+            int j = i;
+            while (j < last && regions.get(j + 1).phase() == phase) {
+                j++;
+            }
+            double lo = i == 0 ? Double.NEGATIVE_INFINITY : thermal.regionStartEnthalpy(i);
+            double hi = j == last ? Double.POSITIVE_INFINITY : thermal.regionEndEnthalpy(j);
+            if (specificEnthalpy >= lo && specificEnthalpy <= hi) {
+                return specificEnthalpy;
+            }
+            double candidate = specificEnthalpy < lo ? lo : hi;
+            double distance = Math.abs(candidate - specificEnthalpy);
+            if (distance < bestDistance) {
+                best = candidate;
+                bestDistance = distance;
+            }
+            i = j + 1;
+        }
+        return best;
     }
 
     /**

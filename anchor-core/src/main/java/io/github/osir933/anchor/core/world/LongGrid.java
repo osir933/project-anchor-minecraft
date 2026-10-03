@@ -35,6 +35,15 @@ final class LongGrid {
         uniform = value;
     }
 
+    /** Copies all 4096 values into an array, starting at an offset. */
+    void copyTo(long[] out, int offset) {
+        if (dense == null) {
+            Arrays.fill(out, offset, offset + 4096, uniform);
+        } else {
+            System.arraycopy(dense, 0, out, offset, 4096);
+        }
+    }
+
     boolean isUniform() {
         return dense == null;
     }
