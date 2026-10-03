@@ -222,7 +222,8 @@ public final class AtmosphereModel implements PhysicsModel {
                 return enthalpy;
             }
             Material m = registry.get(material);
-            if (m.dominantPhase(m.stateFor(enthalpy / mass)) != Phase.GAS) {
+            Phase only = m.onlyPhase();
+            if (only != null ? only != Phase.GAS : m.dominantPhase(m.stateFor(enthalpy / mass)) != Phase.GAS) {
                 return enthalpy;
             }
             double target = targets[material];

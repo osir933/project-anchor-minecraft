@@ -55,10 +55,10 @@ class ThermalActivityTest {
         world.addSection(key);
         ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 3);
         activity.wake(key);
-        activity.endStep(1.0);
-        activity.endStep(1.0);
+        activity.endStep(world, 1.0);
+        activity.endStep(world, 1.0);
         assertTrue(activity.isAwake(key));
-        activity.endStep(1.0);
+        activity.endStep(world, 1.0);
         assertFalse(activity.isAwake(key));
         assertTrue(activity.awakeSections().isEmpty());
     }
@@ -76,11 +76,11 @@ class ThermalActivityTest {
         double capacity = 2630.0 * 775.0;
         heat(world, a, 0.5e-3 * capacity);
         heat(world, b, 2e-3 * capacity);
-        activity.endStep(1.0);
+        activity.endStep(world, 1.0);
         assertTrue(activity.isAwake(a.sectionKey()), "0.5 mK in a second is calm, but one calm step is not enough");
         assertTrue(activity.isAwake(b.sectionKey()), "2 mK in a second wakes a sleeping section");
         heat(world, b, 2e-3 * capacity);
-        activity.endStep(1.0);
+        activity.endStep(world, 1.0);
         assertFalse(activity.isAwake(a.sectionKey()));
         assertTrue(activity.isAwake(b.sectionKey()));
     }
@@ -98,9 +98,28 @@ class ThermalActivityTest {
         CellState s = world.readBlock(other);
         world.writeLeaf(CellId.of(other), new CellState(s.material(), s.mass() * 0.5, s.enthalpy() * 0.5, 0,
                 Provenance.SIMULATED));
-        activity.endStep(1.0);
+        activity.endStep(world, 1.0);
         assertTrue(activity.isAwake(ice.sectionKey()), "melting at a constant temperature is still change");
         assertTrue(activity.isAwake(other.sectionKey()), "matter appearing or vanishing always wakes");
+    }
+
+    @Test
+    void heatThatComesAndGoesInOneStepIsCalm() {
+        PhysicalWorld world = vacuumWorld();
+        GridPos flame = new GridPos(0, 0, 0);
+        world.placeMaterial(flame, MaterialLibrary.GRANITE, 300.0);
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 2);
+        world.addWriteListener(activity);
+        activity.wake(flame.sectionKey());
+        for (int i = 0; i < 2; i++) {
+            heat(world, flame, 1e6);
+            heat(world, flame, -1e6);
+            activity.endStep(world, 1.0);
+        }
+        assertFalse(activity.isAwake(flame.sectionKey()), "a flame balanced by its losses lets a section sleep");
+        heat(world, flame, 1e6);
+        activity.endStep(world, 1.0);
+        assertTrue(activity.isAwake(flame.sectionKey()), "net heat wakes it again");
     }
 
     @Test
@@ -133,7 +152,7 @@ class ThermalActivityTest {
             SortedSet<Long> scope = activity.scope(world);
             conduction.step(new StepContext(world, 100.0, new DeterministicRandom(1),
                     SimulationScope.of(Map.of(Domain.THERMAL, scope))));
-            activity.endStep(100.0);
+            activity.endStep(world, 100.0);
             eastWoke |= activity.isAwake(east);
             assertTrue(world.audit().balanced(), () -> world.audit().toString());
             steps++;
@@ -146,11 +165,12 @@ class ThermalActivityTest {
 
     @Test
     void nonsenseSettingsAreRejected() {
-        MaterialRegistry materials = MaterialRegistry.withLibrary();
+        PhysicalWorld world = vacuumWorld();
+        MaterialRegistry materials = world.materials();
         assertThrows(IllegalArgumentException.class, () -> new ThermalActivity(materials, -1.0, 5));
         assertThrows(IllegalArgumentException.class, () -> new ThermalActivity(materials, 1e-3, 0));
         ThermalActivity activity = new ThermalActivity(materials, 1e-3, 5);
-        assertThrows(IllegalArgumentException.class, () -> activity.endStep(0.0));
+        assertThrows(IllegalArgumentException.class, () -> activity.endStep(world, 0.0));
     }
 
     /** Adds heat to a block the way a model would. */

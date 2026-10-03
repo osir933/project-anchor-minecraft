@@ -5,6 +5,8 @@ import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
+import io.github.osir933.anchor.core.world.Section;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
@@ -23,10 +25,12 @@ import java.util.TreeSet;
  * that starts changing faster than the calm rate wakes in turn. Sleeping sections are paused, not cooled:
  * the small differences they still hold wait until something wakes them.
  *
- * <p>The rate of a cell is the heat it gained or lost divided by its heat capacity, so a block of ice that
- * absorbs latent heat at a constant 0 °C counts as changing. The capacity uses the material's lowest
- * specific heat, which errs towards staying awake. A model write that changes a cell's material or mass
- * always counts as fast.
+ * <p>The rate of a block is the net heat it gained or lost over the step divided by its heat capacity, so a
+ * block of ice that absorbs latent heat at a constant 0 °C counts as changing, while a block that a flame
+ * heats exactly as fast as its surroundings cool it counts as calm, and can sleep in that steady state. The
+ * capacity uses the material's lowest specific heat, which errs towards staying awake. A model write that
+ * changes a cell's material or mass always counts as fast. Leaves of refined blocks are judged by their
+ * largest single write instead of their net change.
  *
  * <p>Register the tracker with {@link PhysicalWorld#addWriteListener} so it sees what the models write, take
  * the scope for each step from {@link #scope}, and call {@link #endStep} after the models have run.
@@ -46,11 +50,31 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
     private final int calmSteps;
     /** Awake sections, with how many calm steps in a row each has had. */
     private final TreeMap<Long, Integer> awake = new TreeMap<>();
-    /** The largest temperature-equivalent change of any cell in each section since the last step ended. */
-    private final TreeMap<Long, Double> change = new TreeMap<>();
-    /** Models write section by section, so the current section's change is gathered here first. */
-    private long pendingKey;
-    private double pendingChange = -1;
+    /** What the models wrote in each section since the last step ended. */
+    private final TreeMap<Long, Written> written = new TreeMap<>();
+    /** Models write section by section, so the last section written is kept at hand. */
+    private long lastKey;
+    private Written last;
+
+    /** The writes to one section during a step. */
+    private static final class Written {
+        /** Each written block's enthalpy before its first write in the step. */
+        final double[] start = new double[SectionPos.BLOCKS];
+        /** Which blocks were written, one bit each. */
+        final long[] touched = new long[SectionPos.BLOCKS / 64];
+        boolean any;
+        /** The largest temperature-equivalent change of a single write, for leaves of refined blocks. */
+        double largestWrite;
+        /** Set when a write changed some cell's material or mass. */
+        boolean structural;
+
+        void reset() {
+            Arrays.fill(touched, 0L);
+            any = false;
+            largestWrite = 0;
+            structural = false;
+        }
+    }
 
     /**
      * Creates a tracker with no section awake.
@@ -86,16 +110,16 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
      * @param sectionKey the packed section position
      */
     public void forget(long sectionKey) {
-        flush();
         awake.remove(sectionKey);
-        change.remove(sectionKey);
+        written.remove(sectionKey);
+        last = null;
     }
 
     /** Puts every section to sleep. */
     public void clear() {
         awake.clear();
-        change.clear();
-        pendingChange = -1;
+        written.clear();
+        last = null;
     }
 
     /**
@@ -143,30 +167,57 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
 
     @Override
     public void leafWritten(long sectionKey, int block, CellState before, CellState after) {
-        double kelvin;
+        Written w = last;
+        if (w == null || lastKey != sectionKey) {
+            w = written.computeIfAbsent(sectionKey, k -> new Written());
+            last = w;
+            lastKey = sectionKey;
+        }
+        w.any = true;
         if (before.material() != after.material()
                 || Double.doubleToRawLongBits(before.mass()) != Double.doubleToRawLongBits(after.mass())) {
-            kelvin = Double.POSITIVE_INFINITY;
-        } else if (after.material() == MaterialRegistry.VACUUM || after.mass() == 0) {
+            w.structural = true;
             return;
-        } else {
-            double capacity = after.mass() * materials.get(after.material()).minSpecificHeat();
-            kelvin = Math.abs(after.enthalpy() - before.enthalpy()) / capacity;
         }
-        if (pendingChange >= 0 && pendingKey == sectionKey) {
-            pendingChange = Math.max(pendingChange, kelvin);
-        } else {
-            flush();
-            pendingKey = sectionKey;
-            pendingChange = kelvin;
+        if (after.material() == MaterialRegistry.VACUUM || after.mass() == 0) {
+            return;
         }
+        int word = block >>> 6;
+        long bit = 1L << (block & 63);
+        if ((w.touched[word] & bit) == 0) {
+            w.touched[word] |= bit;
+            w.start[block] = before.enthalpy();
+        }
+        double capacity = after.mass() * materials.get(after.material()).minSpecificHeat();
+        w.largestWrite = Math.max(w.largestWrite, Math.abs(after.enthalpy() - before.enthalpy()) / capacity);
     }
 
-    private void flush() {
-        if (pendingChange >= 0) {
-            change.merge(pendingKey, pendingChange, Math::max);
-            pendingChange = -1;
+    /** Returns the largest temperature-equivalent net change of any block a step wrote in a section. */
+    private double change(Section section, Written w) {
+        if (w.structural) {
+            return Double.POSITIVE_INFINITY;
         }
+        double largest = 0;
+        boolean refined = false;
+        for (int word = 0; word < w.touched.length; word++) {
+            long bits = w.touched[word];
+            while (bits != 0) {
+                int b = (word << 6) | Long.numberOfTrailingZeros(bits);
+                bits &= bits - 1;
+                if (section.isRefined(b)) {
+                    refined = true;
+                    continue;
+                }
+                int material = section.material(b);
+                double mass = section.mass(b);
+                if (material == MaterialRegistry.VACUUM || mass == 0) {
+                    continue;
+                }
+                double capacity = mass * materials.get(material).minSpecificHeat();
+                largest = Math.max(largest, Math.abs(section.enthalpy(b) - w.start[b]) / capacity);
+            }
+        }
+        return refined ? Math.max(largest, w.largestWrite) : largest;
     }
 
     /**
@@ -174,14 +225,27 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
      * sections that have been calm for long enough fall asleep. Call it only after a step in which the
      * thermal models ran.
      *
+     * @param world the world the models wrote to
      * @param dtSeconds the simulated time the step covered, in seconds
      */
-    public void endStep(double dtSeconds) {
+    public void endStep(PhysicalWorld world, double dtSeconds) {
         if (!(dtSeconds > 0) || !Double.isFinite(dtSeconds)) {
             throw new IllegalArgumentException("time step must be positive: " + dtSeconds);
         }
-        flush();
         double limit = calmRate * dtSeconds;
+        TreeMap<Long, Double> change = new TreeMap<>();
+        for (Iterator<Map.Entry<Long, Written>> it = written.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<Long, Written> e = it.next();
+            Written w = e.getValue();
+            Section section = world.section(e.getKey());
+            if (!w.any || section == null) {
+                it.remove();
+                continue;
+            }
+            change.put(e.getKey(), change(section, w));
+            w.reset();
+        }
+        last = null;
         for (Iterator<Map.Entry<Long, Integer>> it = awake.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<Long, Integer> e = it.next();
             Double changed = change.get(e.getKey());
@@ -198,6 +262,5 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
                 awake.putIfAbsent(e.getKey(), 0);
             }
         }
-        change.clear();
     }
 }

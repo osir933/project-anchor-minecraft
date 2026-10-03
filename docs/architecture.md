@@ -70,9 +70,10 @@ report where they are being used outside their assumptions; those reports go to 
 ## Heat
 
 Heat moves by **conduction** (`physics.thermal.ConductionModel`): Fourier's law between touching cells,
-solved with explicit finite volumes in substeps short enough to be stable. Every face moves the same heat out
-of one cell and into the other, so energy is conserved to rounding, and phase changes happen by themselves as
-enthalpy crosses a material's latent heat. Until the fluid model exists, two correlations stand in for moving
+solved with explicit finite volumes. Every face moves the same heat out of one cell and into the other, so
+energy is conserved to rounding, and phase changes happen by themselves as enthalpy crosses a material's
+latent heat. Each cell takes substeps short enough to be stable for it alone, the step halved as often as it
+needs: a hot plume above a flame may take hundreds of substeps while the rock around it takes one. Until the fluid model exists, two correlations stand in for moving
 air: surfaces in gas exchange heat with a natural-convection coefficient of 10 W/(m²·K), and warm gas below
 cooler gas mixes with a coefficient that grows with the square root of the temperature difference, so heat
 rises.
@@ -90,7 +91,24 @@ one temperature is skipped (`physics.thermal.Isotherms` caches each section's te
 overall and per face). On top of that, `physics.thermal.ThermalActivity` keeps only sections where something
 changes awake: an edit or a new source wakes a section, each step simulates the awake sections and their
 neighbours, a neighbour that starts changing faster than the calm rate wakes in turn, and a section that has
-changed slower than one kelvin per hour for a while falls asleep. Sleeping sections are paused, not cooled.
+changed slower than one kelvin per hour for a while falls asleep. Change is measured net over a step, so a
+room that a torch heats exactly as fast as it loses heat counts as calm and sleeps in that steady state.
+Sleeping sections are paused, not cooled.
+
+## Hosting
+
+The engine runs inside a game through `host.HostedWorld`, which knows nothing about Minecraft. The game names
+its blocks by integer ids of its own and describes each id once as a `host.BlockAppearance`: a material, the
+fraction of the block it fills, the phase the game shows, a temperature of its own (lava's) and a heat source
+for processes the engine does not model yet, such as burning. It also names the block to show instead once
+the shown phase has gone completely, so ice turns into water only when it has melted through.
+
+The game imports the sections it wants simulated, each with the temperature of its surroundings, and
+reports every block that changes. A change that leaves the same matter in a block, such as water the engine
+froze now shown as ice, keeps the block's physical state; anything else replaces it, declared like any edit.
+Each step the hosted world runs heat where something is happening and returns the blocks the game should
+now show differently. `host.ImportPlanner` picks the sections around the players, nearest first and a few
+per tick, and lets them go a margin further out.
 
 ## Requests
 
