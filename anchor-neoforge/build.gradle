@@ -16,6 +16,12 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
 
+// Name each use of a deprecated game API in the build output, as those tend to go in the next Minecraft version.
+// They stay warnings: the game's API changes too often for this module to build with -Werror.
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs.add('-Xlint:deprecation')
+}
+
 repositories {
     mavenCentral()
 }
