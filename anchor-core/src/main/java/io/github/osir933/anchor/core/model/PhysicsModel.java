@@ -49,13 +49,12 @@ public interface PhysicsModel {
     /**
      * Estimates the work a step would take, in abstract units. The scheduler budgets with these estimates,
      * never with measured time, so a slow computer runs the same simulation more slowly rather than a
-     * different one. The estimate must depend only on the world and the time step.
+     * different one. The estimate must depend only on the context.
      *
-     * @param world the world
-     * @param dt the time step in seconds
+     * @param context the world, time step and scope the step would use
      * @return the estimated cost, at least zero
      */
-    long estimateCost(PhysicalWorld world, double dt);
+    long estimateCost(StepContext context);
 
     /**
      * Advances the world.

@@ -1,8 +1,10 @@
 package io.github.osir933.anchor.core.request;
 
 import io.github.osir933.anchor.core.model.Domain;
+import io.github.osir933.anchor.core.model.SimulationScope;
 import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.GridPos;
+import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.CoarseningRule;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
 import io.github.osir933.anchor.core.world.RefinedBlock;
@@ -11,11 +13,14 @@ import io.github.osir933.anchor.core.world.TransitionReport;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * Decides where the world is refined. It refines cells that active requests ask for and tries to coarsen
@@ -102,6 +107,33 @@ public final class RepresentationManager {
             domains.addAll(r.what());
         }
         return Collections.unmodifiableSet(domains);
+    }
+
+    /**
+     * Returns where each domain should be simulated this tick: every existing section that an active
+     * request for that domain overlaps.
+     *
+     * @param world the world
+     * @return the scope
+     */
+    public SimulationScope scope(PhysicalWorld world) {
+        Map<Domain, TreeSet<Long>> sections = new EnumMap<>(Domain.class);
+        for (SimulationRequest r : active(world.tick())) {
+            Region.Box box = r.where().bounds();
+            for (int sx = box.min().x() >> 4; sx <= box.max().x() >> 4; sx++) {
+                for (int sy = box.min().y() >> 4; sy <= box.max().y() >> 4; sy++) {
+                    for (int sz = box.min().z() >> 4; sz <= box.max().z() >> 4; sz++) {
+                        long key = SectionPos.pack(sx, sy, sz);
+                        if (world.section(key) != null) {
+                            for (Domain d : r.what()) {
+                                sections.computeIfAbsent(d, k -> new TreeSet<>()).add(key);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return SimulationScope.of(sections);
     }
 
     /**

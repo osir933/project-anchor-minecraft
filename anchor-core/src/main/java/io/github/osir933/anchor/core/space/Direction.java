@@ -1,5 +1,7 @@
 package io.github.osir933.anchor.core.space;
 
+import java.util.List;
+
 /** The six axis-aligned face directions of a cell. */
 public enum Direction {
     /** Negative x (west). */
@@ -14,6 +16,11 @@ public enum Direction {
     NORTH(0, 0, -1),
     /** Positive z (south). */
     SOUTH(0, 0, 1);
+
+    private static final Direction[] VALUES = values();
+
+    /** The three directions that point along a positive axis, in axis order: east, up, south. */
+    public static final List<Direction> POSITIVE = List.of(EAST, UP, SOUTH);
 
     private final int dx;
     private final int dy;
@@ -58,7 +65,16 @@ public enum Direction {
      * @return the direction pointing the other way
      */
     public Direction opposite() {
-        return values()[ordinal() ^ 1];
+        return VALUES[ordinal() ^ 1];
+    }
+
+    /**
+     * Returns the axis this direction runs along.
+     *
+     * @return 0 for x, 1 for y, 2 for z
+     */
+    public int axis() {
+        return ordinal() >> 1;
     }
 
     /**

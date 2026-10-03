@@ -112,6 +112,59 @@ public record CellId(GridPos block, int level, int subX, int subY, int subZ) imp
     }
 
     /**
+     * Returns the cell of the same size next to this one, which may lie in the neighbouring block.
+     *
+     * @param direction which face to cross
+     * @return the adjacent cell
+     */
+    public CellId neighbor(Direction direction) {
+        int size = 1 << level;
+        int x = subX + direction.dx();
+        int y = subY + direction.dy();
+        int z = subZ + direction.dz();
+        int bx = block.x();
+        int by = block.y();
+        int bz = block.z();
+        if (x < 0) {
+            x += size;
+            bx--;
+        } else if (x >= size) {
+            x -= size;
+            bx++;
+        }
+        if (y < 0) {
+            y += size;
+            by--;
+        } else if (y >= size) {
+            y -= size;
+            by++;
+        }
+        if (z < 0) {
+            z += size;
+            bz--;
+        } else if (z >= size) {
+            z -= size;
+            bz++;
+        }
+        return new CellId(new GridPos(bx, by, bz), level, x, y, z);
+    }
+
+    /**
+     * Returns the cell's index along an axis at its own level.
+     *
+     * @param axis 0 for x, 1 for y, 2 for z
+     * @return the sub-coordinate
+     */
+    public int sub(int axis) {
+        return switch (axis) {
+            case 0 -> subX;
+            case 1 -> subY;
+            case 2 -> subZ;
+            default -> throw new IllegalArgumentException("axis must be 0, 1 or 2: " + axis);
+        };
+    }
+
+    /**
      * Returns which child of its parent this cell is.
      *
      * @return the octant in [0, 8)

@@ -58,7 +58,7 @@ class SchedulerTest {
         }
 
         @Override
-        public long estimateCost(PhysicalWorld world, double dt) {
+        public long estimateCost(StepContext context) {
             return cost;
         }
 
