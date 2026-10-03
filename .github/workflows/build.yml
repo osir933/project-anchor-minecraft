@@ -28,7 +28,7 @@ jobs:
       # v5 is the last MIT-licensed major; v6 moved caching under Gradle's proprietary terms.
       - uses: gradle/actions/setup-gradle@v5
 
-      - name: Release script tests
+      - name: Script tests
         run: python3 -m unittest discover -s .github/scripts
 
       - name: Build and test
@@ -41,6 +41,11 @@ jobs:
           set -o pipefail
           ./gradlew :anchor-neoforge:runGameTestServer --stacktrace --warning-mode all 2>&1 | tee "$RUNNER_TEMP/gametest.log"
           grep -E 'All [1-9][0-9]* required tests passed' "$RUNNER_TEMP/gametest.log"
+
+      # The game tests run in the development setup, which never uses the jar. This installs a NeoForge server
+      # the way players do, starts it with the jar in its mods folder and checks that Anchor works there.
+      - name: Smoke test the jar
+        run: python3 .github/scripts/smoke_test.py --dir "$RUNNER_TEMP/server"
 
       - name: Upload mod jar
         uses: actions/upload-artifact@v6

@@ -57,6 +57,9 @@ jobs:
           test -f "$jar"
           echo "path=$jar" >> "$GITHUB_OUTPUT"
 
+      - name: Smoke test the jar
+        run: python3 .github/scripts/smoke_test.py --dir "$RUNNER_TEMP/server" "${{ steps.jar.outputs.path }}"
+
       - name: GitHub release
         if: steps.version.outputs.publish == 'true'
         env:
