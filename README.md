@@ -20,6 +20,10 @@ rises through the air and drains away into the weather, and blocks change when t
 - Torches, lanterns, candles, campfires, fire, lit furnaces, magma and lava give off heat. Burning is not
   simulated yet, so each holds its block at a flame's temperature with a power typical of it. Lava and magma
   never cool, as in Minecraft, so they glow on the walls of their caves for as long as they are there.
+- Water and lava stir themselves. Warmed from below or cooled from above they turn over, and beside something
+  hotter or colder they flow along it, so they pass on far more heat than they could conduct. Water is densest
+  at 4 °C: cooled from above, it turns over until it reaches 4 °C, then keeps its coldest water on top, which
+  is why lakes freeze from the surface down.
 - Hot surfaces radiate by the Stefan–Boltzmann law, and cold ones take in the radiation of what they face.
   Glass and water stop it, as they do for heat radiation in reality, so a thermal camera cannot see through
   them either.
@@ -29,16 +33,15 @@ rises through the air and drains away into the weather, and blocks change when t
 Heat is simulated in the land around each player: the player's 16-block section and two more in every
 direction. Anchor's clock follows the day: a 20-minute Minecraft day is 24 simulated hours, so each game tick
 is 3.6 simulated seconds. Heat moves at its real pace on that clock and a block is a full cubic metre, so big
-changes take a while: two layers of snow beside a fire melt in about four and a half minutes of play, and a
-block of ice beside lava in about twelve.
+changes take a while: two layers of snow beside a fire melt in about four minutes of play, and a block of ice
+beside lava in about six.
 
 Where temperatures change steeply across a block, as in stone beside lava, Anchor refines the block into eight
 smaller cells, and the cells nearest the heat into eight again, down to 25 cm. Heat then soaks in from the face,
 as it does in reality, instead of spreading through the whole cubic metre at once. With whole blocks the ice
-would take nineteen minutes, and the snow would still be melting after an hour. Once the cells even out they
-merge back into one block, and a block is always saved as one. Most of the ice's wait is now the lava's: lava
-passes heat on as if through half a metre of still molten rock, where real lava churns and keeps its surface
-hot. Until liquids move, `/anchor heat set` changes a temperature directly when an experiment cannot wait.
+would take sixteen minutes, and the snow would still be melting after an hour. Once the cells even out they
+merge back into one block, and a block is always saved as one. When an experiment cannot wait,
+`/anchor heat set` changes a temperature directly.
 
 Temperatures are saved with the world. Anchor stores, with each chunk, the blocks heat has changed, exactly
 as the simulation has them; blocks heat never touched need nothing, because they come back from the block

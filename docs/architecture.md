@@ -78,6 +78,18 @@ air: surfaces in gas exchange heat with a natural-convection coefficient of 10 W
 cooler gas mixes with a coefficient that grows with the square root of the temperature difference, so heat
 rises.
 
+Liquids carry heat by moving too, and their measured viscosity and thermal expansion say how fast, so the same
+model estimates it from each liquid's own properties. A liquid against other matter uses the natural-convection
+correlations for a plate in a large body of liquid: Churchill and Chu's for a wall, and Incropera's for a floor
+or ceiling, with buoyancy from the heaviest or lightest the liquid gets between its own temperature and the
+surface's. Liquid that a floor makes heavier or a ceiling makes lighter lies still and only conducts. Two cells
+of one liquid exchange heat at 0.135·ρ·c·v, with v the speed buoyancy drives between them as far as viscosity
+allows: lighter liquid below denser liquid turns over, liquid side by side exchanges at half that speed, and
+lighter liquid above denser liquid stays layered. Water is densest at 4 °C, so a pond cooled from above turns
+over until it reaches 4 °C, then keeps its coldest water on top and freezes from the surface down. Lava, a
+basaltic melt about a hundred thousand times as viscous as water, still churns enough to keep its face hot:
+beside ice it passes on about ten times the heat it could conduct through half a block.
+
 Surfaces also exchange heat by **radiation** (`physics.thermal.RadiationModel`) across gas and vacuum: grey,
 diffuse surfaces by the Stefan–Boltzmann law, without reflections. Gas lets radiation through and anything
 else stops it, glass and water included, as they do at these wavelengths. Only blocks more than 10 K from
@@ -98,12 +110,13 @@ resistance to it, half its edge over its conductivity. A cell whose drop exceeds
 level a step, down to level 2 (25 cm cells), the largest drops first, at most 256 a step and 16 384 cells in
 all. Radiation only counts where it brings more than 5 kW/m², five times strong sunlight, so sunlight and
 distant glow never refine anything. Gas never splits, because convection rather than its cell size sets how it
-passes heat on, and neither do blocks a heat source holds. The cells of a refined block merge back eight at a
+passes heat on, and neither do blocks a heat source holds; liquid reports no drop where it moves, for the same
+reason. The cells of a refined block merge back eight at a
 time once every drop in the block is below 12.5 K and the eight agree within 5 K, in the same phase and at the
 same stage of any phase change, so a melting front keeps its cells; each step looks at a few refined blocks in
 turn. A merged cell's drops are about twice those of its children, well below the split drop, so cells do not
-split and merge in turn. Measured at Anchor's default clock, a block of ice beside lava melts in 19 game
-minutes with whole blocks, 14 with 50 cm cells, 12 with 25 cm cells and 11 with 12.5 cm cells, which cost three
+split and merge in turn. Measured at Anchor's default clock, a block of ice beside lava melts in 16 game
+minutes with whole blocks, 7 with 50 cm cells, 6 with 25 cm cells and 5.5 with 12.5 cm cells, which cost three
 times as much as 25 cm ones.
 
 Refined blocks radiate from their outer cells. Each face of a block casts its rays once, and the cells on that
@@ -238,8 +251,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 ## Roadmap
 
 Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces
-radiate, temperatures are saved with the world, and blocks refine where temperatures change steeply. Next for
-heat: sunlight and the night sky, and convection in liquids, which will let lava pass its heat on as fast as
-real lava does. After that come structure and fracture; rigid bodies, contact and emergent
+radiate, temperatures are saved with the world, blocks refine where temperatures change steeply, and liquids
+carry heat by moving. Next for heat: sunlight and the night sky. After that come structure and fracture; rigid
+bodies, contact and emergent
 tools; materials processing and microstructure; fluids and chemistry; electricity and control; causal
 targeting and molecular dynamics; and finally life and society, on the way to 1.0.

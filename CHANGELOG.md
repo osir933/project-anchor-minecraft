@@ -16,12 +16,16 @@ Java 25, on both the client and the server.
 - **Heat radiates.** Hot surfaces send heat across air and vacuum onto whatever they face, by the
   Stefan–Boltzmann law, and cold ones take in their surroundings' radiation. Glass and water stop it. Lava
   and magma are strong enough sources to stay hot while they radiate.
+- **Liquids stir themselves.** Water and lava carry heat by moving, from their measured viscosity and thermal
+  expansion: warmed from below or cooled from above they turn over, and beside something hotter or colder they
+  flow along it. Water is densest at 4 °C, so cooled from above it keeps its coldest water on top and freezes
+  from the surface down.
 - **Matter melts, freezes and boils.** Ice melts into water, water freezes or boils away and snow melts when
   its matter reaches the melting or boiling point and has taken in or given up the latent heat.
 - **Heat sources.** Torches, lanterns, candles, campfires, fire, lit furnaces, magma and lava give off heat.
 - **Blocks refine where heat is steep.** Where temperatures change steeply across a block, as in stone beside
   lava, the block splits into smaller cells, down to 25 cm, so heat soaks in from the face first, and the cells
-  merge back once they even out. Ice beside lava melts in twelve minutes instead of nineteen. The thermometer
+  merge back once they even out. Ice beside lava melts in six minutes instead of sixteen. The thermometer
   and the thermal camera read the cell they touch, and `/anchor heat inspect` shows the range of a refined
   block's cells.
 - **Saved with the world.** The blocks heat has changed are saved with their chunk and come back exactly.
@@ -36,9 +40,8 @@ Known limits of this alpha:
 
 - Vanilla's own rules still run: ice melts near bright light and water freezes in cold biomes as usual.
 - Big changes take time: Anchor's clock follows the day (a day is 24 simulated hours) and a block is a full
-  cubic metre. Two layers of snow beside a fire melt in about four and a half minutes of play, a block of ice
-  beside lava in about twelve.
-- Burning and flowing liquids are not simulated yet, and the sun does not warm anything. Flames and torches
-  heat the air around them but do not radiate, and lava passes its heat on as if it were still, so it melts
-  ice more slowly than real lava would.
+  cubic metre. Two layers of snow beside a fire melt in about four minutes of play, a block of ice beside lava
+  in about six.
+- Burning is not simulated yet, liquids stir in place but do not spread from block to block by Anchor's
+  physics, and the sun does not warm anything. Flames and torches heat the air around them but do not radiate.
 - Land nobody is near is paused, not cooled: it carries on from where it was when a player returns.

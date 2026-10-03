@@ -84,6 +84,44 @@ public final class PropertyCurve {
     }
 
     /**
+     * Returns the largest value the property takes between two temperatures, both included.
+     *
+     * @param fromK one limit in kelvin
+     * @param toK the other limit in kelvin, above or below the first
+     * @return the largest value
+     */
+    public double max(double fromK, double toK) {
+        double lo = Math.min(fromK, toK);
+        double hi = Math.max(fromK, toK);
+        double largest = Math.max(at(lo), at(hi));
+        for (int i = 0; i < temperaturesK.length; i++) {
+            if (temperaturesK[i] > lo && temperaturesK[i] < hi) {
+                largest = Math.max(largest, values[i]);
+            }
+        }
+        return largest;
+    }
+
+    /**
+     * Returns the smallest value the property takes between two temperatures, both included.
+     *
+     * @param fromK one limit in kelvin
+     * @param toK the other limit in kelvin, above or below the first
+     * @return the smallest value
+     */
+    public double min(double fromK, double toK) {
+        double lo = Math.min(fromK, toK);
+        double hi = Math.max(fromK, toK);
+        double smallest = Math.min(at(lo), at(hi));
+        for (int i = 0; i < temperaturesK.length; i++) {
+            if (temperaturesK[i] > lo && temperaturesK[i] < hi) {
+                smallest = Math.min(smallest, values[i]);
+            }
+        }
+        return smallest;
+    }
+
+    /**
      * Integrates the property over temperature exactly, for example specific heat to specific enthalpy.
      *
      * @param fromK the lower limit in kelvin

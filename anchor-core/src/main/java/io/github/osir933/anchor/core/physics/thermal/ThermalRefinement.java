@@ -33,7 +33,7 @@ import java.util.function.Predicate;
  * cell whose drop exceeds {@link Settings#refineDropK} is split into eight, one level a step, until the drops
  * are small or the cells reach {@link Settings#maxLevel}. Gas is never split, because convection rather than
  * its cell size sets how it passes heat on, and neither are blocks whose temperature is held from outside,
- * such as heat sources.
+ * such as heat sources. Liquid reports no drop where it moves, for the same reason as gas.
  *
  * <p>The cells of a refined block merge back, eight at a time, once every drop reported in the block is below
  * a quarter of the split drop and the eight agree to within {@link Settings#mergeSpreadK} in temperature, in
@@ -66,7 +66,7 @@ public final class ThermalRefinement {
 
         /**
          * Split at 50 K, merge within 5 K, down to 25 cm cells, at most 16 384 cells. An ice block beside lava
-         * then melts in 12 game minutes, against 19 with whole blocks; 12.5 cm cells take it to 11 for three
+         * then melts in 6 game minutes, against 16 with whole blocks; 12.5 cm cells take it to 5.5 for three
          * times the cost.
          */
         public static final Settings DEFAULT = new Settings(50.0, 5.0, 2, 1 << 14, 256, 64);

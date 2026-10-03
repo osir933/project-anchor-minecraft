@@ -170,6 +170,21 @@ public final class Material {
     }
 
     /**
+     * Returns the dynamic viscosity of a liquid.
+     *
+     * @param state the thermal state
+     * @return the viscosity in Pa·s, or {@link Double#NaN} if the state is not wholly liquid or the liquid has
+     *     no viscosity data
+     */
+    public double viscosity(ThermalState state) {
+        PhaseRegion region = thermal.regions().get(state.region());
+        if (state.inTransition() || region.viscosity() == null) {
+            return Double.NaN;
+        }
+        return region.viscosity().at(state.temperatureK());
+    }
+
+    /**
      * Returns the surface emissivity in a state.
      *
      * @param state the thermal state
@@ -343,6 +358,9 @@ public final class Material {
         for (PhaseRegion r : thermal.regions()) {
             for (PropertyCurve c : List.of(r.specificHeat(), r.conductivity(), r.density(), r.emissivity())) {
                 sources.putIfAbsent(c.source().key(), c.source());
+            }
+            if (r.viscosity() != null) {
+                sources.putIfAbsent(r.viscosity().source().key(), r.viscosity().source());
             }
         }
         for (PhaseTransition t : thermal.transitions()) {
