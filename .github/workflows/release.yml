@@ -1,0 +1,75 @@
+name: Release
+
+# Publishes a version. Pushing the tag v<mod_version> (for example v0.1.0-alpha.1) builds the mod, runs every
+# test, creates a GitHub release with the jar and the version's notes from CHANGELOG.md, and uploads the jar to
+# CurseForge when curseforge_project_id is set in gradle.properties and the repository has a CURSEFORGE_TOKEN
+# secret. Run it by hand to check the CurseForge settings without publishing anything.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 25
+
+      # v5 is the last MIT-licensed major; v6 moved caching under Gradle's proprietary terms.
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Check the version
+        id: version
+        run: python3 .github/scripts/release.py check "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME"
+
+      - name: Release notes
+        run: python3 .github/scripts/release.py notes "${{ steps.version.outputs.version }}" > "$RUNNER_TEMP/notes.md"
+
+      - name: Build and test
+        run: ./gradlew build --stacktrace --warning-mode all
+
+      - name: Game tests
+        run: |
+          set -o pipefail
+          ./gradlew :anchor-neoforge:runGameTestServer --stacktrace --warning-mode all 2>&1 | tee "$RUNNER_TEMP/gametest.log"
+          grep -E 'All [1-9][0-9]* required tests passed' "$RUNNER_TEMP/gametest.log"
+
+      - name: Find the jar
+        id: jar
+        run: |
+          jar="anchor-neoforge/build/libs/anchor-${{ steps.version.outputs.version }}.jar"
+          test -f "$jar"
+          echo "path=$jar" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ steps.version.outputs.release_type != 'release' && '--prerelease' || '' }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ steps.jar.outputs.path }}" $PRERELEASE \
+            --title "Anchor ${{ steps.version.outputs.version }}" --notes-file "$RUNNER_TEMP/notes.md"
+
+      - name: CurseForge
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          UPLOAD: ${{ steps.version.outputs.publish == 'true' && '--upload' || '' }}
+        run: |
+          python3 .github/scripts/release.py curseforge $UPLOAD --notes "$RUNNER_TEMP/notes.md" \
+            "${{ steps.jar.outputs.path }}"

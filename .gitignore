@@ -24,3 +24,6 @@ bin/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python bytecode from the release scripts
+__pycache__/
