@@ -10,6 +10,7 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 /** Connects each server level's {@link LevelHeat} to the game's events. */
@@ -29,7 +30,9 @@ final class HeatEvents {
         bus.addListener(HeatEvents::onLevelTick);
         bus.addListener(HeatEvents::onBlockChanged);
         bus.addListener(HeatEvents::onChunkUnload);
+        bus.addListener(HeatEvents::onLevelSave);
         bus.addListener(HeatEvents::onLevelUnload);
+        bus.addListener(HeatEvents::onServerStopping);
         bus.addListener(HeatEvents::onServerStopped);
         bus.addListener(HeatEvents::onTagsUpdated);
     }
@@ -68,11 +71,21 @@ final class HeatEvents {
         }
     }
 
+    /** A chunk is unloaded before it is saved, so its sections go into it in time for that save. */
     private static void onChunkUnload(ChunkEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel level) {
             LevelHeat heat = LEVELS.get(level);
             if (heat != null) {
-                heat.chunkUnloaded(event.getChunk().getPos());
+                heat.chunkUnloaded(event.getChunk());
+            }
+        }
+    }
+
+    private static void onLevelSave(LevelEvent.Save event) {
+        if (event.getLevel() instanceof ServerLevel level) {
+            LevelHeat heat = LEVELS.get(level);
+            if (heat != null) {
+                heat.save();
             }
         }
     }
@@ -80,6 +93,13 @@ final class HeatEvents {
     private static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel level) {
             LEVELS.remove(level);
+        }
+    }
+
+    /** The server stops before it saves for the last time, so everything simulated goes into its chunks first. */
+    private static void onServerStopping(ServerStoppingEvent event) {
+        for (LevelHeat heat : LEVELS.values()) {
+            heat.save();
         }
     }
 

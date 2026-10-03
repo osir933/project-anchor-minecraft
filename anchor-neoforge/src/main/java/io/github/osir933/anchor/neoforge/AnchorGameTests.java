@@ -1,6 +1,9 @@
 package io.github.osir933.anchor.neoforge;
 
 import io.github.osir933.anchor.core.host.HostedWorld;
+import io.github.osir933.anchor.core.host.SectionSnapshot;
+import io.github.osir933.anchor.core.world.Provenance;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
@@ -10,6 +13,10 @@ import net.minecraft.gametest.framework.FunctionGameTestInstance;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.gametest.framework.TestData;
 import net.minecraft.gametest.framework.TestEnvironmentDefinition;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.block.Block;
@@ -38,7 +45,10 @@ final class AnchorGameTests {
             new Case("water_boils_away", 400, AnchorGameTests::waterBoilsAway),
             new Case("block_placed_this_tick_takes_the_temperature", 400,
                     AnchorGameTests::blockPlacedThisTickTakesTheTemperature),
-            new Case("torch_warms_the_air", 800, AnchorGameTests::torchWarmsTheAir));
+            new Case("torch_warms_the_air", 800, AnchorGameTests::torchWarmsTheAir),
+            new Case("heat_comes_back_when_a_chunk_loads_again", 400,
+                    AnchorGameTests::heatComesBackWhenAChunkLoadsAgain),
+            new Case("saved_heat_keeps_its_numbers", 20, AnchorGameTests::savedHeatKeepsItsNumbers));
 
     private AnchorGameTests() {
     }
@@ -134,6 +144,84 @@ final class AnchorGameTests {
             helper.assertTrue(reading.getString().contains("°C"), "the thermometer says: " + reading.getString());
             heat.release(above);
         });
+    }
+
+    /**
+     * Heat saved with a chunk comes back exactly: a section written into its chunk, let go and brought in again,
+     * as unloading and loading the chunk does, holds the same matter and heat as before.
+     */
+    private static void heatComesBackWhenAChunkLoadsAgain(GameTestHelper helper) {
+        BlockPos relative = new BlockPos(2, 1, 2);
+        helper.setBlock(relative, Blocks.IRON_BLOCK);
+        BlockPos pos = helper.absolutePos(relative);
+        int[] stage = {0};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (stage[0] == 0) {
+                heat.keepSimulated(pos);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (!heat.setTemperature(pos, 600.0)) {
+                    throw helper.assertionException(Component.literal("waiting for the iron to be simulated"));
+                }
+                stage[0] = 2;
+            }
+            HostedWorld.Inspection air = heat.inspect(pos.above()).orElseThrow(
+                    () -> helper.assertionException(Component.literal("waiting for the air to be simulated")));
+            if (!(air.temperatureK() > air.environmentK() + 1.0)) {
+                throw helper.assertionException(Component.literal("waiting for the iron to warm the air"));
+            }
+            List<BlockPos> around = List.of(pos, pos.above(), pos.below(), pos.north(), pos.south(), pos.east(),
+                    pos.west());
+            List<HostedWorld.Inspection> before = new ArrayList<>();
+            for (BlockPos p : around) {
+                before.add(heat.inspect(p).orElseThrow(
+                        () -> helper.assertionException(Component.literal("waiting for " + p + " to be simulated"))));
+            }
+            long restored = heat.report().restoredBlocks();
+            helper.assertTrue(heat.reloadSection(pos), "the iron's section could not be reloaded");
+            ChunkHeat saved = helper.getLevel().getChunkAt(pos).getExistingDataOrNull(AnchorAttachments.CHUNK_HEAT);
+            helper.assertTrue(saved != null && saved.section(pos.getY() >> 4) != null,
+                    "nothing was saved with the chunk");
+            for (int k = 0; k < around.size(); k++) {
+                BlockPos p = around.get(k);
+                HostedWorld.Inspection was = before.get(k);
+                HostedWorld.Inspection is = heat.inspect(p).orElseThrow(
+                        () -> helper.assertionException(Component.literal(p + " is no longer simulated")));
+                helper.assertTrue(was.material().equals(is.material()) && was.massKg() == is.massKg()
+                        && was.enthalpyJ() == is.enthalpyJ(), "the block at " + p + " came back at "
+                        + HeatText.temperature(is.temperatureK()) + " instead of "
+                        + HeatText.temperature(was.temperatureK()));
+            }
+            helper.assertTrue(heat.report().restoredBlocks() > restored, "no block took back its saved state");
+            heat.release(pos);
+        });
+    }
+
+    /**
+     * The format heat is saved in keeps every number exactly, stores blocks and enthalpies as compact arrays,
+     * and refuses a section it cannot make sense of instead of guessing.
+     */
+    private static void savedHeatKeepsItsNumbers(GameTestHelper helper) {
+        List<SectionSnapshot.Entry> palette = List.of(
+                new SectionSnapshot.Entry("anchor:air", 0L, Provenance.SIMULATED),
+                new SectionSnapshot.Entry("anchor:iron", 42L, Provenance.INITIAL));
+        ChunkHeat heat = new ChunkHeat();
+        heat.put(-4, new SectionSnapshot(palette, new int[] {0, 17, 4095}, new int[] {1, 0, 0},
+                new double[] {7874.0, 1.2041, 0.0}, new double[] {1.0e9 / 3, -12_345.678_9, 0.0}));
+        heat.put(5, new SectionSnapshot(palette.subList(0, 1), new int[] {100}, new int[] {0},
+                new double[] {1.1}, new double[] {Math.nextUp(-3000.0)}));
+        Tag tag = ChunkHeat.CODEC.encodeStart(NbtOps.INSTANCE, heat).getOrThrow();
+        helper.assertValueEqual(heat, ChunkHeat.CODEC.parse(NbtOps.INSTANCE, tag).getOrThrow(),
+                "the heat read back");
+        CompoundTag first = ((ListTag) tag).getCompoundOrEmpty(0);
+        helper.assertTrue(first.getIntArray("blocks").isPresent() && first.getLongArray("enthalpy").isPresent(),
+                "blocks and enthalpies are not saved as arrays: " + first);
+        first.remove("palette");
+        helper.assertTrue(ChunkHeat.CODEC.parse(NbtOps.INSTANCE, tag).result().isEmpty(),
+                "a section without its palette was read");
+        helper.succeed();
     }
 
     /** Builds a one-block pool of still water in stone and returns where the water is. */

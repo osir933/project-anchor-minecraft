@@ -5,6 +5,7 @@ import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.ImportPlanner;
 import io.github.osir933.anchor.core.host.PhaseChange;
+import io.github.osir933.anchor.core.host.SectionSnapshot;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
 import io.github.osir933.anchor.core.physics.thermal.ThermalActivity;
@@ -44,6 +45,10 @@ import org.slf4j.Logger;
  * {@linkplain AnchorConfig#GAME_TICKS_PER_STEP few ticks} it brings in sections that players have come near
  * and lets go of those they have left, compares one section with the level to catch changes nobody reported,
  * and steps the simulation. An error stops heat in this level and is logged; the game carries on.
+ *
+ * <p>The state of simulated sections is saved with their chunks as {@link ChunkHeat}: when a section is let
+ * go or its chunk unloads, when the level is saved, and every minute in between. A section brought in again
+ * takes its saved state back.
  */
 final class LevelHeat {
 
@@ -64,6 +69,9 @@ final class LevelHeat {
     /** Sections are let go once they are this many sections beyond the simulated radius. */
     private static final int MARGIN = 1;
 
+    /** Changed sections are written into their chunks at least this often, in game ticks, so a crash loses little. */
+    private static final int SAVE_INTERVAL_TICKS = 1200;
+
     private final ServerLevel level;
     private final BlockMapper mapper;
     private final HostedWorld hosted;
@@ -74,8 +82,13 @@ final class LevelHeat {
     private final TreeMap<Long, Integer> pinned = new TreeMap<>();
     private final ArrayDeque<PhaseChange> toShow = new ArrayDeque<>();
     private final TreeMap<String, Optional<BlockState>> replacements = new TreeMap<>();
+    /** The version of each simulated section when it was last written into its chunk or brought in. */
+    private final TreeMap<Long, Long> savedVersions = new TreeMap<>();
     private long shown;
+    private long restoredBlocks;
+    private int restoredSections;
     private int ticksUntilStep = 1;
+    private int ticksUntilSave = SAVE_INTERVAL_TICKS;
     private long lastVerified = Long.MIN_VALUE;
     private double lastStepMillis;
     private double averageStepMillis;
@@ -115,6 +128,10 @@ final class LevelHeat {
         }
         try {
             takeInChanges();
+            if (--ticksUntilSave <= 0) {
+                ticksUntilSave = SAVE_INTERVAL_TICKS;
+                saveAll();
+            }
             if (!running) {
                 return;
             }
@@ -149,15 +166,17 @@ final class LevelHeat {
     }
 
     /**
-     * Lets go of the sections of a chunk the level unloaded.
+     * Writes the sections of a chunk the level is unloading into the chunk, before it is saved, and lets go of
+     * them.
      *
-     * @param pos the chunk
+     * @param chunk the chunk
      */
-    void chunkUnloaded(ChunkPos pos) {
+    void chunkUnloaded(LevelChunk chunk) {
         if (failure != null) {
             return;
         }
         try {
+            ChunkPos pos = chunk.getPos();
             List<Long> gone = new ArrayList<>();
             for (long key : hosted.importedSections()) {
                 if (SectionPos.x(key) == pos.x() && SectionPos.z(key) == pos.z()) {
@@ -165,10 +184,54 @@ final class LevelHeat {
                 }
             }
             for (long key : gone) {
-                hosted.removeSection(key);
+                save(chunk, key);
+                forget(key);
             }
         } catch (RuntimeException e) {
             stop(e);
+        }
+    }
+
+    /** Writes every simulated section that changed since it was last written into its chunk, for the next save. */
+    void save() {
+        if (failure != null) {
+            return;
+        }
+        try {
+            saveAll();
+        } catch (RuntimeException e) {
+            stop(e);
+        }
+    }
+
+    /**
+     * Writes the section around a block into its chunk, lets it go and brings it in again from what was
+     * written, as unloading and loading its chunk would.
+     *
+     * @param pos the block
+     * @return {@code true} if the section was simulated and came back
+     */
+    boolean reloadSection(BlockPos pos) {
+        long key = sectionKey(pos);
+        if (failure != null || !hosted.isImported(key)) {
+            return false;
+        }
+        try {
+            LevelChunk chunk = chunk(key);
+            if (chunk == null) {
+                return false;
+            }
+            save(chunk, key);
+            forget(key);
+            LevelChunkSection section = section(chunk, key);
+            if (section == null) {
+                return false;
+            }
+            bringIn(chunk, key, section);
+            return true;
+        } catch (RuntimeException e) {
+            stop(e);
+            return false;
         }
     }
 
@@ -254,7 +317,7 @@ final class LevelHeat {
      */
     HeatReport report() {
         return new HeatReport(hosted.status(), hosted.settings().tickSeconds(), lastStepMillis, averageStepMillis,
-                shown, failure);
+                shown, restoredBlocks, restoredSections, failure);
     }
 
     /**
@@ -287,14 +350,68 @@ final class LevelHeat {
         ImportPlanner.Plan plan = planner.plan(anchors, hosted.importedSections(), key -> section(key) != null,
                 sectionsPerStep);
         for (long key : plan.removals()) {
-            hosted.removeSection(key);
+            LevelChunk chunk = chunk(key);
+            if (chunk != null) {
+                save(chunk, key);
+            }
+            forget(key);
         }
         for (long key : plan.imports()) {
-            LevelChunkSection section = section(key);
+            LevelChunk chunk = chunk(key);
+            LevelChunkSection section = chunk == null ? null : section(chunk, key);
             if (section != null) {
-                hosted.importSection(key, ids(section), climate(key));
+                bringIn(chunk, key, section);
             }
         }
+    }
+
+    /** Brings a section in with the state saved in its chunk, if any. */
+    private void bringIn(LevelChunk chunk, long key, LevelChunkSection section) {
+        ChunkHeat saved = chunk.getExistingDataOrNull(AnchorAttachments.CHUNK_HEAT);
+        SectionSnapshot snapshot = saved == null ? null : saved.section(SectionPos.y(key));
+        int restored = hosted.importSection(key, ids(section), climate(key), snapshot);
+        if (restored > 0) {
+            restoredBlocks += restored;
+            restoredSections++;
+        }
+        // A section that came back from its chunk is written again at the next save, which drops any saved
+        // blocks that no longer fit the blocks there.
+        savedVersions.put(key, snapshot == null ? hosted.sectionVersion(key) : Long.MIN_VALUE);
+    }
+
+    /** Writes every simulated section that changed since it was last written into its chunk. */
+    private void saveAll() {
+        for (long key : hosted.importedSections()) {
+            LevelChunk chunk = chunk(key);
+            if (chunk != null) {
+                save(chunk, key);
+            }
+        }
+    }
+
+    /**
+     * Writes a simulated section into its chunk if it changed since it was last written, and marks the chunk
+     * for saving if that changed what the chunk holds.
+     */
+    private void save(LevelChunk chunk, long key) {
+        long version = hosted.sectionVersion(key);
+        Long saved = savedVersions.get(key);
+        if (saved != null && saved == version) {
+            return;
+        }
+        Optional<SectionSnapshot> snapshot = hosted.snapshot(key);
+        ChunkHeat heat = snapshot.isPresent() ? chunk.getData(AnchorAttachments.CHUNK_HEAT)
+                : chunk.getExistingDataOrNull(AnchorAttachments.CHUNK_HEAT);
+        if (heat != null && heat.put(SectionPos.y(key), snapshot.orElse(null))) {
+            chunk.markUnsaved();
+        }
+        savedVersions.put(key, version);
+    }
+
+    /** Lets go of a section without saving it. */
+    private void forget(long key) {
+        hosted.removeSection(key);
+        savedVersions.remove(key);
     }
 
     /** Compares the next imported section with the level, taking in any change nobody reported. */
@@ -309,7 +426,7 @@ final class LevelHeat {
         lastVerified = key;
         LevelChunkSection section = section(key);
         if (section == null) {
-            hosted.removeSection(key);
+            forget(key);
         } else {
             hosted.verifySection(key, ids(section));
         }
@@ -360,12 +477,19 @@ final class LevelHeat {
         });
     }
 
+    /** Returns the loaded chunk a section is in, or {@code null} if it is not loaded. */
+    private LevelChunk chunk(long key) {
+        return level.getChunkSource().getChunkNow(SectionPos.x(key), SectionPos.z(key));
+    }
+
     /** Returns a loaded section of the level, or {@code null} if it is not loaded or outside the world. */
     private LevelChunkSection section(long key) {
-        LevelChunk chunk = level.getChunkSource().getChunkNow(SectionPos.x(key), SectionPos.z(key));
-        if (chunk == null) {
-            return null;
-        }
+        LevelChunk chunk = chunk(key);
+        return chunk == null ? null : section(chunk, key);
+    }
+
+    /** Returns a section of a chunk, or {@code null} if it is outside the world. */
+    private LevelChunkSection section(LevelChunk chunk, long key) {
         int index = level.getSectionIndexFromSectionY(SectionPos.y(key));
         LevelChunkSection[] sections = chunk.getSections();
         return index >= 0 && index < sections.length ? sections[index] : null;

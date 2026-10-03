@@ -30,16 +30,20 @@ travel the full metre, which undersells how fast a hot block heats its neighbour
 where temperatures change steeply will fix it. Until then, `/anchor heat set` changes a temperature directly
 when an experiment cannot wait.
 
+Temperatures are saved with the world. Anchor stores, with each chunk, the blocks heat has changed, exactly
+as the simulation has them; blocks heat never touched need nothing, because they come back from the block
+itself. A block that changed while its land was not simulated starts again from the new block.
+
 Two things to know in this alpha. Vanilla's own rules still run alongside Anchor's: ice still melts near
-bright light and water still freezes in cold biomes, and Anchor follows the blocks they change. Temperatures
-are not saved yet, so land that unloads starts again at the temperature of its surroundings.
+bright light and water still freezes in cold biomes, and Anchor follows the blocks they change. And time
+stands still in land nobody is near: a warm room you walk away from is just as warm when you come back.
 
 ### Commands
 
 | Command | What it does |
 | --- | --- |
 | `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy and where the value came from. Operators can name any block with `/anchor heat inspect <pos>`. |
-| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, and whether energy and mass balanced at the last audit. |
+| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks came back as they were saved, and whether energy and mass balanced at the last audit. |
 | `/anchor heat set <pos> <celsius>` | For operators: sets a block's temperature, keeping its matter, to start an experiment. |
 | `/anchor selftest` | Runs the engine's self-check. |
 

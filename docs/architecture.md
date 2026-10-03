@@ -110,6 +110,13 @@ Each step the hosted world runs heat where something is happening and returns th
 now show differently. `host.ImportPlanner` picks the sections around the players, nearest first and a few
 per tick, and lets them go a margin further out.
 
+To save a section, the game asks for its **snapshot** (`host.SectionSnapshot`): the blocks whose material,
+mass, enthalpy or owner differ from what importing the section afresh would give them, with masses and
+enthalpies exact and materials named by id. Everything else comes back from the game's blocks, so a section
+where nothing happened needs no snapshot, and a placed block, which starts at its surroundings' temperature,
+adds nothing. Importing a section with its snapshot puts each saved block back where its matter still fits
+the game's block there; a block that changed while the section was not simulated starts afresh.
+
 ## In Minecraft
 
 `anchor-neoforge` connects a hosted world to each Minecraft dimension and holds no physical rules of its own.
@@ -125,8 +132,8 @@ per tick, and lets them go a margin further out.
   Block changes arrive through NeoForge's neighbour notifications and are taken in, in sorted order, at the
   start of the next tick. Every few game ticks it imports the sections players have come near, lets go of
   those they have left, compares one imported section with the level to catch any change nobody reported,
-  and steps the simulation. Unloading a chunk lets go of its sections. Frozen time (`/tick freeze`) pauses
-  heat with everything else.
+  and steps the simulation. Unloading a chunk saves its sections into it and lets go of them. Frozen time
+  (`/tick freeze`) pauses heat with everything else.
 - **Phase changes.** A step returns the blocks whose matter now shows a different phase. `LevelHeat` checks
   that block and matter still agree with the step, then places the replacement the appearance names. Ice
   holds the same matter as water, so the block keeps its exact state: water frozen at −5 °C becomes ice at
@@ -137,13 +144,21 @@ per tick, and lets them go a margin further out.
   vanilla does, and the result is held between −30 and 45 °C (`Climate`).
 - **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
   simulation steps every four game ticks. Both are settings.
+- **Saving.** `ChunkHeat` holds the snapshots of a chunk's sections as a NeoForge data attachment, so they
+  are written and read with the chunk: a short palette per section, then each saved block's position and
+  palette index packed in an int array, and masses and enthalpies as the raw bits of their doubles in long
+  arrays. A section is written into its chunk when it is let go, when its chunk unloads (before the chunk
+  is saved), when the level saves, when the server stops, and every minute in between, and only if it
+  changed. Land nobody is near is paused: brought in again, it carries on from its saved state without
+  catching up on the time that passed.
 - **Failure.** An error stops heat in that dimension, logs it and shows it in `/anchor heat status`; the game
   carries on.
 
 The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
 (`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
 below it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes
-the temperature, and a torch warms the air above it.
+the temperature, a torch warms the air above it, a section written into its chunk and brought in again comes
+back exactly, and the save format keeps every number.
 
 ## Requests
 
@@ -170,8 +185,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 
 ## Roadmap
 
-Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in. Next for heat:
-saving temperatures with the world, radiation, convection in liquids, and refining blocks where
-temperatures change steeply. After that come structure and fracture; rigid bodies, contact and emergent
+Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, and
+temperatures are saved with the world. Next for heat: radiation, convection in liquids, and refining blocks
+where temperatures change steeply. After that come structure and fracture; rigid bodies, contact and emergent
 tools; materials processing and microstructure; fluids and chemistry; electricity and control; causal
 targeting and molecular dynamics; and finally life and society, on the way to 1.0.
