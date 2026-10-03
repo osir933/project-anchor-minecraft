@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " S ",
+    "CTC",
+    "CRC"
+  ],
+  "key": {
+    "S": "minecraft:spyglass",
+    "T": "anchor:thermometer",
+    "C": "minecraft:copper_ingot",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "anchor:thermal_camera",
+    "count": 1
+  }
+}

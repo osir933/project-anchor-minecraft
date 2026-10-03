@@ -20,6 +20,9 @@ Java 25, on both the client and the server.
 - **Tools for experiments.** `/anchor heat inspect` shows what the simulation knows about a block,
   `/anchor heat status` how the simulation is doing, and operators can set a block's temperature with
   `/anchor heat set`. A craftable thermometer reads blocks and the air.
+- **Thermal camera.** Held in either hand, it shows the temperatures of what you look at as coloured dots
+  with a scale, of surfaces or of the air that stands out, such as the plume above a torch. Its scale can be
+  locked to compare what you see over time.
 
 Known limits of this alpha:
 

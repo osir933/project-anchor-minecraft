@@ -3,5 +3,14 @@
   "message.anchor.thermometer.off": "Temperatures are not simulated here",
   "message.anchor.thermometer.waiting": "No reading yet: this area is still being loaded into the simulation",
   "message.anchor.thermometer.empty": "Nothing here to measure",
-  "message.anchor.thermometer.reading": "%s: %s"
+  "message.anchor.thermometer.reading": "%s: %s",
+  "item.anchor.thermal_camera": "Thermal Camera",
+  "item.anchor.thermal_camera.hold": "Hold it to see temperatures",
+  "item.anchor.thermal_camera.use": "Use it to switch between surfaces and air",
+  "item.anchor.thermal_camera.sneak": "Sneak and use it to lock the scale",
+  "message.anchor.thermal_camera.surfaces": "Surfaces",
+  "message.anchor.thermal_camera.air": "Air",
+  "message.anchor.thermal_camera.nothing": "Nothing in view is simulated yet",
+  "message.anchor.thermal_camera.spot": "Spot %s",
+  "message.anchor.thermal_camera.locked": "locked"
 }

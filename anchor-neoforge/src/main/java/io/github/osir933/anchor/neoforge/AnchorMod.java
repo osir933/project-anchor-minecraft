@@ -35,6 +35,7 @@ public final class AnchorMod {
         AnchorGameTests.register(modEventBus);
         NeoForge.EVENT_BUS.addListener(AnchorCommands::register);
         HeatEvents.register(NeoForge.EVENT_BUS);
+        ThermalCamera.register(NeoForge.EVENT_BUS);
         LOGGER.info("Anchor {} loaded", modContainer.getModInfo().getVersion());
     }
 

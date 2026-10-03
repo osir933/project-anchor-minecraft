@@ -53,6 +53,17 @@ stands still in land nobody is near: a warm room you walk away from is just as w
 Craft a thermometer from a glass pane, redstone and a copper ingot stacked in a column, glass on top. Use it
 on a block to read the block's temperature, or in the air to read the air around your head.
 
+### Thermal camera
+
+Craft a thermal camera from a spyglass on top, a thermometer between two copper ingots in the middle row, and
+copper ingots around a redstone dust in the bottom row. Hold it in either hand and it shows the temperatures of
+what you look at as coloured dots, twice a second: dark violet for the coldest in view, through red and orange,
+to near white for the hottest. Above the hotbar it shows the temperature at your crosshair and the scale, which
+follows what is in view the way a real thermal camera's automatic range does. Use it to switch to the air
+view, which shows the air that is warmer or colder than the rest, such as the plume above a torch. Sneak and use
+it to lock the scale, so that what you see later compares with what you see now. Like a real thermal camera, it
+cannot see through glass or water. Only you see your camera's images.
+
 ### Settings
 
 Anchor's settings are kept with each world, under `[heat]` in its config file, and each is described there:
