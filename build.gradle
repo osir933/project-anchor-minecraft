@@ -1,0 +1,26 @@
+plugins {
+    id 'base'
+}
+
+allprojects {
+    group = mod_group_id
+    version = mod_version
+}
+
+subprojects {
+    plugins.withType(JavaPlugin).configureEach {
+        tasks.withType(JavaCompile).configureEach {
+            options.encoding = 'UTF-8'
+        }
+        tasks.withType(Javadoc).configureEach {
+            options.encoding = 'UTF-8'
+        }
+        tasks.withType(Test).configureEach {
+            useJUnitPlatform()
+            testLogging {
+                events 'failed', 'skipped'
+                exceptionFormat 'full'
+            }
+        }
+    }
+}
