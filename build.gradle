@@ -19,7 +19,7 @@ subprojects {
             useJUnitPlatform()
             testLogging {
                 events 'failed', 'skipped'
-                exceptionFormat 'full'
+                exceptionFormat = 'full'
             }
         }
     }
