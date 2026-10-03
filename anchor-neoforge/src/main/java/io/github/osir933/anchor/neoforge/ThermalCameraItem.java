@@ -46,7 +46,10 @@ final class ThermalCameraItem extends Item {
         return InteractionResult.SUCCESS;
     }
 
+    // Mojang marks this deprecated as tooltips move to data components, but it is still how an item adds lines of
+    // its own, and a game test checks that they show.
     @Override
+    @SuppressWarnings("deprecation")
     public void appendHoverText(ItemStack stack, Item.TooltipContext context, TooltipDisplay display,
             Consumer<Component> tooltip, TooltipFlag flag) {
         tooltip.accept(Component.translatableWithFallback("item.anchor.thermal_camera.hold",

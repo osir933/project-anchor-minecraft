@@ -18,7 +18,11 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
@@ -51,7 +55,8 @@ final class AnchorGameTests {
                     AnchorGameTests::heatComesBackWhenAChunkLoadsAgain),
             new Case("saved_heat_keeps_its_numbers", 20, AnchorGameTests::savedHeatKeepsItsNumbers),
             new Case("thermal_camera_sees_a_hot_block", 200, AnchorGameTests::thermalCameraSeesAHotBlock),
-            new Case("thermal_camera_sees_warm_air", 600, AnchorGameTests::thermalCameraSeesWarmAir));
+            new Case("thermal_camera_sees_warm_air", 600, AnchorGameTests::thermalCameraSeesWarmAir),
+            new Case("thermal_camera_explains_itself", 20, AnchorGameTests::thermalCameraExplainsItself));
 
     private AnchorGameTests() {
     }
@@ -296,6 +301,18 @@ final class AnchorGameTests {
             helper.assertTrue(ambient == 0, ambient + " dots show air no warmer than the weather");
             heat.release(pos);
         });
+    }
+
+    /** The thermal camera's tooltip says how to use it. */
+    private static void thermalCameraExplainsItself(GameTestHelper helper) {
+        List<Component> lines = new ItemStack(AnchorItems.THERMAL_CAMERA.get()).getTooltipLines(
+                Item.TooltipContext.of(helper.getLevel()), null, TooltipFlag.NORMAL);
+        for (String key : List.of("hold", "use", "sneak")) {
+            String wanted = "item.anchor.thermal_camera." + key;
+            helper.assertTrue(lines.stream().anyMatch(line -> line.getContents() instanceof TranslatableContents t
+                    && t.getKey().equals(wanted)), "the tooltip has no line " + wanted + ": " + lines);
+        }
+        helper.succeed();
     }
 
     /** Builds a one-block pool of still water in stone and returns where the water is. */
