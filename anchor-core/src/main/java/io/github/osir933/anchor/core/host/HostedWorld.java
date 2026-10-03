@@ -205,6 +205,10 @@ public final class HostedWorld {
         int presentable;
         /** The section version the last phase-change scan saw. */
         long scannedVersion = Long.MIN_VALUE;
+        /** The section version right after it was imported. */
+        long importedVersion;
+        /** Whether some blocks were restored from a snapshot, so the section differs from a fresh import. */
+        boolean restored;
 
         Hosted(int uniform) {
             this.uniform = uniform;
@@ -321,6 +325,24 @@ public final class HostedWorld {
      * @param environmentK the temperature of the section's surroundings, which its air returns to
      */
     public void importSection(long sectionKey, IntUnaryOperator hostIdAt, double environmentK) {
+        importSection(sectionKey, hostIdAt, environmentK, null);
+    }
+
+    /**
+     * Brings a section of the host's world in, like {@link #importSection(long, IntUnaryOperator, double)}, and
+     * gives the blocks a {@linkplain #snapshot snapshot} saved back the state they were saved in. A saved block
+     * whose matter no longer fits the host's block there, because the block changed while the section was not
+     * simulated, starts afresh, and so does one whose material is no longer registered.
+     *
+     * @param sectionKey the packed section position
+     * @param hostIdAt the host's id for the block at each local index, as numbered by
+     *     {@link SectionPos#localIndex}
+     * @param environmentK the temperature of the section's surroundings, which its air returns to
+     * @param saved the section's saved state, from {@link #snapshot}, or {@code null} for none
+     * @return how many blocks were restored
+     */
+    public int importSection(long sectionKey, IntUnaryOperator hostIdAt, double environmentK,
+            SectionSnapshot saved) {
         if (!(environmentK > 0) || !Double.isFinite(environmentK)) {
             throw new IllegalArgumentException("climate must be positive: " + environmentK);
         }
@@ -355,7 +377,20 @@ public final class HostedWorld {
             }
             cells[i] = previousCell;
         }
-        world.importSection(sectionKey, i -> cells[i], "imported from the host");
+        int restored = saved == null ? 0 : restore(cells, ids, saved);
+        if (restored > 0) {
+            for (CellState cell : cells) {
+                double t = temperature(cell);
+                if (!Double.isNaN(t)) {
+                    coldest = Math.min(coldest, t);
+                    hottest = Math.max(hottest, t);
+                }
+            }
+        }
+        Section section = world.importSection(sectionKey, i -> cells[i],
+                restored > 0 ? "restored from the host's save" : "imported from the host");
+        ids.importedVersion = section.version();
+        ids.restored = restored > 0;
         sources.removeSection(sectionKey);
         for (int i = 0; i < SectionPos.BLOCKS; i++) {
             BlockAppearance a = resolve(ids.get(i)).appearance();
@@ -378,6 +413,92 @@ public final class HostedWorld {
         if (unbalanced) {
             activity.wake(sectionKey);
         }
+        return restored;
+    }
+
+    /**
+     * Returns what a host has to save of an imported section for its blocks to come back as they are now, to
+     * hand back to {@link #importSection(long, IntUnaryOperator, double, SectionSnapshot)} later: the blocks
+     * whose material, mass, enthalpy or owner differ from what importing the section afresh would give them.
+     *
+     * @param sectionKey the packed section position
+     * @return the snapshot, or empty if the section is not imported or a fresh import would rebuild every
+     *     block exactly
+     */
+    public Optional<SectionSnapshot> snapshot(long sectionKey) {
+        Hosted ids = hosted.get(sectionKey);
+        Section s = world.section(sectionKey);
+        if (ids == null || s == null || (!ids.restored && s.version() == ids.importedVersion)) {
+            return Optional.empty();
+        }
+        int[] material = new int[SectionPos.BLOCKS];
+        double[] mass = new double[SectionPos.BLOCKS];
+        double[] enthalpy = new double[SectionPos.BLOCKS];
+        long[] owner = new long[SectionPos.BLOCKS];
+        s.copyBlocks(material, mass, enthalpy, owner, 0);
+        double climate = atmosphere.environment(sectionKey);
+        MaterialRegistry registry = world.materials();
+        TreeMap<Integer, CellState> fresh = new TreeMap<>();
+        List<SectionSnapshot.Entry> palette = new ArrayList<>();
+        int[] blocks = new int[SectionPos.BLOCKS];
+        int[] entries = new int[SectionPos.BLOCKS];
+        double[] savedMass = new double[SectionPos.BLOCKS];
+        double[] savedEnthalpy = new double[SectionPos.BLOCKS];
+        int saved = 0;
+        int previousId = 0;
+        CellState expected = null;
+        int entry = -1;
+        for (int i = 0; i < SectionPos.BLOCKS; i++) {
+            int id = ids.get(i);
+            if (expected == null || id != previousId) {
+                expected = fresh.computeIfAbsent(id, k -> cellFor(resolve(k), climate));
+                previousId = id;
+            }
+            if (material[i] == expected.material() && mass[i] == expected.mass()
+                    && enthalpy[i] == expected.enthalpy() && owner[i] == expected.owner()) {
+                continue;
+            }
+            Provenance provenance = s.provenance(i);
+            if (entry < 0 || !matches(palette.get(entry), registry, material[i], owner[i], provenance)) {
+                entry = -1;
+                for (int e = 0; e < palette.size() && entry < 0; e++) {
+                    if (matches(palette.get(e), registry, material[i], owner[i], provenance)) {
+                        entry = e;
+                    }
+                }
+                if (entry < 0) {
+                    entry = palette.size();
+                    palette.add(new SectionSnapshot.Entry(registry.id(material[i]), owner[i], provenance));
+                }
+            }
+            blocks[saved] = i;
+            entries[saved] = entry;
+            savedMass[saved] = mass[i];
+            savedEnthalpy[saved] = enthalpy[i];
+            saved++;
+        }
+        if (saved == 0) {
+            return Optional.empty();
+        }
+        return Optional.of(new SectionSnapshot(palette, Arrays.copyOf(blocks, saved), Arrays.copyOf(entries, saved),
+                Arrays.copyOf(savedMass, saved), Arrays.copyOf(savedEnthalpy, saved)));
+    }
+
+    private static boolean matches(SectionSnapshot.Entry e, MaterialRegistry registry, int material, long owner,
+            Provenance provenance) {
+        return e.owner() == owner && e.provenance() == provenance && e.material().equals(registry.id(material));
+    }
+
+    /**
+     * Returns a number that grows whenever anything in an imported section changes, so a host can tell when
+     * a snapshot it saved has gone out of date.
+     *
+     * @param sectionKey the packed section position
+     * @return the section's version, or {@link Long#MIN_VALUE} if it is not imported
+     */
+    public long sectionVersion(long sectionKey) {
+        Section s = hosted.containsKey(sectionKey) ? world.section(sectionKey) : null;
+        return s == null ? Long.MIN_VALUE : s.version();
     }
 
     /**
@@ -605,6 +726,32 @@ public final class HostedWorld {
                     + ", which is not registered");
         }
         return new Resolved(a, material);
+    }
+
+    /** Puts saved states into a section being imported where they still fit, and counts them. */
+    private int restore(CellState[] cells, Hosted ids, SectionSnapshot saved) {
+        MaterialRegistry registry = world.materials();
+        List<SectionSnapshot.Entry> palette = saved.palette();
+        int[] materialOf = new int[palette.size()];
+        for (int e = 0; e < materialOf.length; e++) {
+            materialOf[e] = registry.indexOf(palette.get(e).material());
+        }
+        int restored = 0;
+        for (int k = 0; k < saved.size(); k++) {
+            int material = materialOf[saved.paletteIndex(k)];
+            double mass = saved.mass(k);
+            if (material < 0 || (material == MaterialRegistry.VACUUM && mass != 0)) {
+                continue;
+            }
+            SectionSnapshot.Entry e = saved.entry(k);
+            CellState cell = new CellState(material, mass, saved.enthalpy(k), e.owner(), e.provenance());
+            int i = saved.block(k);
+            if (keeps(cell, resolve(ids.get(i)))) {
+                cells[i] = cell;
+                restored++;
+            }
+        }
+        return restored;
     }
 
     /** Returns the state a block with an appearance starts in. */

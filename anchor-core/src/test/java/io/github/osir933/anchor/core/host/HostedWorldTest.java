@@ -16,7 +16,10 @@ import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
+import io.github.osir933.anchor.core.world.Provenance;
 import io.github.osir933.anchor.core.world.WorldSettings;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.IntUnaryOperator;
@@ -341,5 +344,133 @@ class HostedWorldTest {
                 MaterialRegistry.withLibrary()), id -> null, HostedWorld.Settings.defaults());
         assertThrows(IllegalStateException.class, () -> missing.importSection(ORIGIN, i -> 0, 290.0));
         assertThrows(IllegalArgumentException.class, () -> hosted().importSection(ORIGIN, i -> 0, -1.0));
+    }
+
+    @Test
+    void aFreshSectionNeedsNoSnapshotUntilSomethingInItChanges() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, terrain(Map.of()), 290.0);
+        assertTrue(h.snapshot(ORIGIN).isEmpty(), "a fresh import rebuilds itself from the host's blocks");
+        long before = h.sectionVersion(ORIGIN);
+        GridPos stone = new GridPos(3, 2, 3);
+        assertTrue(h.setTemperature(stone, 400.0));
+        assertTrue(h.sectionVersion(ORIGIN) > before);
+        SectionSnapshot saved = h.snapshot(ORIGIN).orElseThrow();
+        assertEquals(1, saved.size(), "only the block that differs from a fresh import is saved");
+        assertEquals(stone.indexInSection(), saved.block(0));
+        assertEquals("anchor:granite", saved.entry(0).material());
+        assertEquals(h.world().readBlock(stone).enthalpy(), saved.enthalpy(0));
+
+        assertTrue(h.setTemperature(stone, 290.0));
+        assertTrue(h.snapshot(ORIGIN).isEmpty(), "a block set back to its surroundings' temperature is as new");
+        long elsewhere = SectionPos.pack(4, 4, 4);
+        assertTrue(h.snapshot(elsewhere).isEmpty());
+        assertEquals(Long.MIN_VALUE, h.sectionVersion(elsewhere));
+    }
+
+    @Test
+    void placingAndBreakingBlocksLeavesNothingToSave() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, terrain(Map.of()), 290.0);
+        assertTrue(h.reconcile(new GridPos(4, 10, 4), STONE, Double.NaN));
+        assertTrue(h.reconcile(new GridPos(4, 3, 4), AIR, Double.NaN));
+        assertTrue(h.snapshot(ORIGIN).isEmpty(), "blocks placed at the climate come back from the host's blocks");
+    }
+
+    @Test
+    void aSavedSectionComesBackExactly() {
+        HostedWorld h = hosted();
+        GridPos ice = new GridPos(5, 9, 5);
+        IntUnaryOperator blocks = terrain(Map.of(ice, ICE));
+        h.importSection(ORIGIN, blocks, 290.0);
+        assertTrue(h.setTemperature(new GridPos(3, 2, 3), 600.0));
+        for (int i = 0; i < 20; i++) {
+            h.tick();
+        }
+        SectionSnapshot saved = h.snapshot(ORIGIN).orElseThrow();
+        assertTrue(saved.size() > 1 && saved.size() < SectionPos.BLOCKS, () -> saved.size() + " blocks saved");
+
+        HostedWorld again = hosted();
+        assertEquals(saved.size(), again.importSection(ORIGIN, blocks, 290.0, saved));
+        for (int i = 0; i < SectionPos.BLOCKS; i++) {
+            GridPos p = GridPos.of(ORIGIN, i);
+            CellState was = h.world().readBlock(p);
+            CellState is = again.world().readBlock(p);
+            assertEquals(was.material(), is.material(), () -> "material of " + p);
+            assertEquals(was.mass(), is.mass(), () -> "mass of " + p);
+            assertEquals(was.enthalpy(), is.enthalpy(), () -> "enthalpy of " + p);
+        }
+        assertEquals(Provenance.SIMULATED, again.inspect(new GridPos(3, 2, 3)).orElseThrow().provenance());
+        assertEquals(saved, again.snapshot(ORIGIN).orElseThrow(), "a restored section is saved as it was");
+        assertTrue(again.status().awakeSections() > 0, "the warm stone keeps the restored section awake");
+        assertTrue(again.world().audit().balanced(), () -> again.world().audit().toString());
+    }
+
+    @Test
+    void blocksThatChangedWhileNotSimulatedStartAfresh() {
+        HostedWorld h = hosted();
+        GridPos water = new GridPos(5, 9, 5);
+        GridPos stone = new GridPos(3, 2, 3);
+        h.importSection(ORIGIN, terrain(Map.of(water, WATER)), 290.0);
+        assertTrue(h.setTemperature(water, 330.0));
+        assertTrue(h.setTemperature(stone, 350.0));
+        SectionSnapshot saved = h.snapshot(ORIGIN).orElseThrow();
+        assertEquals(2, saved.size());
+
+        HostedWorld again = hosted();
+        assertEquals(1, again.importSection(ORIGIN, terrain(Map.of(water, STONE)), 290.0, saved));
+        assertEquals("anchor:granite", again.inspect(water).orElseThrow().material());
+        assertEquals(290.0, again.temperature(water), 1e-9);
+        assertEquals(350.0, again.temperature(stone), 1e-9, "the stone that is still there keeps its heat");
+    }
+
+    @Test
+    void blocksOfMaterialsNoLongerRegisteredStartAfresh() {
+        HostedWorld h = hosted();
+        GridPos stone = new GridPos(1, 1, 1);
+        h.importSection(ORIGIN, terrain(Map.of()), 290.0);
+        assertTrue(h.setTemperature(stone, 350.0));
+        SectionSnapshot saved = h.snapshot(ORIGIN).orElseThrow();
+        List<SectionSnapshot.Entry> palette = new ArrayList<>(saved.palette());
+        palette.add(new SectionSnapshot.Entry("anchor:unobtainium", 0L, Provenance.SIMULATED));
+        SectionSnapshot edited = new SectionSnapshot(palette, saved.blocks(), new int[] {palette.size() - 1},
+                saved.masses(), saved.enthalpies());
+
+        HostedWorld again = hosted();
+        assertEquals(0, again.importSection(ORIGIN, terrain(Map.of()), 290.0, edited));
+        assertEquals(290.0, again.temperature(stone), 1e-9);
+    }
+
+    @Test
+    void snapshotsRefuseWhatCouldNotBeASection() {
+        List<SectionSnapshot.Entry> palette = List.of(new SectionSnapshot.Entry("anchor:air", 0L,
+                Provenance.INITIAL));
+        int[] blocks = {3, 7};
+        int[] entries = {0, 0};
+        double[] mass = {1.2, 1.2};
+        double[] enthalpy = {-5.0, 7.0};
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, blocks, new int[1], mass,
+                enthalpy), "one palette index per block");
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, new int[] {7, 3}, entries,
+                mass, enthalpy), "blocks in ascending order");
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, new int[] {3, 3}, entries,
+                mass, enthalpy), "each block once");
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette,
+                new int[] {3, SectionPos.BLOCKS}, entries, mass, enthalpy), "blocks inside the section");
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, blocks, new int[] {0, 1},
+                mass, enthalpy), "palette indices inside the palette");
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, blocks, entries,
+                new double[] {1.2, -1.0}, enthalpy), "no negative mass");
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, blocks, entries,
+                new double[] {1.2, 0.0}, enthalpy), "no heat without matter");
+        assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, blocks, entries, mass,
+                new double[] {Double.NaN, 7.0}), "finite enthalpy");
+        SectionSnapshot snapshot = new SectionSnapshot(palette, blocks, entries, mass, enthalpy);
+        blocks[0] = 5;
+        enthalpy[0] = 9.0;
+        assertEquals(3, snapshot.block(0), "a snapshot keeps its own copy of the data");
+        assertEquals(-5.0, snapshot.enthalpy(0));
+        assertEquals(new SectionSnapshot(palette, new int[] {3, 7}, entries, mass, new double[] {-5.0, 7.0}),
+                snapshot);
     }
 }
