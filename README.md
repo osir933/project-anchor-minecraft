@@ -119,6 +119,8 @@ You need JDK 25. Then:
 
 The mod jar lands in `anchor-neoforge/build/libs/`. Run the game with `./gradlew :anchor-neoforge:runClient`,
 and the in-game tests on a real server with `./gradlew :anchor-neoforge:runGameTestServer`.
+`python3 .github/scripts/smoke_test.py` installs a NeoForge server the way players do and checks that the
+built jar works on it.
 
 Setting up Minecraft needs access to Mojang's and NeoForged's servers. Without it, build and test only the
 engine:
@@ -131,9 +133,9 @@ engine:
 
 Set `mod_version` in `gradle.properties`, describe the version under its own heading in
 [CHANGELOG.md](CHANGELOG.md), and push the tag `v<mod_version>`. The release workflow builds and tests the
-mod, publishes a GitHub release with the jar and those notes, and uploads the jar to CurseForge when
-`curseforge_project_id` is set and the repository has a `CURSEFORGE_TOKEN` secret. Running the workflow by
-hand checks the CurseForge settings without publishing anything.
+mod, tries the jar on a real server, publishes a GitHub release with the jar and those notes, and uploads the
+jar to CurseForge when `curseforge_project_id` is set and the repository has a `CURSEFORGE_TOKEN` secret.
+Running the workflow by hand checks the CurseForge settings without publishing anything.
 
 ## Licence
 

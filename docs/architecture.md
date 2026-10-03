@@ -158,7 +158,10 @@ The adapter's plain-Java parts have unit tests. Everything that needs Minecraft 
 (`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
 below it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes
 the temperature, a torch warms the air above it, a section written into its chunk and brought in again comes
-back exactly, and the save format keeps every number.
+back exactly, and the save format keeps every number. The game tests load the mod from the build
+directories, so CI also installs a NeoForge server the way players do, starts it with the released jar and
+checks that the mod loads, its self-test passes, heat runs, the server stops cleanly and nothing is logged as an
+error (`.github/scripts/smoke_test.py`).
 
 ## Requests
 
