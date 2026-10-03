@@ -204,6 +204,7 @@ final class LevelHeat {
             return false;
         }
         try {
+            takeInNow(pos);
             return hosted.setTemperature(grid(pos), kelvin);
         } catch (RuntimeException e) {
             stop(e);
@@ -234,7 +235,16 @@ final class LevelHeat {
      * @return the inspection, or empty if the block is not simulated or heat has stopped
      */
     Optional<HostedWorld.Inspection> inspect(BlockPos pos) {
-        return failure == null ? hosted.inspect(grid(pos)) : Optional.empty();
+        if (failure != null) {
+            return Optional.empty();
+        }
+        try {
+            takeInNow(pos);
+            return hosted.inspect(grid(pos));
+        } catch (RuntimeException e) {
+            stop(e);
+            return Optional.empty();
+        }
     }
 
     /**
@@ -245,6 +255,17 @@ final class LevelHeat {
     HeatReport report() {
         return new HeatReport(hosted.status(), hosted.settings().tickSeconds(), lastStepMillis, averageStepMillis,
                 shown, failure);
+    }
+
+    /**
+     * Takes in a block now instead of at the next tick, so that what is read or set is the block that is there.
+     * A block placed this tick would otherwise still be the old one to the simulation.
+     */
+    private void takeInNow(BlockPos pos) {
+        changed.remove(pos.asLong());
+        if (hosted.isImported(sectionKey(pos)) && level.isLoaded(pos)) {
+            hosted.reconcile(grid(pos), Block.getId(level.getBlockState(pos)), Double.NaN);
+        }
     }
 
     /** Takes in the blocks that changed since the last tick. */
