@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -368,6 +369,81 @@ class PhysicalWorldTest {
                 Provenance.SIMULATED));
         world.writeLeaf(to, new CellState(b.material(), b.mass(), b.enthalpy() + joules, b.owner(),
                 Provenance.SIMULATED));
+    }
+
+    @Test
+    void importedSectionsAreDeclaredAndReplaceWhatWasThere() {
+        PhysicalWorld world = airWorld();
+        long key = ORIGIN.sectionKey();
+        world.placeMaterial(ORIGIN, MaterialLibrary.GOLD, 300.0);
+        world.refine(new CellId(ORIGIN, 2, 1, 1, 1));
+        CellState stone = world.fullBlock(MaterialLibrary.GRANITE, 290.0);
+        CellState air = world.fullBlock(MaterialLibrary.AIR, 290.0);
+        Section imported = world.importSection(key, i -> SectionPos.localY(i) < 4 ? stone : air, "chunk load");
+        assertSame(imported, world.section(key));
+        assertEquals(0, world.leafCount(), "the refined block went with the old section");
+        assertEquals(world.materials().indexOf(MaterialLibrary.GRANITE), imported.material(0));
+        assertEquals(world.materials().indexOf(MaterialLibrary.AIR), imported.material(SectionPos.BLOCKS - 1));
+        assertTrue(world.audit().balanced(), () -> world.audit().toString());
+        WorldEvent event = world.events().recent(1).get(0);
+        assertEquals(WorldEvent.Kind.SECTION_ADDED, event.kind());
+        assertEquals("chunk load", event.detail());
+
+        Section uniform = world.importSection(key, i -> air, "reload");
+        assertTrue(uniform.isUniform(), "imported sections are stored compactly");
+        assertTrue(world.audit().balanced(), () -> world.audit().toString());
+    }
+
+    @Test
+    void importingUnknownMaterialsFails() {
+        PhysicalWorld world = airWorld();
+        assertThrows(IllegalArgumentException.class, () -> world.importSection(ORIGIN.sectionKey(),
+                i -> new CellState(999, 1.0, 0.0, 0, Provenance.INITIAL), "bad"));
+        assertNull(world.section(ORIGIN.sectionKey()));
+    }
+
+    @Test
+    void sectionVersionsCountEveryChange() {
+        PhysicalWorld world = airWorld();
+        world.placeMaterial(ORIGIN, MaterialLibrary.GRANITE, 300.0);
+        Section s = world.section(ORIGIN.sectionKey());
+        long v0 = s.version();
+        CellState b = world.readBlock(ORIGIN);
+        world.writeLeaf(CellId.of(ORIGIN), new CellState(b.material(), b.mass(), b.enthalpy() + 1, 0,
+                Provenance.SIMULATED));
+        long v1 = s.version();
+        world.refine(new CellId(ORIGIN, 1, 0, 0, 0));
+        long v2 = s.version();
+        world.placeMaterial(ORIGIN.offset(1, 0, 0), MaterialLibrary.GRANITE, 300.0);
+        long v3 = s.version();
+        assertTrue(v0 < v1 && v1 < v2 && v2 < v3, v0 + " " + v1 + " " + v2 + " " + v3);
+        WorldSnapshot snapshot = world.snapshot();
+        world.restore(snapshot);
+        assertEquals(v3, world.section(ORIGIN.sectionKey()).version());
+    }
+
+    @Test
+    void writeListenersSeeEveryModelWriteButNoEdits() {
+        PhysicalWorld world = airWorld();
+        world.placeMaterial(ORIGIN, MaterialLibrary.GRANITE, 300.0);
+        CellId fine = new CellId(ORIGIN.offset(1, 0, 0), 1, 1, 0, 1);
+        world.placeMaterial(fine.block(), MaterialLibrary.COPPER, 300.0);
+        world.refine(fine);
+        List<String> seen = new ArrayList<>();
+        PhysicalWorld.WriteListener listener = (key, block, before, after) -> seen.add(GridPos.of(key, block)
+                + ": " + (after.enthalpy() - before.enthalpy()));
+        world.addWriteListener(listener);
+        CellState block = world.readBlock(ORIGIN);
+        world.writeLeaf(CellId.of(ORIGIN), new CellState(block.material(), block.mass(), block.enthalpy() + 5,
+                0, Provenance.SIMULATED));
+        CellState leaf = world.readLeaf(fine);
+        world.writeLeaf(fine, new CellState(leaf.material(), leaf.mass(), leaf.enthalpy() - 5, 0,
+                Provenance.SIMULATED));
+        world.placeMaterial(ORIGIN.offset(2, 0, 0), MaterialLibrary.GRANITE, 300.0);
+        assertEquals(List.of(ORIGIN + ": 5.0", fine.block() + ": -5.0"), seen);
+        world.removeWriteListener(listener);
+        world.writeLeaf(CellId.of(ORIGIN), block);
+        assertEquals(2, seen.size());
     }
 
     @Test

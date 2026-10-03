@@ -1,6 +1,7 @@
 package io.github.osir933.anchor.core.physics.thermal;
 
 import io.github.osir933.anchor.core.matter.Material;
+import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.matter.ThermalState;
 import io.github.osir933.anchor.core.model.Domain;
 import io.github.osir933.anchor.core.model.PhysicsModel;
@@ -28,6 +29,17 @@ import java.util.TreeMap;
  * split into substeps short enough to be stable for the most conductive, least massive cell. Phase changes
  * happen by themselves: heat goes into enthalpy, and a cell at its melting point absorbs latent heat at
  * constant temperature until it has melted.
+ *
+ * <p>Still gas conducts very poorly, yet surfaces in air lose heat quickly because the air next to them
+ * moves, and warm air rises. Until the fluid model exists, two correlations stand in for that motion:
+ * <ul>
+ *   <li>the gas side of a face between a gas and other matter uses a natural-convection coefficient of
+ *   {@value #CONVECTION_COEFFICIENT} W/(m²·K), a typical value for still air (2 to 25);</li>
+ *   <li>a horizontal face between two gases with the warmer one below mixes them with a coefficient of
+ *   {@value #BUOYANT_MIXING_COEFFICIENT}·√(ΔT·L) W/(m²·K), with ΔT the temperature difference in kelvin and
+ *   L the face's edge in metres, an order-of-magnitude estimate for the exchange a rising plume drives.</li>
+ * </ul>
+ * Each applies only where it conducts better than the gas itself. Both are evaluated once per step.
  */
 public final class ConductionModel implements PhysicsModel {
 
@@ -40,10 +52,35 @@ public final class ConductionModel implements PhysicsModel {
     /** The most substeps a single step may take. */
     static final int MAX_SUBSTEPS = 4096;
 
-    /** Thermal diffusivity no starter material exceeds by much (gold, about 1.3e-4 m²/s), with margin. */
-    private static final double MAX_DIFFUSIVITY = 2e-4;
+    /** Heat transfer coefficient on the gas side of a surface in still air, in W/(m²·K). */
+    public static final double CONVECTION_COEFFICIENT = 10.0;
 
+    /**
+     * Scale of the mixing between a warm gas and a cooler gas above it, in W/(m²·K) per √(K·m). Buoyancy
+     * moves gas at about √(g·L·ΔT/T), roughly 0.2·√(ΔT·L) m/s near room temperature; carrying air's heat
+     * capacity per volume at a fifth of that speed gives about 30·√(ΔT·L) W/(m²·K).
+     */
+    public static final double BUOYANT_MIXING_COEFFICIENT = 30.0;
+
+    /**
+     * Thermal diffusivity no starter material exceeds by much, in m²/s, with margin. Diamond leads at about
+     * 1.3e-3 m²/s; most metals are below 1.7e-4.
+     */
+    private static final double MAX_DIFFUSIVITY = 1.5e-3;
+
+    private final Isotherms isotherms = new Isotherms();
+    private final ThermalGraph g = new ThermalGraph();
     private List<ValidityIssue> issues = List.of();
+
+    // Work arrays, kept from step to step so a steady simulation allocates almost nothing.
+    private double[] temperature = new double[0];
+    private double[] conductivity = new double[0];
+    private double[] capacity = new double[0];
+    private boolean[] gas = new boolean[0];
+    private Material[] materials = new Material[0];
+    private double[] conductanceSum = new double[0];
+    private double[] working = new double[0];
+    private double[] conductance = new double[0];
 
     /** Creates the model. */
     public ConductionModel() {
@@ -62,8 +99,12 @@ public final class ConductionModel implements PhysicsModel {
     @Override
     public String assumptions() {
         return "Fourier conduction between touching cells, explicit finite volumes. Conductivity is evaluated "
-                + "once per step. Gases conduct but do not flow, and there is no radiation yet. Faces to "
-                + "regions outside the thermal scope are insulated.";
+                + "once per step. Gases do not flow; surfaces in gas use a natural-convection coefficient of "
+                + CONVECTION_COEFFICIENT + " W/(m2 K), and warm gas below cooler gas mixes with a coefficient of "
+                + BUOYANT_MIXING_COEFFICIENT + " sqrt(dT L) W/(m2 K) instead. Liquids conduct but do not "
+                + "convect, and there is no radiation yet. Faces to regions outside the thermal scope are "
+                + "insulated, and temperature differences below " + Isotherms.TOLERANCE_K + " K do not wake "
+                + "idle sections.";
     }
 
     @Override
@@ -74,7 +115,7 @@ public final class ConductionModel implements PhysicsModel {
         int finest = 0;
         for (long key : scope) {
             Section s = world.section(key);
-            if (s == null || ThermalGraph.isQuiet(world, scope, s)) {
+            if (s == null || isotherms.isQuiet(world, scope, s)) {
                 continue;
             }
             cells += SectionPos.BLOCKS - s.refinedBlocks().size() + s.leafCount();
@@ -90,16 +131,16 @@ public final class ConductionModel implements PhysicsModel {
     @Override
     public void step(StepContext context) {
         PhysicalWorld world = context.world();
-        ThermalGraph g = ThermalGraph.build(world, context.sections(Domain.THERMAL));
+        isotherms.prune(world);
+        g.rebuild(world, context.sections(Domain.THERMAL), isotherms);
         MaterialRegistry registry = world.materials();
         int n = g.leafCount;
-        double[] temperature = new double[n];
-        double[] conductivity = new double[n];
-        double[] capacity = new double[n];
-        Material[] materials = new Material[n];
+        resize(n, g.faceCount);
         TreeMap<String, Integer> extrapolated = new TreeMap<>();
         for (int i = 0; i < n; i++) {
             if (g.material[i] == MaterialRegistry.VACUUM || g.mass[i] == 0) {
+                materials[i] = null;
+                conductanceSum[i] = 0;
                 continue;
             }
             Material m = registry.get(g.material[i]);
@@ -108,19 +149,37 @@ public final class ConductionModel implements PhysicsModel {
             temperature[i] = s.temperatureK();
             conductivity[i] = m.conductivity(s);
             capacity[i] = g.mass[i] * m.specificHeat(s);
+            gas[i] = m.dominantPhase(s) == Phase.GAS;
+            conductanceSum[i] = 0;
             if (s.extrapolated()) {
                 extrapolated.merge(m.id(), 1, Integer::sum);
             }
         }
-        double[] conductance = new double[g.faceCount];
-        double[] conductanceSum = new double[n];
         for (int f = 0; f < g.faceCount; f++) {
             int a = g.faceA[f];
             int b = g.faceB[f];
             if (materials[a] == null || materials[b] == null) {
+                conductance[f] = 0;
                 continue;
             }
-            double resistance = g.edge[a] / (2 * conductivity[a]) + g.edge[b] / (2 * conductivity[b]);
+            double ra = g.edge[a] / (2 * conductivity[a]);
+            double rb = g.edge[b] / (2 * conductivity[b]);
+            double resistance;
+            if (gas[a] && gas[b]) {
+                resistance = ra + rb;
+                double rise = temperature[a] - temperature[b];
+                if (g.faceAxis[f] == 1 && rise > 0) {
+                    double mixing = BUOYANT_MIXING_COEFFICIENT * Math.sqrt(rise * Math.sqrt(g.faceArea[f]));
+                    resistance = Math.min(resistance, 1 / mixing);
+                }
+            } else {
+                if (gas[a]) {
+                    ra = Math.min(ra, 1 / CONVECTION_COEFFICIENT);
+                } else if (gas[b]) {
+                    rb = Math.min(rb, 1 / CONVECTION_COEFFICIENT);
+                }
+                resistance = ra + rb;
+            }
             conductance[f] = g.faceArea[f] / resistance;
             conductanceSum[a] += conductance[f];
             conductanceSum[b] += conductance[f];
@@ -143,12 +202,13 @@ public final class ConductionModel implements PhysicsModel {
                     + MAX_SUBSTEPS + " are allowed; temperatures may overshoot"));
         }
         double h = context.dt() / substeps;
-        double[] enthalpy = g.enthalpy.clone();
+        double[] enthalpy = working;
+        System.arraycopy(g.enthalpy, 0, enthalpy, 0, n);
         for (int step = 0; step < substeps; step++) {
             if (step > 0) {
                 for (int i = 0; i < n; i++) {
                     if (materials[i] != null) {
-                        temperature[i] = materials[i].stateFor(enthalpy[i] / g.mass[i]).temperatureK();
+                        temperature[i] = materials[i].temperatureFor(enthalpy[i] / g.mass[i]);
                     }
                 }
             }
@@ -164,10 +224,16 @@ public final class ConductionModel implements PhysicsModel {
                 enthalpy[b] += q;
             }
         }
+        CellState written = CellState.vacuum(Provenance.SIMULATED);
         for (int i = 0; i < n; i++) {
             if (Double.doubleToRawLongBits(enthalpy[i]) != Double.doubleToRawLongBits(g.enthalpy[i])) {
-                world.writeLeaf(g.cells[i], new CellState(g.material[i], g.mass[i], enthalpy[i], g.owner[i],
-                        Provenance.SIMULATED));
+                written.set(g.material[i], g.mass[i], enthalpy[i], g.owner[i], Provenance.SIMULATED);
+                CellId cell = g.cells[i];
+                if (cell == null) {
+                    world.writeBlock(g.sections[g.leafSection[i]].key(), g.leafBlock[i], written);
+                } else {
+                    world.writeLeaf(cell, written);
+                }
             }
         }
         for (var e : extrapolated.entrySet()) {
@@ -180,6 +246,24 @@ public final class ConductionModel implements PhysicsModel {
     @Override
     public List<ValidityIssue> checkValidity(PhysicalWorld world) {
         return issues;
+    }
+
+    /** Makes the work arrays fit a graph, reusing them when their size is still reasonable. */
+    private void resize(int leaves, int faces) {
+        int size = ThermalGraph.capacity(temperature.length, leaves);
+        if (size != temperature.length) {
+            temperature = new double[size];
+            conductivity = new double[size];
+            capacity = new double[size];
+            gas = new boolean[size];
+            materials = new Material[size];
+            conductanceSum = new double[size];
+            working = new double[size];
+        }
+        int faceSize = ThermalGraph.capacity(conductance.length, faces);
+        if (faceSize != conductance.length) {
+            conductance = new double[faceSize];
+        }
     }
 
     private static long substeps(double dt, double stable) {

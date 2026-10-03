@@ -67,6 +67,31 @@ budget of work units. A model that does not fit is deferred and catches up later
 deferred too long runs on credit so nothing starves. After the models run, the world is audited. Models can
 report where they are being used outside their assumptions; those reports go to the event log.
 
+## Heat
+
+Heat moves by **conduction** (`physics.thermal.ConductionModel`): Fourier's law between touching cells,
+solved with explicit finite volumes in substeps short enough to be stable. Every face moves the same heat out
+of one cell and into the other, so energy is conserved to rounding, and phase changes happen by themselves as
+enthalpy crosses a material's latent heat. Until the fluid model exists, two correlations stand in for moving
+air: surfaces in gas exchange heat with a natural-convection coefficient of 10 W/(m²·K), and warm gas below
+cooler gas mixes with a coefficient that grows with the square root of the temperature difference, so heat
+rises.
+
+Two models connect the simulated region to the rest of the world, and both declare the energy they exchange:
+
+- **Heat sources** (`physics.thermal.HeatSourceModel`) stand for things the simulation does not model yet,
+  such as a flame. Each heats its block towards a temperature with at most a set power, and never cools it.
+- **The atmosphere** (`physics.thermal.AtmosphereModel`) relaxes gas cells towards their section's weather
+  temperature with a time constant, exactly for any step length. Without it the simulated region would be a
+  closed box in which heat piles up.
+
+Heat costs what is happening, not what is loaded. A section whose matter and touching neighbours all sit at
+one temperature is skipped (`physics.thermal.Isotherms` caches each section's temperature range by version,
+overall and per face). On top of that, `physics.thermal.ThermalActivity` keeps only sections where something
+changes awake: an edit or a new source wakes a section, each step simulates the awake sections and their
+neighbours, a neighbour that starts changing faster than the calm rate wakes in turn, and a section that has
+changed slower than one kelvin per hour for a while falls asleep. Sleeping sections are paused, not cooled.
+
 ## Requests
 
 Detail is spent where someone asks for it. A **simulation request** (`request.SimulationRequest`) names WHAT

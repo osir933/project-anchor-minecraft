@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.function.IntFunction;
 
 /**
  * The physical world: every section of matter the engine simulates, with its conservation ledger and
@@ -32,6 +33,23 @@ public final class PhysicalWorld {
 
     private static final Element[] ELEMENTS = Element.values();
 
+    /**
+     * Something that follows every model write, such as the tracker that decides which regions are active.
+     * Listeners are not part of the world's state: snapshots neither keep nor restore them.
+     */
+    @FunctionalInterface
+    public interface WriteListener {
+        /**
+         * Called after a physics model wrote a leaf.
+         *
+         * @param sectionKey the packed position of the leaf's section
+         * @param block the index of the leaf's block in the section
+         * @param before the leaf's state before the write; a view that is only valid during the call
+         * @param after the state written; a view that is only valid during the call
+         */
+        void leafWritten(long sectionKey, int block, CellState before, CellState after);
+    }
+
     private final WorldSettings settings;
     private final MaterialRegistry materials;
     private final CellState ambient;
@@ -39,6 +57,10 @@ public final class PhysicalWorld {
     private final ConservationLedger ledger = new ConservationLedger();
     private final EventLog events = new EventLog(EventLog.DEFAULT_CAPACITY);
     private double[][] elementFractions = new double[0][];
+    private final List<WriteListener> writeListeners = new ArrayList<>();
+    private final CellState writeScratch = CellState.vacuum(Provenance.INITIAL);
+    /** The last section looked up, which models usually ask for many times in a row. */
+    private Section lastSection;
     private long tick;
     private int leafCount;
 
@@ -124,7 +146,15 @@ public final class PhysicalWorld {
      * @return the section, or {@code null} if it is not part of the world
      */
     public Section section(long key) {
-        return sections.get(key);
+        Section last = lastSection;
+        if (last != null && last.key() == key) {
+            return last;
+        }
+        Section s = sections.get(key);
+        if (s != null) {
+            lastSection = s;
+        }
+        return s;
     }
 
     /**
@@ -144,7 +174,7 @@ public final class PhysicalWorld {
      *     no section
      */
     public CellState readBlock(GridPos pos) {
-        Section s = sections.get(pos.sectionKey());
+        Section s = section(pos.sectionKey());
         return s == null ? ambient.copy() : s.blockState(pos.indexInSection());
     }
 
@@ -155,7 +185,7 @@ public final class PhysicalWorld {
      * @return {@code true} if the block has smaller cells
      */
     public boolean isRefined(GridPos pos) {
-        Section s = sections.get(pos.sectionKey());
+        Section s = section(pos.sectionKey());
         return s != null && s.isRefined(pos.indexInSection());
     }
 
@@ -166,7 +196,7 @@ public final class PhysicalWorld {
      * @return the octree, or {@code null} if the block is not refined
      */
     public RefinedBlock refinedBlock(GridPos pos) {
-        Section s = sections.get(pos.sectionKey());
+        Section s = section(pos.sectionKey());
         return s == null ? null : s.refinedBlock(pos.indexInSection());
     }
 
@@ -345,6 +375,40 @@ public final class PhysicalWorld {
     }
 
     /**
+     * Brings in a section whose blocks come from outside the simulation, such as a Minecraft chunk section,
+     * and declares the matter it adds. A section already at that position is replaced, and the matter it
+     * held is declared as leaving.
+     *
+     * @param key the packed section position
+     * @param blocks gives the state of the block at each local index, as numbered by
+     *     {@link SectionPos#localIndex}
+     * @param reason a short description for the event log
+     * @return the new section
+     */
+    public Section importSection(long key, IntFunction<CellState> blocks, String reason) {
+        CellState first = blocks.apply(0);
+        checkMaterial(first.material());
+        Section s = new Section(key, first);
+        for (int i = 1; i < SectionPos.BLOCKS; i++) {
+            CellState state = blocks.apply(i);
+            checkMaterial(state.material());
+            s.setBlock(i, state);
+        }
+        s.compact();
+        TotalsBuilder change = new TotalsBuilder(this);
+        Section old = sections.put(key, s);
+        lastSection = null;
+        if (old != null) {
+            leafCount -= old.leafCount();
+            change.addSection(old, -1);
+        }
+        change.addSection(s, 1);
+        ledger.recordExchange(change.build());
+        events.add(new WorldEvent(tick, WorldEvent.Kind.SECTION_ADDED, SectionPos.toString(key), reason));
+        return s;
+    }
+
+    /**
      * Takes a section out of the world and declares the matter that leaves with it.
      *
      * @param key the packed section position
@@ -352,6 +416,7 @@ public final class PhysicalWorld {
      */
     public boolean removeSection(long key) {
         Section s = sections.remove(key);
+        lastSection = null;
         if (s == null) {
             return false;
         }
@@ -368,25 +433,83 @@ public final class PhysicalWorld {
      * moves must add up.
      *
      * @param leaf an existing leaf in a loaded section
-     * @param state the new state
+     * @param state the new state; it is copied, so the caller may reuse the object
      */
     public void writeLeaf(CellId leaf, CellState state) {
-        checkMaterial(state.material());
-        Section s = sections.get(leaf.block().sectionKey());
+        long key = leaf.block().sectionKey();
+        int index = leaf.block().indexInSection();
+        Section s = section(key);
         if (s == null) {
             throw new IllegalStateException("no section holds " + leaf.block());
         }
-        int index = leaf.block().indexInSection();
         RefinedBlock block = s.refinedBlock(index);
         if (block == null) {
             if (leaf.level() != 0) {
                 throw new IllegalArgumentException(leaf + " is not a leaf: its block is not refined");
             }
-            s.setBlock(index, state);
-        } else {
-            block.writeLeaf(leaf, state);
-            s.invalidateTotals();
+            writeBlock(key, index, state);
+            return;
         }
+        checkMaterial(state.material());
+        boolean listened = !writeListeners.isEmpty();
+        if (listened) {
+            writeScratch.set(block.liveLeaf(leaf));
+        }
+        block.writeLeaf(leaf, state);
+        s.invalidateTotals();
+        if (listened) {
+            for (WriteListener listener : writeListeners) {
+                listener.leafWritten(key, index, writeScratch, state);
+            }
+        }
+    }
+
+    /**
+     * Replaces the state of a block that is not refined, so that the block is its own leaf. Like
+     * {@link #writeLeaf}, for physics models, and quicker for models that work block by block.
+     *
+     * @param sectionKey the packed position of a loaded section
+     * @param index the block's index in the section, as numbered by {@link SectionPos#localIndex}
+     * @param state the new state; it is copied, so the caller may reuse the object
+     */
+    public void writeBlock(long sectionKey, int index, CellState state) {
+        checkMaterial(state.material());
+        Section s = section(sectionKey);
+        if (s == null) {
+            throw new IllegalStateException("no section at " + SectionPos.toString(sectionKey));
+        }
+        if (s.isRefined(index)) {
+            throw new IllegalArgumentException(describe(s.blockPos(index)) + " is refined; write its leaves");
+        }
+        boolean listened = !writeListeners.isEmpty();
+        if (listened) {
+            writeScratch.set(s.material(index), s.mass(index), s.enthalpy(index), s.owner(index),
+                    s.provenance(index));
+        }
+        s.setBlock(index, state);
+        if (listened) {
+            for (WriteListener listener : writeListeners) {
+                listener.leafWritten(sectionKey, index, writeScratch, state);
+            }
+        }
+    }
+
+    /**
+     * Starts telling a listener about every model write.
+     *
+     * @param listener the listener; it is told in the order listeners were added
+     */
+    public void addWriteListener(WriteListener listener) {
+        writeListeners.add(Objects.requireNonNull(listener, "listener"));
+    }
+
+    /**
+     * Stops telling a listener about model writes.
+     *
+     * @param listener a listener added before
+     */
+    public void removeWriteListener(WriteListener listener) {
+        writeListeners.remove(listener);
     }
 
     /**
@@ -419,7 +542,7 @@ public final class PhysicalWorld {
         }
         GridPos pos = target.block();
         int index = pos.indexInSection();
-        Section s = sections.get(pos.sectionKey());
+        Section s = section(pos.sectionKey());
         RefinedBlock existing = s == null ? null : s.refinedBlock(index);
         int needed = existing == null ? 7 * target.level() + 1 : existing.leavesToRefine(target);
         if (needed == 0) {
@@ -454,7 +577,7 @@ public final class PhysicalWorld {
         TransitionReport.Kind kind = TransitionReport.Kind.COARSEN;
         GridPos pos = node.block();
         int index = pos.indexInSection();
-        Section s = sections.get(pos.sectionKey());
+        Section s = section(pos.sectionKey());
         RefinedBlock block = s == null ? null : s.refinedBlock(index);
         if (block == null) {
             return TransitionReport.unchanged(kind, node, "the block is not refined");
@@ -633,6 +756,7 @@ public final class PhysicalWorld {
         }
         long from = tick;
         sections.clear();
+        lastSection = null;
         for (Map.Entry<Long, Section> e : snapshot.sections().entrySet()) {
             sections.put(e.getKey(), e.getValue().copy());
         }
@@ -682,7 +806,7 @@ public final class PhysicalWorld {
     }
 
     private Section sectionForEdit(long key) {
-        Section s = sections.get(key);
+        Section s = section(key);
         if (s == null) {
             s = new Section(key, ambient);
             sections.put(key, s);

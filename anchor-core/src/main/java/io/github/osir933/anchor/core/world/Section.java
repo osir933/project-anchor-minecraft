@@ -33,6 +33,7 @@ public final class Section {
     private final TreeMap<Integer, RefinedBlock> refined;
     private final long[] refinedMask;
     private int leafCount;
+    private long version;
 
     private boolean totalsValid;
     private double totalMass;
@@ -63,6 +64,7 @@ public final class Section {
         }
         this.refinedMask = other.refinedMask.clone();
         this.leafCount = other.leafCount;
+        this.version = other.version;
         this.totalsValid = other.totalsValid;
         this.totalMass = other.totalMass;
         this.totalEnthalpy = other.totalEnthalpy;
@@ -81,6 +83,16 @@ public final class Section {
      */
     public long key() {
         return key;
+    }
+
+    /**
+     * Returns a counter that grows with every change to the section, so that derived data such as cached
+     * temperatures can tell when it is stale. A copy starts with the original's count.
+     *
+     * @return the number of changes made to this section's contents
+     */
+    public long version() {
+        return version;
     }
 
     /**
@@ -196,6 +208,47 @@ public final class Section {
     }
 
     /**
+     * Copies the material, mass, enthalpy and owner of every block into arrays, in index order; much quicker
+     * than reading block by block. Refined blocks give their aggregates, as {@link #blockState} does.
+     *
+     * @param material receives material indices, or {@code null} to skip them
+     * @param mass receives masses in kilograms, or {@code null} to skip them
+     * @param enthalpy receives enthalpies in joules, or {@code null} to skip them
+     * @param owner receives owning entity ids, or {@code null} to skip them
+     * @param offset where in the arrays block 0 goes; each array needs room for 4096 values from there
+     */
+    public void copyBlocks(int[] material, double[] mass, double[] enthalpy, long[] owner, int offset) {
+        if (material != null) {
+            this.material.copyTo(material, offset);
+        }
+        if (mass != null) {
+            this.mass.copyTo(mass, offset);
+        }
+        if (enthalpy != null) {
+            this.enthalpy.copyTo(enthalpy, offset);
+        }
+        if (owner != null) {
+            this.owner.copyTo(owner, offset);
+        }
+        for (var e : refined.entrySet()) {
+            CellState a = e.getValue().aggregate();
+            int i = offset + e.getKey();
+            if (material != null) {
+                material[i] = a.material();
+            }
+            if (mass != null) {
+                mass[i] = a.mass();
+            }
+            if (enthalpy != null) {
+                enthalpy[i] = a.enthalpy();
+            }
+            if (owner != null) {
+                owner[i] = a.owner();
+            }
+        }
+    }
+
+    /**
      * Tells whether every block holds the same state and nothing is refined.
      *
      * @return {@code true} for a uniform section
@@ -254,6 +307,24 @@ public final class Section {
         }
     }
 
+    /**
+     * Visits the state of every leaf, in the same order as {@link #forEachLeaf}, without building cell ids.
+     *
+     * @param consumer receives a view of each leaf's state that is only valid during the call
+     */
+    public void forEachLeafState(Consumer<CellState> consumer) {
+        CellState scratch = CellState.vacuum(Provenance.INITIAL);
+        for (int i = 0; i < SectionPos.BLOCKS; i++) {
+            if (isRefined(i)) {
+                refined.get(i).visitLive((cell, state) -> consumer.accept(scratch.set(state)));
+            } else {
+                scratch.set(material.get(i), mass.get(i), enthalpy.get(i), owner.get(i),
+                        PROVENANCES[provenance.get(i)]);
+                consumer.accept(scratch);
+            }
+        }
+    }
+
     /** Visits every leaf's live state without building cell ids; for totals and hashing. */
     void visitLeafStates(Consumer<CellState> consumer) {
         CellState scratch = CellState.vacuum(Provenance.INITIAL);
@@ -292,6 +363,7 @@ public final class Section {
         owner.set(index, state.owner());
         provenance.set(index, (byte) state.provenance().ordinal());
         totalsValid = false;
+        version++;
     }
 
     void fill(CellState state) {
@@ -304,6 +376,7 @@ public final class Section {
         owner.fill(state.owner());
         provenance.fill((byte) state.provenance().ordinal());
         totalsValid = false;
+        version++;
     }
 
     /** Returns the octree of a block, creating a single-leaf one from the block's state if needed. */
@@ -316,6 +389,7 @@ public final class Section {
             leafCount += block.leafCount();
         }
         totalsValid = false;
+        version++;
         return block;
     }
 
@@ -335,11 +409,13 @@ public final class Section {
             provenance.set(index, (byte) root.provenance().ordinal());
         }
         totalsValid = false;
+        version++;
     }
 
     /** Marks the cached totals stale after a leaf was written. */
     void invalidateTotals() {
         totalsValid = false;
+        version++;
     }
 
     /** Returns grids to their single-value form where possible. */
