@@ -15,6 +15,10 @@ final class AnchorItems {
     static final DeferredItem<ThermometerItem> THERMOMETER = ITEMS.registerItem("thermometer", ThermometerItem::new,
             properties -> properties.stacksTo(1));
 
+    /** Shows the temperatures of what the player looks at. */
+    static final DeferredItem<ThermalCameraItem> THERMAL_CAMERA = ITEMS.registerItem("thermal_camera",
+            ThermalCameraItem::new, properties -> properties.stacksTo(1));
+
     private AnchorItems() {
     }
 
@@ -31,6 +35,7 @@ final class AnchorItems {
     private static void addToCreativeTabs(BuildCreativeModeTabContentsEvent event) {
         if (event.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) {
             event.accept(THERMOMETER.get());
+            event.accept(THERMAL_CAMERA.get());
         }
     }
 }

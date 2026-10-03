@@ -292,6 +292,18 @@ final class LevelHeat {
     }
 
     /**
+     * Returns a block's temperature as the simulation has it, without taking in changes to the block first. It
+     * is quick enough to read many blocks a tick, as the thermal camera does.
+     *
+     * @param pos the block
+     * @return the temperature in kelvin, or {@link Double#NaN} if the block is empty or not simulated, or heat
+     *     has stopped
+     */
+    double temperature(BlockPos pos) {
+        return failure == null ? hosted.temperature(grid(pos)) : Double.NaN;
+    }
+
+    /**
      * Returns what the simulation knows about a block.
      *
      * @param pos the block

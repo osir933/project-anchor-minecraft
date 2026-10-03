@@ -21,6 +21,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -48,7 +49,9 @@ final class AnchorGameTests {
             new Case("torch_warms_the_air", 800, AnchorGameTests::torchWarmsTheAir),
             new Case("heat_comes_back_when_a_chunk_loads_again", 400,
                     AnchorGameTests::heatComesBackWhenAChunkLoadsAgain),
-            new Case("saved_heat_keeps_its_numbers", 20, AnchorGameTests::savedHeatKeepsItsNumbers));
+            new Case("saved_heat_keeps_its_numbers", 20, AnchorGameTests::savedHeatKeepsItsNumbers),
+            new Case("thermal_camera_sees_a_hot_block", 200, AnchorGameTests::thermalCameraSeesAHotBlock),
+            new Case("thermal_camera_sees_warm_air", 600, AnchorGameTests::thermalCameraSeesWarmAir));
 
     private AnchorGameTests() {
     }
@@ -222,6 +225,77 @@ final class AnchorGameTests {
         helper.assertTrue(ChunkHeat.CODEC.parse(NbtOps.INSTANCE, tag).result().isEmpty(),
                 "a section without its palette was read");
         helper.succeed();
+    }
+
+    /**
+     * A thermal camera looking at a hot iron block reads its temperature at the crosshair, shows it in many dots
+     * and shows the cold floor too.
+     */
+    private static void thermalCameraSeesAHotBlock(GameTestHelper helper) {
+        BlockPos relative = new BlockPos(2, 1, 4);
+        helper.setBlock(relative, Blocks.IRON_BLOCK);
+        BlockPos pos = helper.absolutePos(relative);
+        // Two blocks in front of the iron, at its height, looking south at it: Minecraft's yaw 0 faces south.
+        Vec3 eye = helper.absoluteVec(new Vec3(2.5, 1.5, 1.5));
+        boolean[] pinned = {false};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (!pinned[0]) {
+                heat.keepSimulated(pos);
+                pinned[0] = true;
+            }
+            if (!heat.setTemperature(pos, 600.0)) {
+                throw helper.assertionException(Component.literal("waiting for the iron to be simulated"));
+            }
+            ThermalCamera.Frame frame = ThermalCamera.capture(helper.getLevel(), heat, eye, 0.0f, 0.0f,
+                    ThermalCamera.View.SURFACES);
+            helper.assertTrue(Math.abs(frame.spotK() - 600.0) < 1.0, "the camera reads "
+                    + HeatText.temperature(frame.spotK()) + " at the iron, which is at 600 K");
+            long hot = frame.dots().stream().filter(dot -> dot.kelvin() > 599.0).count();
+            helper.assertTrue(hot >= 20, "only " + hot + " of " + frame.dots().size() + " dots show the iron");
+            helper.assertTrue(frame.hottestK() > 599.0 && frame.coldestK() < 330.0, "the image spans "
+                    + HeatText.temperature(frame.coldestK()) + " to " + HeatText.temperature(frame.hottestK())
+                    + ", not the floor to the iron");
+            heat.release(pos);
+        });
+    }
+
+    /** In its air view, a thermal camera shows the warm air above a hot iron block and leaves out the rest. */
+    private static void thermalCameraSeesWarmAir(GameTestHelper helper) {
+        BlockPos relative = new BlockPos(2, 1, 3);
+        helper.setBlock(relative, Blocks.IRON_BLOCK);
+        BlockPos pos = helper.absolutePos(relative);
+        // Level with the air just above the iron, looking south through it.
+        Vec3 eye = helper.absoluteVec(new Vec3(2.5, 2.5, 0.5));
+        int[] stage = {0};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (stage[0] == 0) {
+                heat.keepSimulated(pos);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (!heat.setTemperature(pos, 900.0)) {
+                    throw helper.assertionException(Component.literal("waiting for the iron to be simulated"));
+                }
+                stage[0] = 2;
+            }
+            HostedWorld.Inspection air = heat.inspect(pos.above()).orElseThrow(
+                    () -> helper.assertionException(Component.literal("waiting for the air to be simulated")));
+            if (!(air.temperatureK() > air.environmentK() + 2.0)) {
+                throw helper.assertionException(Component.literal("waiting for the iron to warm the air"));
+            }
+            ThermalCamera.Frame frame = ThermalCamera.capture(helper.getLevel(), heat, eye, 0.0f, 0.0f,
+                    ThermalCamera.View.AIR);
+            double warmest = frame.dots().stream().mapToDouble(ThermalCamera.Dot::kelvin).max().orElse(Double.NaN);
+            helper.assertTrue(warmest > air.environmentK() + 2.0, "the warmest air the camera shows is "
+                    + HeatText.temperature(warmest) + "; the air above the iron is "
+                    + HeatText.temperature(air.temperatureK()));
+            long ambient = frame.dots().stream()
+                    .filter(dot -> Math.abs(dot.kelvin() - air.environmentK()) < 0.1).count();
+            helper.assertTrue(ambient == 0, ambient + " dots show air no warmer than the weather");
+            heat.release(pos);
+        });
     }
 
     /** Builds a one-block pool of still water in stone and returns where the water is. */

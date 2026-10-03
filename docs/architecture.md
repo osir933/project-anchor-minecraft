@@ -153,12 +153,20 @@ the game's block there; a block that changed while the section was not simulated
   catching up on the time that passed.
 - **Failure.** An error stops heat in that dimension, logs it and shows it in `/anchor heat status`; the game
   carries on.
+- **Thermal camera.** While a player holds one, `ThermalCamera` takes an image of what they look at every ten
+  game ticks: 24 by 14 rays across 48° stop at the first block outline or fluid within 24 blocks, and each hit
+  becomes a dot on that face, or in the air view the air along the rays that differs from the typical air in
+  view. Dots are vanilla trail particles sent to that player alone, which stay where they are put until the
+  next image, so the client needs no mod code for them. `ThermalScale` maps temperatures to colours that
+  brighten from violet to near white and follows the view with a span that widens at once and narrows
+  slowly.
 
 The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
 (`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
 below it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes
 the temperature, a torch warms the air above it, a section written into its chunk and brought in again comes
-back exactly, and the save format keeps every number. The game tests load the mod from the build
+back exactly, the save format keeps every number, a thermal camera reads a hot iron block at its crosshair and
+shows it among the cold floor, and its air view shows the warm air above the iron and none of the still air. The game tests load the mod from the build
 directories, so CI also installs a NeoForge server the way players do, starts it with the released jar and
 checks that the mod loads, its self-test passes, heat runs, the server stops cleanly and nothing is logged as an
 error (`.github/scripts/smoke_test.py`).
