@@ -15,6 +15,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -172,7 +173,7 @@ final class BlockMapper {
     private static BlockAppearance builtIn(BlockState state) {
         Block block = state.getBlock();
         FluidState fluid = state.getFluidState();
-        if (state.liquid() && !fluid.isEmpty()) {
+        if (isFluidBlock(state) && !fluid.isEmpty()) {
             return fluid(fluid);
         }
         if (block == Blocks.ICE || block == Blocks.PACKED_ICE || block == Blocks.BLUE_ICE
@@ -221,6 +222,14 @@ final class BlockMapper {
         return furnace && state.hasProperty(BlockStateProperties.LIT) ? lit(state, a, FURNACE) : a;
     }
 
+    /**
+     * Returns whether a block is a fluid itself, as water, lava and bubble columns are, rather than a block
+     * standing in one, such as a waterlogged stair.
+     */
+    private static boolean isFluidBlock(BlockState state) {
+        return state.getBlock() instanceof LiquidBlock || state.is(Blocks.BUBBLE_COLUMN);
+    }
+
     /** Describes a fluid: its own block, or the water a thin block stands in. */
     private static BlockAppearance fluid(FluidState fluid) {
         double fill = Math.max(1, Math.min(8, fluid.getAmount())) / 8.0;
@@ -250,6 +259,9 @@ final class BlockMapper {
     }
 
     /** Guesses a material from the sound a block makes, for names that say nothing. */
+    // The sound without a position is deprecated for the sound at one, but a block is described once for
+    // everywhere it stands, so its own sound is the one wanted.
+    @SuppressWarnings("deprecation")
     private static MaterialGuess.Guess bySound(BlockState state, String path) {
         SoundType sound = state.getSoundType();
         if (sound == SoundType.WOOD) {
@@ -296,7 +308,7 @@ final class BlockMapper {
             return layers(state);
         }
         FluidState fluid = state.getFluidState();
-        if (state.liquid() && !fluid.isEmpty()) {
+        if (isFluidBlock(state) && !fluid.isEmpty()) {
             return Math.max(1, Math.min(8, fluid.getAmount())) / 8.0;
         }
         return shapeFill(state);
