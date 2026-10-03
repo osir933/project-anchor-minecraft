@@ -27,19 +27,22 @@ neoForge {
         client {
             client()
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            logLevel = org.slf4j.event.Level.DEBUG
         }
         server {
             server()
             programArgument '--nogui'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            logLevel = org.slf4j.event.Level.DEBUG
         }
+        // Runs Anchor's game tests on a real server and exits with the number of failed tests; CI runs it.
         gameTestServer {
             type = 'gameTestServer'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            logLevel = org.slf4j.event.Level.INFO
         }
         configureEach {
             systemProperty 'forge.logging.markers', 'REGISTRIES'
-            logLevel = org.slf4j.event.Level.DEBUG
         }
     }
 
@@ -55,6 +58,12 @@ neoForge {
 dependencies {
     // Compile against the core only; its classes are shipped inside this mod's jar (see `jar` below).
     compileOnly core
+
+    // Unit tests cover the adapter's plain-Java parts; in-game behaviour is covered by game tests.
+    testImplementation core
+    testImplementation platform("org.junit:junit-bom:${junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 // Generates META-INF/neoforge.mods.toml from src/main/templates using the values in gradle.properties.

@@ -31,6 +31,14 @@ jobs:
       - name: Build and test
         run: ./gradlew build --stacktrace --warning-mode all
 
+      # Starts a server with the mod and runs its game tests. The log check makes sure tests really ran:
+      # a server that found none would otherwise pass.
+      - name: Game tests
+        run: |
+          set -o pipefail
+          ./gradlew :anchor-neoforge:runGameTestServer --stacktrace --warning-mode all 2>&1 | tee "$RUNNER_TEMP/gametest.log"
+          grep -E 'All [1-9][0-9]* required tests passed' "$RUNNER_TEMP/gametest.log"
+
       - name: Upload mod jar
         uses: actions/upload-artifact@v6
         with:

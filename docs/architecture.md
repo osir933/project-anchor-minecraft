@@ -110,6 +110,40 @@ Each step the hosted world runs heat where something is happening and returns th
 now show differently. `host.ImportPlanner` picks the sections around the players, nearest first and a few
 per tick, and lets them go a margin further out.
 
+## In Minecraft
+
+`anchor-neoforge` connects a hosted world to each Minecraft dimension and holds no physical rules of its own.
+
+- **Blocks.** `BlockMapper` describes each block state the first time the simulation meets its id. The
+  `anchor:materials` data map comes first, so data packs can describe any block. Built-in rules cover the
+  blocks whose heat or phase matters: water, ice, snow, lava, magma, fire, torches, lanterns, candles,
+  campfires and lit furnaces. Everything else is guessed from its name (`MaterialGuess`) or its sound, with
+  its fill from its collision shape. A block filling less than a fifth of its space counts as the air or
+  water around it, so a torch is a heat source in air. Reloading tags or data packs describes every block
+  again.
+- **Dimensions.** `LevelHeat` runs one hosted world per dimension, started when the dimension first ticks.
+  Block changes arrive through NeoForge's neighbour notifications and are taken in, in sorted order, at the
+  start of the next tick. Every few game ticks it imports the sections players have come near, lets go of
+  those they have left, compares one imported section with the level to catch any change nobody reported,
+  and steps the simulation. Unloading a chunk lets go of its sections. Frozen time (`/tick freeze`) pauses
+  heat with everything else.
+- **Phase changes.** A step returns the blocks whose matter now shows a different phase. `LevelHeat` checks
+  that block and matter still agree with the step, then places the replacement the appearance names. Ice
+  holds the same matter as water, so the block keeps its exact state: water frozen at −5 °C becomes ice at
+  −5 °C. Steam leaves in a puff of cloud, and the air that takes its place starts at the steam's
+  temperature.
+- **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
+  snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
+  vanilla does, and the result is held between −30 and 45 °C (`Climate`).
+- **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
+  simulation steps every four game ticks. Both are settings.
+- **Failure.** An error stops heat in that dimension, logs it and shows it in `/anchor heat status`; the game
+  carries on.
+
+The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
+(`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
+below it becomes ice, water heated past boiling leaves air, and a torch warms the air above it.
+
 ## Requests
 
 Detail is spent where someone asks for it. A **simulation request** (`request.SimulationRequest`) names WHAT
@@ -135,7 +169,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 
 ## Roadmap
 
-Phase 0 (this foundation) is followed by: heat and phase change with the first playable alpha; structure and
-fracture; rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and
-chemistry; electricity and control; causal targeting and molecular dynamics; and finally life and society,
-on the way to 1.0.
+Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in. Next for heat:
+saving temperatures with the world, radiation, convection in liquids, and refining blocks where
+temperatures change steeply. After that come structure and fracture; rigid bodies, contact and emergent
+tools; materials processing and microstructure; fluids and chemistry; electricity and control; causal
+targeting and molecular dynamics; and finally life and society, on the way to 1.0.

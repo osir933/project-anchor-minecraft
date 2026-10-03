@@ -34,6 +34,7 @@ class HostedWorldTest {
     private static final int SLAB = 7;
     private static final int DOUBLE_SLAB = 8;
     private static final int HEATED_SNOW = 9;
+    private static final int DUST = 10;
 
     private static final BlockAppearance SNOW_LOOK = BlockAppearance.of("anchor:powder_snow").shownAs(Phase.SOLID)
             .becoming(Phase.LIQUID, "air").becoming(Phase.GAS, "air");
@@ -52,6 +53,7 @@ class HostedWorldTest {
         BlockAppearance.of("anchor:granite").withFill(0.5),
         BlockAppearance.of("anchor:granite"),
         SNOW_LOOK.heatedBy(new HeatSourceModel.Source(400.0, 1e5)),
+        BlockAppearance.of("anchor:air"),
     };
 
     private static final long ORIGIN = SectionPos.pack(0, 0, 0);
@@ -252,6 +254,42 @@ class HostedWorldTest {
         assertTrue(flame > above && above > 290.0, flame + " K at the torch, " + above + " K above it");
         assertTrue(above > beside, "heat rises: " + above + " K above, " + beside + " K beside");
         assertTrue(h.world().audit().balanced(), () -> h.world().audit().toString());
+    }
+
+    @Test
+    void aChangeBetweenIdsThatLookTheSameLeavesThePhysicsAlone() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, terrain(Map.of()), 290.0);
+        GridPos dust = new GridPos(4, 8, 4);
+        CellState before = h.world().readBlock(dust);
+        assertTrue(h.reconcile(dust, DUST, 500.0), "the id changed");
+        assertEquals(before, h.world().readBlock(dust));
+        assertEquals(0, h.status().awakeSections(), "nothing physical happened, so the section sleeps on");
+        assertEquals(0, h.status().reconciled());
+        assertFalse(h.reconcile(dust, DUST, Double.NaN));
+        assertEquals(0, h.verifySection(ORIGIN, terrain(Map.of(dust, DUST))), "the new id was recorded");
+        assertTrue(h.reconcile(dust, STONE, Double.NaN));
+        assertEquals(1, h.status().awakeSections());
+    }
+
+    @Test
+    void anExperimentCanSetATemperatureAndTheNextTickShowsWhatItDid() {
+        HostedWorld h = hosted();
+        GridPos ice = new GridPos(6, 8, 6);
+        h.importSection(ORIGIN, terrain(Map.of(ice, ICE)), 260.0);
+        assertEquals(0, h.status().awakeSections());
+        double mass = h.world().readBlock(ice).mass();
+        assertTrue(h.setTemperature(ice, 290.0));
+        assertEquals(290.0, h.temperature(ice), 1e-9);
+        assertEquals(mass, h.world().readBlock(ice).mass(), "the matter stays");
+        assertEquals(1, h.status().awakeSections(), "the change wakes its section");
+        PhaseChange melted = h.tick().phaseChanges().get(0);
+        assertEquals(ice, melted.pos());
+        assertEquals(Phase.LIQUID, melted.now());
+        assertEquals("water", melted.hostBlock());
+        assertTrue(h.world().audit().balanced(), () -> h.world().audit().toString());
+        assertFalse(h.setTemperature(new GridPos(6, 8, 40), 290.0), "the block is not imported");
+        assertThrows(IllegalArgumentException.class, () -> h.setTemperature(ice, -1.0));
     }
 
     @Test

@@ -399,7 +399,8 @@ public final class HostedWorld {
 
     /**
      * Takes in a block the host changed. A block in a section that is not imported is ignored; it will be
-     * read when its section is imported.
+     * read when its section is imported. A change between two ids that look the same, such as redstone dust
+     * changing its power, only records the new id: it neither touches the block's state nor wakes its section.
      *
      * @param pos the block
      * @param hostId the host's id for the block now
@@ -422,6 +423,10 @@ public final class HostedWorld {
         Resolved before = resolve(old);
         Resolved after = resolve(hostId);
         ids.set(index, hostId);
+        if (before.equals(after)) {
+            // Only the host's id changed, as when redstone dust changes its power: the physics is untouched.
+            return true;
+        }
         ids.presentable += (after.appearance().presentable() ? 1 : 0) - (before.appearance().presentable() ? 1 : 0);
         if (after.appearance().source() != null) {
             sources.put(pos, after.appearance().source());
@@ -435,6 +440,35 @@ public final class HostedWorld {
         }
         activity.wake(key);
         reconciled++;
+        return true;
+    }
+
+    /**
+     * Sets a block's temperature and keeps its matter, as the starting condition of an experiment. The change
+     * is declared in the conservation ledger like any edit from outside, and wakes the block's section; if the
+     * new temperature puts the matter in another phase, the next {@link #tick} reports it.
+     *
+     * @param pos the block
+     * @param temperatureK the new temperature in kelvin
+     * @return {@code true} if the block was set; {@code false} if its section is not imported or it holds no
+     *     matter
+     */
+    public boolean setTemperature(GridPos pos, double temperatureK) {
+        if (!(temperatureK > 0) || !Double.isFinite(temperatureK)) {
+            throw new IllegalArgumentException("temperature must be positive: " + temperatureK);
+        }
+        long key = pos.sectionKey();
+        if (!hosted.containsKey(key)) {
+            return false;
+        }
+        CellState c = world.readBlock(pos);
+        if (c.material() == MaterialRegistry.VACUUM || c.mass() == 0) {
+            return false;
+        }
+        Material m = world.materials().get(c.material());
+        world.setBlock(pos, new CellState(c.material(), c.mass(), c.mass() * m.specificEnthalpy(temperatureK),
+                c.owner(), Provenance.INITIAL));
+        activity.wake(key);
         return true;
     }
 
