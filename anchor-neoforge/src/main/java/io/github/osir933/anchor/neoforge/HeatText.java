@@ -168,7 +168,8 @@ final class HeatText {
             lines.add("  The log has the details. Heat restarts when the world is loaded again.");
         }
         lines.add(String.format(Locale.ROOT, "  %d sections loaded, %d awake, %d simulated in the last step; "
-                + "%d heat sources", w.sections(), w.awakeSections(), w.simulatedSections(), w.sources()));
+                + "%d heat sources, %d faces radiating", w.sections(), w.awakeSections(), w.simulatedSections(),
+                w.sources(), w.radiatingFaces()));
         lines.add(String.format(Locale.ROOT, "  %s simulated in %d steps of %s; the last took %.2f ms, on average"
                 + " %.2f ms", duration(w.simulatedSeconds()), w.tick(), duration(s.stepSeconds()),
                 s.lastStepMillis(), s.averageStepMillis()));

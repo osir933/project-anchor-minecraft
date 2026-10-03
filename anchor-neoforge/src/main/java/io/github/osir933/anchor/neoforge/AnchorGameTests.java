@@ -56,7 +56,8 @@ final class AnchorGameTests {
             new Case("saved_heat_keeps_its_numbers", 20, AnchorGameTests::savedHeatKeepsItsNumbers),
             new Case("thermal_camera_sees_a_hot_block", 200, AnchorGameTests::thermalCameraSeesAHotBlock),
             new Case("thermal_camera_sees_warm_air", 600, AnchorGameTests::thermalCameraSeesWarmAir),
-            new Case("thermal_camera_explains_itself", 20, AnchorGameTests::thermalCameraExplainsItself));
+            new Case("thermal_camera_explains_itself", 20, AnchorGameTests::thermalCameraExplainsItself),
+            new Case("hot_iron_warms_stone_across_air", 600, AnchorGameTests::hotIronWarmsStoneAcrossAir));
 
     private AnchorGameTests() {
     }
@@ -313,6 +314,40 @@ final class AnchorGameTests {
                     && t.getKey().equals(wanted)), "the tooltip has no line " + wanted + ": " + lines);
         }
         helper.succeed();
+    }
+
+    /**
+     * An iron block held at 1500 K warms a stone block across two blocks of air. Still air carries almost no
+     * heat sideways and the warm air rises away from the stone, so the heat that gets there is radiated.
+     */
+    private static void hotIronWarmsStoneAcrossAir(GameTestHelper helper) {
+        BlockPos ironAt = new BlockPos(2, 1, 1);
+        BlockPos stoneAt = new BlockPos(2, 1, 4);
+        helper.setBlock(ironAt, Blocks.IRON_BLOCK);
+        helper.setBlock(stoneAt, Blocks.STONE);
+        BlockPos iron = helper.absolutePos(ironAt);
+        BlockPos stone = helper.absolutePos(stoneAt);
+        boolean[] pinned = {false};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (!pinned[0]) {
+                heat.keepSimulated(iron);
+                heat.keepSimulated(stone);
+                pinned[0] = true;
+            }
+            if (!heat.setTemperature(iron, 1500.0)) {
+                throw helper.assertionException(Component.literal("waiting for the iron to be simulated"));
+            }
+            HostedWorld.Inspection is = heat.inspect(stone).orElseThrow(
+                    () -> helper.assertionException(Component.literal("waiting for the stone to be simulated")));
+            if (!(is.temperatureK() > is.environmentK() + 3.0)) {
+                throw helper.assertionException(Component.literal("the stone is at "
+                        + HeatText.temperature(is.temperatureK()) + ", hardly warmer than its surroundings at "
+                        + HeatText.temperature(is.environmentK())));
+            }
+            heat.release(iron);
+            heat.release(stone);
+        });
     }
 
     /** Builds a one-block pool of still water in stone and returns where the water is. */

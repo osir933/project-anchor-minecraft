@@ -9,6 +9,7 @@ import io.github.osir933.anchor.core.model.TickReport;
 import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
 import io.github.osir933.anchor.core.physics.thermal.ConductionModel;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
+import io.github.osir933.anchor.core.physics.thermal.RadiationModel;
 import io.github.osir933.anchor.core.physics.thermal.ThermalActivity;
 import io.github.osir933.anchor.core.space.Direction;
 import io.github.osir933.anchor.core.space.GridPos;
@@ -187,14 +188,15 @@ public final class HostedWorld {
      * @param awakeSections awake sections
      * @param simulatedSections sections heat ran in during the last tick
      * @param sources heat sources
+     * @param radiatingFaces block faces that radiated the last time radiation ran
      * @param tick ticks simulated
      * @param simulatedSeconds simulated time in seconds
      * @param phaseChanges phase changes handed to the host so far
      * @param reconciled block changes from the host that changed something
      * @param conserved whether the last conservation audit balanced
      */
-    public record Status(int sections, int awakeSections, int simulatedSections, int sources, long tick,
-            double simulatedSeconds, long phaseChanges, long reconciled, boolean conserved) {
+    public record Status(int sections, int awakeSections, int simulatedSections, int sources, int radiatingFaces,
+            long tick, double simulatedSeconds, long phaseChanges, long reconciled, boolean conserved) {
     }
 
     /** The host's ids for the blocks of one imported section. */
@@ -240,6 +242,7 @@ public final class HostedWorld {
     private final Scheduler scheduler;
     private final HeatSourceModel sources = new HeatSourceModel();
     private final AtmosphereModel atmosphere;
+    private final RadiationModel radiation;
     private final ThermalActivity activity;
     private final TreeMap<Long, Hosted> hosted = new TreeMap<>();
     private Resolved[] resolvedById = new Resolved[0];
@@ -262,11 +265,13 @@ public final class HostedWorld {
         this.appearances = Objects.requireNonNull(appearances, "appearances");
         this.settings = Objects.requireNonNull(settings, "settings");
         this.atmosphere = new AtmosphereModel(settings.relaxationSeconds(), settings.defaultEnvironmentK());
+        this.radiation = new RadiationModel(atmosphere::environment);
         this.activity = new ThermalActivity(world.materials(), settings.calmRate(), settings.calmSteps());
         world.addWriteListener(activity);
         this.scheduler = new Scheduler(settings.tickSeconds(), settings.budgetPerTick(), 4, settings.auditInterval());
         scheduler.register(sources);
         scheduler.register(new ConductionModel());
+        scheduler.register(radiation);
         scheduler.register(atmosphere);
     }
 
@@ -689,7 +694,8 @@ public final class HostedWorld {
      */
     public Status status() {
         return new Status(hosted.size(), activity.awakeSections().size(), lastScope.size(), sources.sources().size(),
-                world.tick(), world.tick() * settings.tickSeconds(), phaseChanges, reconciled, conserved);
+                radiation.lastRadiatingFaces(), world.tick(), world.tick() * settings.tickSeconds(), phaseChanges,
+                reconciled, conserved);
     }
 
     // ---- internals ----
