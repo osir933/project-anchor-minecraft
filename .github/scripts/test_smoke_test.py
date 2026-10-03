@@ -16,6 +16,17 @@ FAKE_SERVER = textwrap.dedent("""\
     import sys
     import time
 
+    NOISE = \'\'\'2026-10-03T14:47:36.676057777Z Server thread ERROR An exception occurred processing Appender DebugFile
+    org.apache.logging.log4j.core.appender.AppenderLoggingException: java.lang.NoClassDefFoundError: Could not \\
+    initialize class io.netty.channel.kqueue.Native
+    \tat org.apache.logging.log4j.core.config.AppenderControl.tryCallAppender(AppenderControl.java:164)
+    \tat io.netty.channel.kqueue.KQueue.<clinit>(KQueue.java:54)
+    Caused by: java.lang.ExceptionInInitializerError: Exception java.lang.IllegalStateException: Only supported \\
+    on OSX/BSD [in thread "Server thread"]
+    \tat io.netty.channel.kqueue.Native.loadNativeLibrary(Native.java:159)
+    \t... 6 more
+    \'\'\'
+
     mode = sys.argv[1]
 
     def log(message, level="INFO", thread="Server thread", logger="minecraft/MinecraftServer"):
@@ -32,6 +43,9 @@ FAKE_SERVER = textwrap.dedent("""\
     if mode == "trace":
         log("Something went wrong", level="WARN")
         print("java.lang.NoClassDefFoundError: io/github/osir933/anchor/core/Engine", flush=True)
+        print("\tat io.github.osir933.anchor.neoforge.AnchorMod.<init>(AnchorMod.java:30)", flush=True)
+    if mode in ("noise", "error"):
+        print(NOISE, flush=True)
     log('Done (1.234s)! For help, type "help"', logger="minecraft/DedicatedServer")
     for command in sys.stdin:
         command = command.strip()
@@ -72,7 +86,10 @@ class SmokeTestTest(unittest.TestCase):
         self.run_fake("ok")
 
     def test_errors_in_the_log_fail_even_when_everything_answers(self):
-        self.assert_fails("error", "1 error lines in the log, the first: [12:00:00] [Server thread/ERROR]")
+        self.assert_fails("error", "the log shows an error: [12:00:00] [Server thread/ERROR]")
+
+    def test_the_servers_own_known_stack_traces_are_not_errors(self):
+        self.run_fake("noise")
 
     def test_stack_traces_under_warnings_fail(self):
         self.assert_fails("trace", "java.lang.NoClassDefFoundError")

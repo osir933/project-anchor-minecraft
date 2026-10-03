@@ -36,10 +36,9 @@ STEPS = [
      r"Heat is not simulated|stopped after an error|NOT balanced"),
 ]
 
-# A small world that generates quickly. No player joins, so the server needs no connection to Mojang.
+# The same world every run, kept small. No player joins, so the server needs no connection to Mojang.
 SERVER_PROPERTIES = """\
 # Written by Anchor's smoke test.
-level-type=minecraft\\:flat
 level-seed=anchor
 online-mode=false
 view-distance=3
@@ -48,8 +47,15 @@ simulation-distance=3
 
 # A log line at the ERROR or FATAL level, such as "[12:00:00] [Server thread/ERROR] [logger/]: message".
 ERROR_LINE = re.compile(r"^\[[^\]]*\] \[[^\]]*/(ERROR|FATAL)\]")
-# The first line of a stack trace, which a warning can carry without being an error.
+# The first line of a stack trace, which a warning can carry without being an error, and the lines after it.
 TRACE_LINE = re.compile(r"^(Exception in thread .*|(Caused by: )?[a-zA-Z_$][\w.$]*(Exception|Error)(: .*)?)$")
+TRACE_CONTINUATION = re.compile(r"^(\s+at |\s*\.\.\. \d+ more|\s*Caused by: |\s*Suppressed: )")
+# Stack traces that the server logs with or without Anchor, each matched by a line only that trace has.
+KNOWN_TRACES = [
+    # Netty checks whether macOS's kqueue is there, and on other systems log4j fails to write the stack
+    # trace of that check into the debug log.
+    re.compile(r"io\.netty\.channel\.kqueue\.Native"),
+]
 
 
 class SmokeTestError(Exception):
@@ -196,14 +202,33 @@ class Server:
                 pass
 
 
+def traces(lines):
+    """Returns the stack traces in a log, each as the index of its first line and its lines."""
+    found = []
+    current = None
+    for index, line in enumerate(lines):
+        if current is not None and TRACE_CONTINUATION.match(line):
+            current.append(line)
+        elif TRACE_LINE.match(line):
+            current = [line]
+            found.append((index, current))
+        else:
+            current = None
+    return found
+
+
 def check_log(lines, version):
     """Returns what is wrong in a server's log: the mod not loading, errors and stack traces."""
     problems = []
     if not any(f"Anchor {version} loaded" in line for line in lines):
         problems.append(f"the log never says 'Anchor {version} loaded'")
-    errors = [line for line in lines if ERROR_LINE.match(line) or TRACE_LINE.match(line)]
-    if errors:
-        problems.append(f"{len(errors)} error lines in the log, the first: {errors[0]}")
+    errors = [(index, line) for index, line in enumerate(lines) if ERROR_LINE.match(line)]
+    errors += [(index, trace[0]) for index, trace in traces(lines)
+               if not any(known.search(line) for known in KNOWN_TRACES for line in trace)]
+    if len(errors) == 1:
+        problems.append(f"the log shows an error: {errors[0][1]}")
+    elif errors:
+        problems.append(f"the log shows {len(errors)} errors, the first: {min(errors)[1]}")
     return problems
 
 
