@@ -15,7 +15,8 @@ import java.util.List;
  * moves to data packs.
  *
  * <p>All values are at standard atmospheric pressure. Solids keep their 300 K density at all temperatures
- * for now; thermal expansion arrives with the structural model.
+ * for now; thermal expansion arrives with the structural model. Liquids expand as they warm and carry a
+ * viscosity, because warm liquid rising and cold liquid sinking is how they move most of their heat.
  */
 public final class MaterialLibrary {
 
@@ -56,6 +57,21 @@ public final class MaterialLibrary {
             "Engineering estimate from typical published values for similar materials; no single reference "
                     + "value exists",
             DataQuality.ESTIMATED);
+    /** Viscosity models for silicate melts. */
+    public static final Source MELT_VISCOSITY = new Source("melt-viscosity",
+            "Vogel-Fulcher-Tammann fits: D. Giordano, J. K. Russell and D. B. Dingwell, Earth Planet. Sci. Lett. "
+                    + "271 (2008) 123-134, for a typical dry basalt; K.-U. Hess and D. B. Dingwell, Am. Mineral. 81 "
+                    + "(1996) 1297-1300, for a granite holding 0.1 % water; and an Arrhenius line through the "
+                    + "annealing and softening points of fused silica. Melt viscosity changes by orders of magnitude "
+                    + "with composition, dissolved water and crystals",
+            DataQuality.ESTIMATED);
+    /** Densities and viscosities of liquid metals. */
+    public static final Source LIQUID_METALS = new Source("liquid-metals",
+            "M. J. Assael et al., J. Phys. Chem. Ref. Data 35 (2006) 285 for liquid aluminium and iron, and 39 "
+                    + "(2010) 033105 for the viscosity of liquid copper; the viscosity of liquid gold from the "
+                    + "Arrhenius fit in Smithells Metals Reference Book, 8th ed. (2004); the density slopes of "
+                    + "liquid copper and gold are typical published values",
+            DataQuality.ESTIMATED);
     /** Minecraft materials with no real counterpart. */
     public static final Source GAME_MATERIAL = new Source("game-material",
             "Minecraft material with no real counterpart; the properties of the closest real material, named in "
@@ -73,9 +89,14 @@ public final class MaterialLibrary {
                     360.0, 4203.0, 373.15, 4217.0),
             table(INCROPERA, 273.15, 0.569, 280.0, 0.582, 300.0, 0.613, 320.0, 0.640, 340.0, 0.660,
                     360.0, 0.674, 373.15, 0.680),
-            table(INCROPERA, 273.15, 1000.0, 300.0, 997.0, 320.0, 989.0, 340.0, 979.0, 360.0, 967.0,
-                    373.15, 958.0),
-            constant(0.96, EMISSIVITY));
+            // Water is densest at 4 °C, so a lake cooled below that keeps its coldest water on top and freezes there.
+            table(CRC, 273.15, 999.84, 275.15, 999.94, 277.15, 999.97, 279.15, 999.94, 281.15, 999.85,
+                    283.15, 999.70, 288.15, 999.10, 293.15, 998.21, 298.15, 997.05, 303.15, 995.65, 313.15, 992.22,
+                    323.15, 988.04, 333.15, 983.20, 343.15, 977.76, 353.15, 971.79, 363.15, 965.31, 373.15, 958.35),
+            constant(0.96, EMISSIVITY),
+            table(INCROPERA, 273.15, 1.750e-3, 280.0, 1.422e-3, 290.0, 1.080e-3, 300.0, 0.855e-3, 310.0, 0.695e-3,
+                    320.0, 0.577e-3, 330.0, 0.489e-3, 340.0, 0.420e-3, 350.0, 0.365e-3, 360.0, 0.324e-3,
+                    373.15, 0.279e-3));
     /** Boiling of water at one atmosphere. */
     private static final PhaseTransition WATER_BOILING = new PhaseTransition("boiling", 373.124, 2257e3, IAPWS);
     /** Steam at one atmosphere. */
@@ -93,8 +114,12 @@ public final class MaterialLibrary {
     private static final PhaseRegion SILICA_MELT = new PhaseRegion(Phase.LIQUID, "silica melt", 1996.0, 2500.0,
             constant(1430.0, JANAF),
             constant(1.5, ROCK_ESTIMATE),
+            // Silica melt barely expands as it warms. Held at one density it only conducts, which its viscosity,
+            // a million times water's, makes nearly true anyway.
             constant(2200.0, CRC),
-            constant(0.90, EMISSIVITY));
+            constant(0.90, EMISSIVITY),
+            table(MELT_VISCOSITY, 1996.0, 4.96e5, 2100.0, 1.24e5, 2200.0, 3.69e4, 2300.0, 1.22e4, 2400.0, 4.43e3,
+                    2500.0, 1.74e3));
     /** Melting of basaltic rock, one transition standing in for a range. */
     private static final PhaseTransition BASALT_MELTING =
             new PhaseTransition("melting", 1423.0, 400e3, ROCK_ESTIMATE);
@@ -103,8 +128,11 @@ public final class MaterialLibrary {
             2500.0,
             constant(1500.0, ROCK_ESTIMATE),
             constant(1.5, ROCK_ESTIMATE),
-            constant(2700.0, ROCK_ESTIMATE),
-            constant(0.95, EMISSIVITY));
+            // Silicate melts expand by about 5e-5 per kelvin.
+            table(ROCK_ESTIMATE, 1423.0, 2700.0, 2500.0, 2554.6),
+            constant(0.95, EMISSIVITY),
+            table(MELT_VISCOSITY, 1423.0, 147.5, 1450.0, 93.7, 1475.0, 63.0, 1500.0, 43.2, 1550.0, 21.5,
+                    1600.0, 11.4, 1700.0, 3.79, 1800.0, 1.49, 2000.0, 0.34, 2250.0, 0.087, 2500.0, 0.031));
 
     /** Water substance: ice Ih, liquid water and steam. */
     public static final Material WATER = Material.builder("anchor:water", "Water")
@@ -148,8 +176,10 @@ public final class MaterialLibrary {
             .region(new PhaseRegion(Phase.LIQUID, "liquid iron", 1811.0, 3134.0,
                     constant(824.0, JANAF),
                     constant(40.0, CRC),
-                    constant(7015.0, CRC),
-                    constant(0.40, EMISSIVITY)))
+                    table(LIQUID_METALS, 1811.0, 7034.96, 3134.0, 5809.86),
+                    constant(0.40, EMISSIVITY),
+                    table(LIQUID_METALS, 1811.0, 5.851e-3, 1900.0, 4.983e-3, 2000.0, 4.232e-3, 2200.0, 3.192e-3,
+                            2500.0, 2.276e-3, 2800.0, 1.744e-3, 3134.0, 1.377e-3)))
             .notes("The Curie point near 1043 K appears as a peak in specific heat, approximated by a few "
                     + "points. Emissivity assumes an oxidised surface. Boiling at 3134 K is outside the range.")
             .build();
@@ -168,8 +198,10 @@ public final class MaterialLibrary {
             .region(new PhaseRegion(Phase.LIQUID, "liquid copper", 1357.77, 2835.0,
                     constant(495.0, JANAF),
                     constant(165.0, CRC),
-                    constant(8020.0, CRC),
-                    constant(0.15, EMISSIVITY)))
+                    table(LIQUID_METALS, 1357.77, 8020.0, 2835.0, 6838.2),
+                    constant(0.15, EMISSIVITY),
+                    table(LIQUID_METALS, 1357.77, 4.020e-3, 1400.0, 3.744e-3, 1500.0, 3.213e-3, 1600.0, 2.811e-3,
+                            1800.0, 2.250e-3, 2100.0, 1.744e-3, 2500.0, 1.366e-3, 2835.0, 1.174e-3)))
             .notes("Emissivity assumes an oxidised surface; polished copper is near 0.03.")
             .build();
 
@@ -187,8 +219,11 @@ public final class MaterialLibrary {
             .region(new PhaseRegion(Phase.LIQUID, "liquid aluminium", 933.47, 2792.0,
                     constant(1177.0, JANAF),
                     constant(91.0, CRC),
-                    constant(2375.0, CRC),
-                    constant(0.10, EMISSIVITY)))
+                    table(LIQUID_METALS, 933.47, 2377.23, 2792.0, 1799.23),
+                    constant(0.10, EMISSIVITY),
+                    table(LIQUID_METALS, 933.47, 1.344e-3, 1000.0, 1.178e-3, 1100.0, 0.9955e-3, 1200.0, 0.8653e-3,
+                            1400.0, 0.6943e-3, 1700.0, 0.5498e-3, 2000.0, 0.4670e-3, 2400.0, 0.4003e-3,
+                            2792.0, 0.3592e-3)))
             .build();
 
     /** Pure gold. */
@@ -205,8 +240,10 @@ public final class MaterialLibrary {
             .region(new PhaseRegion(Phase.LIQUID, "liquid gold", 1337.33, 3129.0,
                     constant(149.0, JANAF),
                     constant(105.0, CRC),
-                    constant(17310.0, CRC),
-                    constant(0.05, EMISSIVITY)))
+                    table(LIQUID_METALS, 1337.33, 17310.0, 3129.0, 14801.7),
+                    constant(0.05, EMISSIVITY),
+                    table(LIQUID_METALS, 1337.33, 4.730e-3, 1400.0, 4.437e-3, 1500.0, 4.051e-3, 1700.0, 3.486e-3,
+                            2000.0, 2.945e-3, 2500.0, 2.432e-3, 3129.0, 2.086e-3)))
             .build();
 
     /** Granite, the default rock behind vanilla stone. */
@@ -226,8 +263,10 @@ public final class MaterialLibrary {
             .region(new PhaseRegion(Phase.LIQUID, "granitic melt", 1510.0, 2500.0,
                     constant(1400.0, ROCK_ESTIMATE),
                     constant(1.5, ROCK_ESTIMATE),
-                    constant(2350.0, ROCK_ESTIMATE),
-                    constant(0.85, EMISSIVITY)))
+                    table(ROCK_ESTIMATE, 1510.0, 2350.0, 2500.0, 2280.2),
+                    constant(0.85, EMISSIVITY),
+                    table(MELT_VISCOSITY, 1510.0, 2.39e5, 1600.0, 5.23e4, 1700.0, 1.18e4, 1800.0, 3.2e3, 2000.0, 355.0,
+                            2250.0, 40.7, 2500.0, 7.34)))
             .notes("Composition is a typical granite (" + COMPOSITION_ESTIMATE.key() + "). Specific heat and "
                     + "conductivity are 300 K values held constant; both change with temperature in reality.")
             .build();

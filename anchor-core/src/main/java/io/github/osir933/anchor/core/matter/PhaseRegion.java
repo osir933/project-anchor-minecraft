@@ -12,8 +12,10 @@ import java.util.Objects;
  * @param toK the upper end of the range in kelvin
  * @param specificHeat specific heat capacity at constant pressure, J/(kg·K)
  * @param conductivity thermal conductivity, W/(m·K)
- * @param density density, kg/m³
+ * @param density density, kg/m³; how it changes with temperature is what makes a warm liquid rise
  * @param emissivity total hemispherical emissivity of a typical surface, dimensionless
+ * @param viscosity dynamic viscosity of a liquid, Pa·s, or {@code null} for a solid, a gas, or a liquid without
+ *     data; a liquid without it conducts heat but does not convect
  */
 public record PhaseRegion(
         Phase phase,
@@ -23,7 +25,8 @@ public record PhaseRegion(
         PropertyCurve specificHeat,
         PropertyCurve conductivity,
         PropertyCurve density,
-        PropertyCurve emissivity) {
+        PropertyCurve emissivity,
+        PropertyCurve viscosity) {
 
     /**
      * Validates the region.
@@ -36,6 +39,7 @@ public record PhaseRegion(
      * @param conductivity the conductivity curve
      * @param density the density curve
      * @param emissivity the emissivity curve
+     * @param viscosity the viscosity curve, or {@code null}
      */
     public PhaseRegion {
         Objects.requireNonNull(phase, "phase");
@@ -47,6 +51,26 @@ public record PhaseRegion(
         if (!(fromK > 0) || !(toK > fromK) || !Double.isFinite(toK)) {
             throw new IllegalArgumentException("invalid temperature range [" + fromK + ", " + toK + "]");
         }
+        if (viscosity != null && phase != Phase.LIQUID) {
+            throw new IllegalArgumentException("only liquids take a viscosity for now: " + structure);
+        }
+    }
+
+    /**
+     * Creates a region without a viscosity, as for a solid or a gas.
+     *
+     * @param phase the phase
+     * @param structure the structure name
+     * @param fromK the lower temperature
+     * @param toK the upper temperature
+     * @param specificHeat the specific heat curve
+     * @param conductivity the conductivity curve
+     * @param density the density curve
+     * @param emissivity the emissivity curve
+     */
+    public PhaseRegion(Phase phase, String structure, double fromK, double toK, PropertyCurve specificHeat,
+            PropertyCurve conductivity, PropertyCurve density, PropertyCurve emissivity) {
+        this(phase, structure, fromK, toK, specificHeat, conductivity, density, emissivity, null);
     }
 
     /**

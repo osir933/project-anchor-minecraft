@@ -2,6 +2,7 @@ package io.github.osir933.anchor.core.physics.thermal;
 
 import io.github.osir933.anchor.core.matter.Material;
 import io.github.osir933.anchor.core.matter.Phase;
+import io.github.osir933.anchor.core.matter.PhaseRegion;
 import io.github.osir933.anchor.core.matter.ThermalState;
 import io.github.osir933.anchor.core.model.Domain;
 import io.github.osir933.anchor.core.model.PhysicsModel;
@@ -10,6 +11,7 @@ import io.github.osir933.anchor.core.model.ValidityIssue;
 import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.space.SectionPos;
+import io.github.osir933.anchor.core.units.PhysicalConstants;
 import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
@@ -48,6 +50,29 @@ import java.util.TreeMap;
  * </ul>
  * Each applies only where it conducts better than the gas itself. Both are evaluated once per step.
  *
+ * <p>Liquids move too: a liquid warmed or cooled at a surface rises or sinks along it, and a body of liquid
+ * lighter than the liquid above it turns over. Liquids carry far more heat per volume than gas, so this matters
+ * more for them, and their properties are known well enough to estimate it from the liquid's own viscosity,
+ * thermal expansion and diffusivity rather than from one coefficient:
+ * <ul>
+ *   <li>the liquid side of a face between a liquid and other matter uses the natural-convection correlations
+ *   for a plate in a large body of liquid (Incropera, 7th ed., ch. 9), with the liquid cell's size as the
+ *   plate's: Churchill and Chu's for a wall, and for a floor that makes the liquid on it lighter, or a ceiling
+ *   that makes it heavier, {@code 0.54·Ra^1/4} or {@code 0.15·Ra^1/3}. Liquid made heavier by a floor or lighter
+ *   by a ceiling lies still against it and only conducts. The Rayleigh number takes its buoyancy from the
+ *   heaviest or lightest the liquid gets between its own temperature and the other side's, kept within the
+ *   liquid's range: a liquid against something colder than its freezing point convects as if against its
+ *   freezing point, and water cooled from above keeps sinking until it reaches 4 °C, its densest;</li>
+ *   <li>two bodies of one liquid, such as water and melted snow, exchange heat with a coefficient of
+ *   {@value #LIQUID_MIXING_EFFICIENCY}·ρ·c·v, with v the speed buoyancy drives between them: √(g′·L) for a
+ *   lighter body below a denser one, half that sideways, where the denser body slumps under the lighter one,
+ *   and never more than the speed viscosity allows, {@code g′·L²/(18ν)}; g′ is gravity times their difference
+ *   in density over their mean density. Bodies stacked lighter over denser stay layered, which is how water,
+ *   densest at 4 °C, keeps its coldest water on top and freezes from the surface down.</li>
+ * </ul>
+ * Like the correlations for gas, these apply only where they pass on more heat than the liquid would conduct,
+ * and are evaluated once per step. Liquids in a phase change, and liquids without viscosity data, only conduct.
+ *
  * <p>Given a {@link ThermalRefinement}, the model reports the temperature drop each cell needs between its
  * centre and its faces to pass on the heat that flows through them, so that cells too coarse for the
  * gradient around them can be split.
@@ -76,6 +101,13 @@ public final class ConductionModel implements PhysicsModel {
      */
     public static final double BUOYANT_MIXING_COEFFICIENT = 30.0;
 
+    /**
+     * Share of the heat a buoyant flow could carry, {@code ρ·c·v·ΔT}, that crosses a face between two bodies of
+     * one liquid. It is the share that turns the same estimate for air at 290 K into
+     * {@link #BUOYANT_MIXING_COEFFICIENT}.
+     */
+    public static final double LIQUID_MIXING_EFFICIENCY = 0.135;
+
     private final Isotherms isotherms = new Isotherms();
     private final ThermalGraph g = new ThermalGraph();
     private final ThermalRefinement refinement;
@@ -86,6 +118,12 @@ public final class ConductionModel implements PhysicsModel {
     private double[] conductivity = new double[0];
     private double[] capacity = new double[0];
     private boolean[] gas = new boolean[0];
+    /** The phase region of each cell that convects as a liquid, otherwise null. */
+    private PhaseRegion[] liquid = new PhaseRegion[0];
+    private double[] density = new double[0];
+    private double[] kinematicViscosity = new double[0];
+    private double[] diffusivity = new double[0];
+    private double[] heatPerVolume = new double[0];
     private Material[] materials = new Material[0];
     private double[] conductanceSum = new double[0];
     private double[] working = new double[0];
@@ -132,8 +170,10 @@ public final class ConductionModel implements PhysicsModel {
         return "Fourier conduction between touching cells, explicit finite volumes. Conductivity is evaluated "
                 + "once per step. Gases do not flow; surfaces in gas use a natural-convection coefficient of "
                 + CONVECTION_COEFFICIENT + " W/(m2 K), and warm gas below cooler gas mixes with a coefficient of "
-                + BUOYANT_MIXING_COEFFICIENT + " sqrt(dT L) W/(m2 K) instead. Liquids conduct but do not "
-                + "convect; radiation is a separate model. Faces to regions outside the thermal scope are "
+                + BUOYANT_MIXING_COEFFICIENT + " sqrt(dT L) W/(m2 K) instead. Liquids do not flow either; their "
+                + "surfaces use natural-convection correlations for a plate in a large body of liquid, and two "
+                + "bodies of one liquid mix at " + LIQUID_MIXING_EFFICIENCY + " rho c v, with v the buoyant speed "
+                + "between them. Radiation is a separate model. Faces to regions outside the thermal scope are "
                 + "insulated, and temperature differences below " + Isotherms.TOLERANCE_K + " K do not wake "
                 + "idle sections.";
     }
@@ -186,6 +226,17 @@ public final class ConductionModel implements PhysicsModel {
             conductivity[i] = m.conductivity(s);
             capacity[i] = g.mass[i] * m.specificHeat(s);
             gas[i] = m.dominantPhase(s) == Phase.GAS;
+            liquid[i] = null;
+            double viscosity = m.viscosity(s);
+            if (!Double.isNaN(viscosity)) {
+                PhaseRegion region = m.thermal().regions().get(s.region());
+                double rho = region.density().at(s.temperatureK());
+                liquid[i] = region;
+                density[i] = rho;
+                kinematicViscosity[i] = viscosity / rho;
+                heatPerVolume[i] = rho * m.specificHeat(s);
+                diffusivity[i] = conductivity[i] / heatPerVolume[i];
+            }
             conductanceSum[i] = 0;
             if (s.extrapolated()) {
                 extrapolated.merge(m.id(), 1, Integer::sum);
@@ -213,19 +264,38 @@ public final class ConductionModel implements PhysicsModel {
                     resistance = Math.min(resistance, 1 / mixing);
                 }
             } else {
-                if (gas[a]) {
-                    ra = Math.min(ra, 1 / CONVECTION_COEFFICIENT);
-                } else if (gas[b]) {
-                    rb = Math.min(rb, 1 / CONVECTION_COEFFICIENT);
+                // Whether each side only conducts here; where matter moves, finer cells would not help it.
+                boolean stillA = !gas[a];
+                boolean stillB = !gas[b];
+                if (liquid[a] != null && liquid[a] == liquid[b]) {
+                    double mixing = mixingCoefficient(f, a, b);
+                    boolean mixed = mixing > 0 && 1 / mixing < ra + rb;
+                    stillA = stillB = !mixed;
+                    resistance = mixed ? 1 / mixing : ra + rb;
+                } else {
+                    if (gas[a]) {
+                        ra = Math.min(ra, 1 / CONVECTION_COEFFICIENT);
+                    } else if (liquid[a] != null) {
+                        double moving = 1 / surfaceCoefficient(f, a, b, false);
+                        stillA = !(moving < ra);
+                        ra = Math.min(ra, moving);
+                    }
+                    if (gas[b]) {
+                        rb = Math.min(rb, 1 / CONVECTION_COEFFICIENT);
+                    } else if (liquid[b] != null) {
+                        double moving = 1 / surfaceCoefficient(f, b, a, true);
+                        stillB = !(moving < rb);
+                        rb = Math.min(rb, moving);
+                    }
+                    resistance = ra + rb;
                 }
-                resistance = ra + rb;
                 if (reporting) {
                     // The drop inside each side is its share of the resistance times the whole difference.
                     double difference = Math.abs(temperature[a] - temperature[b]);
-                    if (!gas[a]) {
+                    if (stillA) {
                         drop[a] = Math.max(drop[a], difference * ra / resistance);
                     }
-                    if (!gas[b]) {
+                    if (stillB) {
                         drop[b] = Math.max(drop[b], difference * rb / resistance);
                     }
                 }
@@ -265,6 +335,74 @@ public final class ConductionModel implements PhysicsModel {
     @Override
     public List<ValidityIssue> checkValidity(PhysicalWorld world) {
         return issues;
+    }
+
+    /**
+     * Returns the natural-convection coefficient on the liquid side of a face between a liquid and other matter,
+     * or 0 where the liquid at the surface lies still.
+     *
+     * @param f the face
+     * @param cell the liquid cell
+     * @param other the cell on the face's other side
+     * @param above whether the liquid lies above the face, which is then its floor
+     */
+    private double surfaceCoefficient(int f, int cell, int other, boolean above) {
+        PhaseRegion region = liquid[cell];
+        double surface = Math.max(region.fromK(), Math.min(region.toK(), temperature[other]));
+        // The liquid against the surface takes every temperature between the surface's and the rest's. What
+        // drives it is its heaviest part, which sinks, and its lightest, which rises: water at 6 °C cooled from
+        // above still sinks, because water near 4 °C is heavier, while water at 3 °C stays on top.
+        double heavier = region.density().max(surface, temperature[cell]) - density[cell];
+        double lighter = density[cell] - region.density().min(surface, temperature[cell]);
+        boolean wall = g.faceAxis[f] != 1;
+        // Liquid rises off a floor and sinks off a ceiling. Liquid that would sink onto a floor or rise against a
+        // ceiling stays where it is; a floor or ceiling is mostly part of a wider one, so that liquid cannot
+        // spill off its edges either, and only conducts.
+        double difference = wall ? Math.max(heavier, lighter) : above ? lighter : heavier;
+        double reduced = PhysicalConstants.STANDARD_GRAVITY * difference / density[cell];
+        if (!(reduced > 0)) {
+            return 0;
+        }
+        double nu = kinematicViscosity[cell];
+        double alpha = diffusivity[cell];
+        // The liquid cell's own size sets the scale, however finely the other side is divided.
+        double edge = g.edge[cell];
+        if (wall) {
+            // Churchill and Chu, for a wall as tall as the cell, at any Rayleigh number.
+            double rayleigh = reduced * edge * edge * edge / (nu * alpha);
+            double prandtl = nu / alpha;
+            double root = 0.825 + 0.387 * StrictMath.pow(rayleigh, 1.0 / 6.0)
+                    / StrictMath.pow(1 + StrictMath.pow(0.492 / prandtl, 9.0 / 16.0), 8.0 / 27.0);
+            return root * root * conductivity[cell] / edge;
+        }
+        // The length of a floor or ceiling as wide as the cell is its area over its perimeter.
+        double length = edge / 4;
+        double rayleigh = reduced * length * length * length / (nu * alpha);
+        double nusselt = rayleigh < 1e7 ? 0.54 * Math.sqrt(Math.sqrt(rayleigh)) : 0.15 * StrictMath.cbrt(rayleigh);
+        return nusselt * conductivity[cell] / length;
+    }
+
+    /**
+     * Returns the coefficient with which buoyancy mixes two bodies of one liquid across a face, or 0 where they
+     * stay layered.
+     *
+     * @param f the face
+     * @param a the cell on its negative side, below it for a face between two layers
+     * @param b the cell on its positive side
+     */
+    private double mixingCoefficient(int f, int a, int b) {
+        double heavierAbove = density[b] - density[a];
+        boolean layered = g.faceAxis[f] == 1;
+        if (layered ? !(heavierAbove > 0) : heavierAbove == 0) {
+            return 0;
+        }
+        double mean = 0.5 * (density[a] + density[b]);
+        double reduced = PhysicalConstants.STANDARD_GRAVITY * Math.abs(heavierAbove) / mean;
+        double edge = Math.sqrt(g.faceArea[f]);
+        double inertial = Math.sqrt(reduced * edge);
+        double viscous = reduced * edge * edge / (9 * (kinematicViscosity[a] + kinematicViscosity[b]));
+        double speed = Math.min(inertial, viscous) * (layered ? 1.0 : 0.5);
+        return LIQUID_MIXING_EFFICIENCY * 0.5 * (heatPerVolume[a] + heatPerVolume[b]) * speed;
     }
 
     /**
@@ -399,6 +537,11 @@ public final class ConductionModel implements PhysicsModel {
             conductivity = new double[size];
             capacity = new double[size];
             gas = new boolean[size];
+            liquid = new PhaseRegion[size];
+            density = new double[size];
+            kinematicViscosity = new double[size];
+            diffusivity = new double[size];
+            heatPerVolume = new double[size];
             materials = new Material[size];
             conductanceSum = new double[size];
             working = new double[size];

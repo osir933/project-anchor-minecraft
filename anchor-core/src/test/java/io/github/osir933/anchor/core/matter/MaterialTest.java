@@ -2,6 +2,9 @@ package io.github.osir933.anchor.core.matter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.TreeSet;
@@ -121,6 +124,49 @@ class MaterialTest {
         double molten = iron.specificEnthalpy(2000.0);
         assertEquals(1811.0, iron.stateFor(iron.nearestSpecificEnthalpyIn(Phase.SOLID, molten)).temperatureK(),
                 1e-9);
+    }
+
+    @Test
+    void everyLiquidCanFlow() {
+        for (Material m : MaterialLibrary.all()) {
+            for (PhaseRegion r : m.thermal().regions()) {
+                if (r.phase() != Phase.LIQUID) {
+                    assertNull(r.viscosity(), m.id() + " " + r.structure());
+                    continue;
+                }
+                assertNotNull(r.viscosity(), "every liquid has a viscosity: " + m.id());
+                assertTrue(m.sources().containsKey(r.viscosity().source().key()), m.id());
+                double previous = Double.POSITIVE_INFINITY;
+                for (double t = r.fromK(); t <= r.toK(); t += (r.toK() - r.fromK()) / 50) {
+                    double viscosity = r.viscosity().at(t);
+                    assertTrue(viscosity > 0 && viscosity < previous, "liquids thin as they warm: " + m.id() + " at "
+                            + t + " K");
+                    previous = viscosity;
+                    if (t > 278.0 && t + 1 <= r.toK()) {
+                        assertTrue(r.density().at(t + 1) <= r.density().at(t), "and never shrink: " + m.id() + " at "
+                                + t + " K");
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void waterIsDensestAtFourDegrees() {
+        double densest = WATER.density(WATER.stateFor(WATER.specificEnthalpy(277.15)));
+        for (double t : new double[] {273.15, 275.15, 276.15, 278.15, 279.15, 283.15}) {
+            assertTrue(WATER.density(WATER.stateFor(WATER.specificEnthalpy(t))) < densest, t + " K");
+        }
+        ThermalState melting = WATER.stateFor(WATER.specificEnthalpy(273.15) + 0.5 * 333.7e3);
+        assertTrue(Double.isNaN(WATER.viscosity(melting)), "half-frozen water has no single viscosity");
+        assertEquals(1.08e-3, WATER.viscosity(WATER.stateFor(WATER.specificEnthalpy(290.0))), 1e-12);
+    }
+
+    @Test
+    void onlyLiquidsTakeAViscosity() {
+        PropertyCurve one = PropertyCurve.constant(1.0, MaterialLibrary.PROPERTY_ESTIMATE);
+        assertThrows(IllegalArgumentException.class,
+                () -> new PhaseRegion(Phase.SOLID, "glassy", 100.0, 200.0, one, one, one, one, one));
     }
 
     @Test
