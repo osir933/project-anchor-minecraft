@@ -30,6 +30,7 @@ public final class AnchorMod {
     public AnchorMod(IEventBus modEventBus, ModContainer modContainer) {
         modContainer.registerConfig(ModConfig.Type.SYNCED, AnchorConfig.SPEC);
         AnchorItems.register(modEventBus);
+        AnchorAttachments.register(modEventBus);
         modEventBus.addListener(AnchorDataMaps::register);
         AnchorGameTests.register(modEventBus);
         NeoForge.EVENT_BUS.addListener(AnchorCommands::register);

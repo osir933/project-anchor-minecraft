@@ -174,6 +174,10 @@ final class HeatText {
                 s.lastStepMillis(), s.averageStepMillis()));
         lines.add(String.format(Locale.ROOT, "  %d block changes followed; %d blocks changed to show melting, "
                 + "freezing or boiling", w.reconciled(), s.shownPhaseChanges()));
+        if (s.restoredBlocks() > 0) {
+            lines.add(String.format(Locale.ROOT, "  %d blocks in %d sections came back as they were saved",
+                    s.restoredBlocks(), s.restoredSections()));
+        }
         lines.add("  Energy and mass " + (w.conserved() ? "balanced" : "NOT balanced") + " at the last audit");
         return lines;
     }

@@ -62,13 +62,15 @@ class HeatTextTest {
                 HostedWorld.Settings.defaults());
         hosted.tick();
         List<String> lines = HeatText.status("minecraft:overworld",
-                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, null));
+                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, 1200L, 3, null));
         assertEquals("Heat in minecraft:overworld", lines.get(0));
         assertTrue(lines.get(2).contains(" steps of 14 s"), lines.get(2));
         assertTrue(lines.get(2).contains("1.25 ms"), lines.get(2));
+        assertTrue(lines.contains("  1200 blocks in 3 sections came back as they were saved"), lines.toString());
         List<String> stopped = HeatText.status("minecraft:the_nether",
-                new HeatReport(hosted.status(), 14.4, 0.0, 0.0, 0L, "java.lang.IllegalStateException: boom"));
+                new HeatReport(hosted.status(), 14.4, 0.0, 0.0, 0L, 0L, 0, "java.lang.IllegalStateException: boom"));
         assertEquals("Heat in minecraft:the_nether: stopped after an error", stopped.get(0));
         assertEquals("  java.lang.IllegalStateException: boom", stopped.get(1));
+        assertTrue(stopped.stream().noneMatch(l -> l.contains("came back")), "nothing restored, nothing said");
     }
 }
