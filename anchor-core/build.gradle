@@ -1,0 +1,50 @@
+plugins {
+    id 'java-library'
+}
+
+description = 'Anchor simulation core: the physical world, its models and the engine rules. No Minecraft code.'
+
+base {
+    archivesName = 'anchor-core'
+}
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation platform("org.junit:junit-bom:${junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // Java 21 bytecode keeps the core usable outside Minecraft; the mod itself runs on Java 25.
+    options.release = 21
+    options.compilerArgs.addAll(['-Xlint:all', '-Werror'])
+}
+
+tasks.named('javadoc', Javadoc) {
+    (options as StandardJavadocDocletOptions).addBooleanOption('Xdoclint:all,-missing', true)
+    (options as StandardJavadocDocletOptions).addBooleanOption('Werror', true)
+}
+
+tasks.named('test', Test) {
+    // The determinism lint scans these sources.
+    systemProperty 'anchor.core.sourceDir', file('src/main/java').absolutePath
+}
+
+tasks.named('jar', Jar) {
+    manifest {
+        attributes(
+            'Implementation-Title': 'anchor-core',
+            'Implementation-Version': project.version,
+            'Automatic-Module-Name': 'io.github.osir933.anchor.core'
+        )
+    }
+}
