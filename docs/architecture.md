@@ -78,10 +78,24 @@ air: surfaces in gas exchange heat with a natural-convection coefficient of 10 W
 cooler gas mixes with a coefficient that grows with the square root of the temperature difference, so heat
 rises.
 
-Two models connect the simulated region to the rest of the world, and both declare the energy they exchange:
+Surfaces also exchange heat by **radiation** (`physics.thermal.RadiationModel`) across gas and vacuum: grey,
+diffuse surfaces by the Stefan–Boltzmann law, without reflections. Gas lets radiation through and anything
+else stops it, glass and water included, as they do at these wavelengths. Only blocks more than 10 K from
+their surroundings' temperature radiate, so the cost follows what is hot or cold. Each of their faces that
+touches gas casts a fixed pattern of 32 rays up to 16 blocks (`physics.thermal.RayPattern`, a rank-1 lattice
+chosen to reproduce exact view factors between nearby squares); the share of rays that reach a block is the
+view factor to it, and rays that get no further reach surroundings at the weather temperature, which is
+declared. When both blocks of a pair radiate, each estimates their exchange and counts half. A face keeps its
+rays until a block on their way changes whether it lets radiation through, so a steady scene casts none. The
+exchange takes as many substeps as the hottest, smallest blocks need, up to 64; blocks that would need more
+are damped, which keeps them stable but slow, and reported. Refined blocks do not radiate yet.
+
+Three models connect the simulated region to the rest of the world, and all declare the energy they exchange:
 
 - **Heat sources** (`physics.thermal.HeatSourceModel`) stand for things the simulation does not model yet,
   such as a flame. Each heats its block towards a temperature with at most a set power, and never cools it.
+- **Radiation** that leaves the simulated region, described above, reaches surroundings at the weather
+  temperature.
 - **The atmosphere** (`physics.thermal.AtmosphereModel`) relaxes gas cells towards their section's weather
   temperature with a time constant, exactly for any step length. Without it the simulated region would be a
   closed box in which heat piles up.
@@ -126,8 +140,9 @@ the game's block there; a block that changed while the section was not simulated
   blocks whose heat or phase matters: water, ice, snow, lava, magma, fire, torches, lanterns, candles,
   campfires and lit furnaces. Everything else is guessed from its name (`MaterialGuess`) or its sound, with
   its fill from its collision shape. A block filling less than a fifth of its space counts as the air or
-  water around it, so a torch is a heat source in air. Reloading tags or data packs describes every block
-  again.
+  water around it, so a torch is a heat source in air. Lava and magma never cool in Minecraft, so their
+  sources outrun what they radiate even with every face open. Reloading tags or data packs describes every
+  block again.
 - **Dimensions.** `LevelHeat` runs one hosted world per dimension, started when the dimension first ticks.
   Block changes arrive through NeoForge's neighbour notifications and are taken in, in sorted order, at the
   start of the next tick. Every few game ticks it imports the sections players have come near, lets go of
@@ -166,8 +181,9 @@ The adapter's plain-Java parts have unit tests. Everything that needs Minecraft 
 below it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes
 the temperature, a torch warms the air above it, a section written into its chunk and brought in again comes
 back exactly, the save format keeps every number, a thermal camera reads a hot iron block at its crosshair and
-shows it among the cold floor, its air view shows the warm air above the iron and none of the still air, and
-its tooltip says how to use it. The game tests load the mod from the build directories, so CI also installs a
+shows it among the cold floor, its air view shows the warm air above the iron and none of the still air, its
+tooltip says how to use it, and an iron block at 1500 K warms a stone block across two blocks of air. The game
+tests load the mod from the build directories, so CI also installs a
 NeoForge server the way players do, starts it with the released jar and checks that the mod loads, its
 self-test passes, heat runs, the server stops cleanly and nothing is logged as an error
 (`.github/scripts/smoke_test.py`).
@@ -197,8 +213,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 
 ## Roadmap
 
-Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, and
-temperatures are saved with the world. Next for heat: radiation, convection in liquids, and refining blocks
-where temperatures change steeply. After that come structure and fracture; rigid bodies, contact and emergent
+Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces
+radiate, and temperatures are saved with the world. Next for heat: sunlight and the night sky, convection in
+liquids, and refining blocks where temperatures change steeply. After that come structure and fracture; rigid bodies, contact and emergent
 tools; materials processing and microstructure; fluids and chemistry; electricity and control; causal
 targeting and molecular dynamics; and finally life and society, on the way to 1.0.

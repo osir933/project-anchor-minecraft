@@ -119,7 +119,7 @@ public final class ConductionModel implements PhysicsModel {
                 + "once per step. Gases do not flow; surfaces in gas use a natural-convection coefficient of "
                 + CONVECTION_COEFFICIENT + " W/(m2 K), and warm gas below cooler gas mixes with a coefficient of "
                 + BUOYANT_MIXING_COEFFICIENT + " sqrt(dT L) W/(m2 K) instead. Liquids conduct but do not "
-                + "convect, and there is no radiation yet. Faces to regions outside the thermal scope are "
+                + "convect; radiation is a separate model. Faces to regions outside the thermal scope are "
                 + "insulated, and temperature differences below " + Isotherms.TOLERANCE_K + " K do not wake "
                 + "idle sections.";
     }

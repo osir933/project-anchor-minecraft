@@ -47,8 +47,11 @@ final class BlockMapper {
     static final HeatSourceModel.Source CAMPFIRE = new HeatSourceModel.Source(1100.0, 15_000.0);
     static final HeatSourceModel.Source FIRE = new HeatSourceModel.Source(1200.0, 20_000.0);
     static final HeatSourceModel.Source FURNACE = new HeatSourceModel.Source(600.0, 3000.0);
-    static final HeatSourceModel.Source MAGMA = new HeatSourceModel.Source(1000.0, 5000.0);
-    static final HeatSourceModel.Source LAVA = new HeatSourceModel.Source(1450.0, 100_000.0);
+    // Minecraft's lava and magma blocks never cool, so their sources must outrun what they radiate: about 240 kW
+    // from each face open to the air at 1450 K, and 50 kW at 1000 K. These keep even a block open on all six
+    // sides at its temperature.
+    static final HeatSourceModel.Source MAGMA = new HeatSourceModel.Source(1000.0, 320_000.0);
+    static final HeatSourceModel.Source LAVA = new HeatSourceModel.Source(1450.0, 1_500_000.0);
 
     static final BlockAppearance AIR = BlockAppearance.of("anchor:air");
     static final BlockAppearance WATER = BlockAppearance.of("anchor:water").shownAs(Phase.LIQUID)

@@ -51,7 +51,7 @@ class HostedWorldTest {
                 .becoming(Phase.GAS, "air"),
         BlockAppearance.of("anchor:air").heatedBy(new HeatSourceModel.Source(1300.0, 1500.0)),
         BlockAppearance.of("anchor:basalt").shownAs(Phase.LIQUID).startingAt(1450.0)
-                .heatedBy(new HeatSourceModel.Source(1450.0, 1e5)),
+                .heatedBy(new HeatSourceModel.Source(1450.0, 1.5e6)),
         SNOW_LOOK,
         BlockAppearance.of("anchor:granite").withFill(0.5),
         BlockAppearance.of("anchor:granite"),
@@ -117,12 +117,13 @@ class HostedWorldTest {
         HostedWorld.Inspection inspection = h.inspect(lava).orElseThrow();
         assertEquals(1450.0, inspection.temperatureK(), 1e-9);
         assertEquals(Phase.LIQUID, inspection.phase());
-        assertEquals(new HeatSourceModel.Source(1450.0, 1e5), inspection.source());
+        assertEquals(new HeatSourceModel.Source(1450.0, 1.5e6), inspection.source());
         assertEquals(1, h.status().sources());
         for (int i = 0; i < 10; i++) {
             h.tick();
         }
-        assertEquals(1450.0, h.temperature(lava), 0.1, "the source holds the lava near its temperature");
+        // Radiation from the open top takes about 0.2 K in each step, after the source has topped the lava up.
+        assertEquals(1450.0, h.temperature(lava), 0.5, "the source holds the lava near its temperature");
         assertTrue(h.temperature(lava.offset(0, -1, 0)) > 290.0, "the rock under the lava warms");
         assertTrue(h.temperature(lava.offset(0, 1, 0)) > 290.0, "and so does the air above it");
         assertTrue(h.world().audit().balanced(), () -> h.world().audit().toString());

@@ -13,6 +13,9 @@ Java 25, on both the client and the server.
   shape, and data packs can describe any block in the `anchor:materials` data map.
 - **Heat moves by real physics.** It conducts through blocks, rises through the air and drains into the
   weather: each biome's temperature, cooler higher up. Energy and mass are audited to stay balanced.
+- **Heat radiates.** Hot surfaces send heat across air and vacuum onto whatever they face, by the
+  Stefan–Boltzmann law, and cold ones take in their surroundings' radiation. Glass and water stop it. Lava
+  and magma are strong enough sources to stay hot while they radiate.
 - **Matter melts, freezes and boils.** Ice melts into water, water freezes or boils away and snow melts when
   its matter reaches the melting or boiling point and has taken in or given up the latent heat.
 - **Heat sources.** Torches, lanterns, candles, campfires, fire, lit furnaces, magma and lava give off heat.
@@ -30,5 +33,6 @@ Known limits of this alpha:
 - Big changes take time: Anchor's clock follows the day (a day is 24 simulated hours) and a block is a full
   cubic metre. A snow layer beside a fire melts in about five minutes of play, a block of ice beside lava in
   about fifty.
-- Burning, radiation and flowing liquids are not simulated yet.
+- Burning and flowing liquids are not simulated yet, and the sun does not warm anything. Flames and torches
+  heat the air around them but do not radiate.
 - Land nobody is near is paused, not cooled: it carries on from where it was when a player returns.

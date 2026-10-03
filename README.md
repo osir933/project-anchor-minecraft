@@ -11,14 +11,18 @@ with NeoForge 26.3 and Java 25, installed on both the game and the server.
 ## Heat in the game
 
 Every block near a player is matter: a material such as granite, oak, iron or water, with a mass and a
-temperature. Heat conducts through it, rises through the air and drains away into the weather, and blocks
-change when their matter does:
+temperature. Heat conducts through it, radiates from hot surfaces across the air onto whatever they face,
+rises through the air and drains away into the weather, and blocks change when their matter does:
 
 - Ice melts into water, water freezes into ice or boils away, and snow melts, each when its matter reaches
   the melting or boiling point and has taken in or given up the latent heat. Ice turns into water only once
   it has melted through.
 - Torches, lanterns, candles, campfires, fire, lit furnaces, magma and lava give off heat. Burning is not
-  simulated yet, so each holds its block at a flame's temperature with a power typical of it.
+  simulated yet, so each holds its block at a flame's temperature with a power typical of it. Lava and magma
+  never cool, as in Minecraft, so they glow on the walls of their caves for as long as they are there.
+- Hot surfaces radiate by the Stefan–Boltzmann law, and cold ones take in the radiation of what they face.
+  Glass and water stop it, as they do for heat radiation in reality, so a thermal camera cannot see through
+  them either.
 - The weather sets the temperature heat escapes to: the biome's temperature, cooler higher up. Snowy biomes
   sit below freezing and deserts around 40 °C.
 
