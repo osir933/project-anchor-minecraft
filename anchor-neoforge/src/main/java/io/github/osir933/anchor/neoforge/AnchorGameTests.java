@@ -1,5 +1,6 @@
 package io.github.osir933.anchor.neoforge;
 
+import io.github.osir933.anchor.core.host.GlowingBlock;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.host.RegionSnapshot;
@@ -10,6 +11,7 @@ import io.github.osir933.anchor.core.instrument.TimeSeries;
 import io.github.osir933.anchor.core.instrument.TimeSeriesCsv;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
 import io.github.osir933.anchor.core.space.CellId;
+import io.github.osir933.anchor.core.space.Direction;
 import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.world.BlockCopy;
 import io.github.osir933.anchor.core.world.Provenance;
@@ -103,6 +105,7 @@ final class AnchorGameTests {
             new Case("thermal_camera_explains_itself", 20, AnchorGameTests::thermalCameraExplainsItself),
             new Case("hot_iron_warms_stone_across_air", 600, AnchorGameTests::hotIronWarmsStoneAcrossAir),
             new Case("stone_beside_lava_is_refined", 200, AnchorGameTests::stoneBesideLavaIsRefined),
+            new Case("hot_iron_glows_where_it_shows", 200, AnchorGameTests::hotIronGlowsWhereItShows),
             new Case("black_wool_warms_more_in_the_sun", 400, AnchorGameTests::blackWoolWarmsMoreInTheSun, SUNLIT),
             new Case("probe_records_a_cooling_block", 400, AnchorGameTests::probeRecordsACoolingBlock),
             new Case("thermometer_leaves_and_takes_a_probe", 200, AnchorGameTests::thermometerLeavesAndTakesAProbe),
@@ -446,6 +449,60 @@ final class AnchorGameTests {
                     "the thermometer touching the face says: " + reading.getString());
             heat.release(lava);
         });
+    }
+
+    /**
+     * An iron block at 1300 K glows on the faces it shows, with oxidised iron's emissivity, but not on the face the
+     * floor hides or the face against a stone block, and not once it is cooled. A lava pool nearby, which the game
+     * already draws glowing, is left out.
+     */
+    private static void hotIronGlowsWhereItShows(GameTestHelper helper) {
+        BlockPos ironAt = new BlockPos(1, 1, 1);
+        helper.setBlock(ironAt, Blocks.IRON_BLOCK);
+        helper.setBlock(ironAt.east(), Blocks.STONE);
+        BlockPos lavaAt = new BlockPos(2, 1, 3);
+        for (BlockPos wall : List.of(lavaAt.north(), lavaAt.south(), lavaAt.east(), lavaAt.west())) {
+            helper.setBlock(wall, Blocks.STONE);
+        }
+        helper.setBlock(lavaAt, Blocks.LAVA);
+        BlockPos iron = helper.absolutePos(ironAt);
+        BlockPos lava = helper.absolutePos(lavaAt);
+        boolean[] pinned = {false};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (!pinned[0]) {
+                heat.keepSimulated(iron);
+                heat.keepSimulated(lava);
+                pinned[0] = true;
+            }
+            if (!heat.setTemperature(iron, 1300.0) || heat.inspect(lava).isEmpty()) {
+                throw helper.assertionException(Component.literal("waiting for the iron and lava to be simulated"));
+            }
+            GlowingBlock glowing = glowingBlock(heat, iron).orElseThrow(
+                    () -> helper.assertionException(Component.literal("the iron at 1300 K does not glow")));
+            helper.assertTrue(Math.abs(glowing.emissivity() - 0.70) < 1e-9,
+                    "the iron glows with emissivity " + glowing.emissivity());
+            int faces = 0b111111 & ~(1 << Direction.DOWN.ordinal()) & ~(1 << Direction.EAST.ordinal());
+            helper.assertTrue(glowing.faces() == faces, "the iron glows on faces " + Integer.toBinaryString(
+                    glowing.faces()) + ", not on all but its bottom and east faces");
+            helper.assertTrue(glowing.hottest() > 1250.0 && glowing.hottest() <= 1300.0 + 1e-6,
+                    "the iron's hottest face is at " + HeatText.temperature(glowing.hottest()));
+            int[] colours = GlowData.decode(GlowData.encode(List.of(glowing))).get(0).colours();
+            int north = colours[GlowingBlock.sample(Direction.NORTH, 1, 1)];
+            helper.assertTrue(north >>> 24 > 100 && (north >> 16 & 0xFF) == 255,
+                    "the iron's north face is drawn as " + Integer.toHexString(north));
+            helper.assertTrue(glowingBlock(heat, lava).isEmpty(), "the lava is listed as glowing as well");
+
+            helper.assertTrue(heat.setTemperature(iron, 300.0), "the iron could not be cooled");
+            helper.assertTrue(glowingBlock(heat, iron).isEmpty(), "the iron still glows at 300 K");
+            heat.release(iron);
+            heat.release(lava);
+        });
+    }
+
+    private static Optional<GlowingBlock> glowingBlock(LevelHeat heat, BlockPos pos) {
+        int index = new GridPos(pos.getX(), pos.getY(), pos.getZ()).indexInSection();
+        return heat.glowingBlocks(pos).stream().filter(block -> block.index() == index).findFirst();
     }
 
     /**

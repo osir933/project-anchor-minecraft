@@ -4,8 +4,10 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Optional;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.event.TagsUpdatedEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
@@ -35,6 +37,8 @@ final class HeatEvents {
         bus.addListener(HeatEvents::onServerStopping);
         bus.addListener(HeatEvents::onServerStopped);
         bus.addListener(HeatEvents::onTagsUpdated);
+        bus.addListener(HeatEvents::onPlayerChangedDimension);
+        bus.addListener(HeatEvents::onPlayerLoggedOut);
     }
 
     /**
@@ -113,6 +117,23 @@ final class HeatEvents {
     private static void onTagsUpdated(TagsUpdatedEvent event) {
         for (LevelHeat heat : LEVELS.values()) {
             heat.appearancesChanged();
+        }
+    }
+
+    /** A player's client forgets the glowing blocks it was told about when it leaves a level; so does the server. */
+    private static void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        forget(event.getEntity());
+    }
+
+    private static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        forget(event.getEntity());
+    }
+
+    private static void forget(Object entity) {
+        if (entity instanceof ServerPlayer player) {
+            for (LevelHeat heat : LEVELS.values()) {
+                heat.forgetPlayer(player);
+            }
         }
     }
 }

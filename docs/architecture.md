@@ -182,6 +182,19 @@ changed slower than one kelvin per hour for a while falls asleep. Change is meas
 room that a torch heats exactly as fast as it loses heat counts as calm and sleeps in that steady state.
 Sleeping sections are paused, not cooled, apart from what the sky does to their surfaces.
 
+Hot surfaces glow. `physics.thermal.Incandescence` gives the colour and brightness of the light a surface gives
+off by its temperature alone: Planck's law weighted with the CIE 1931 colour matching functions, in the multi-lobe
+fit of Wyman, Sloan and Shirley, from 360 to 830 nm gives its tristimulus values, 683 lm/W times Y its luminance,
+and a grey body gives off its emissivity times a black body's light. For a screen the colour becomes sRGB scaled to
+its brightest channel, and the luminance a glow level on a logarithmic scale, as the eye judges brightness: 0 at
+10<sup>−2.5</sup> cd/m², where a black body of about 775 K is just seen in the dark, and 1 from 10<sup>4</sup>
+cd/m², which it reaches at about 1520 K. A table of black bodies every 10 K, interpolated, makes it cheap enough
+for every spot of every glowing face. `HostedWorld.glowingBlocks` lists the blocks of a section that glow, each
+(`host.GlowingBlock`) with its emissivity and, on every face no opaque block hides, the temperatures of 4 by 4
+spots just inside the face: the cell there in a refined block, and the sky's skin temperature on a top open to the
+sky. Blocks whose enthalpy is too low to glow are skipped before anything else, gases have no surface to glow
+from, and the game names the blocks it already draws glowing, such as lava, which are left out.
+
 ## Hosting
 
 The engine runs inside a game through `host.HostedWorld`, which knows nothing about Minecraft. The game names
@@ -318,6 +331,15 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   which stay where they are put until the next image, so the client needs no mod code for them. `ThermalScale`
   maps temperatures to colours that brighten from violet to near white and follows the view with a span that
   widens at once and narrows slowly.
+- **Glow.** Every ten game ticks `GlowSender` goes through the simulated sections within 128 blocks of each player,
+  lists what glows in a section again only when it has changed or every 100 ticks, and sends each player the
+  sections whose glow differs from what they were sent before, one message per section (`GlowPayload`): a block's
+  index, emissivity and faces, then each face's temperatures in whole kelvin, one for a face as hot all over
+  (`GlowData`). A section that stops glowing, or that the player leaves behind, is sent empty. A full, opaque
+  block hides the face next to it, and blocks that give off light are left out. On the client, the mod's only
+  client code, `GlowClient` draws a sheet of light just in front of each glowing face, following the boxes of
+  the block's shape: whole where the face glows evenly and spot by spot where it does not, in the black body's
+  colour with the glow level as its alpha, added to what is drawn behind it as lightning is.
 
 The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
 (`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled below
@@ -326,7 +348,9 @@ temperature, a torch warms the air above it, a section written into its chunk an
 exactly, the save format keeps every number, a thermal camera reads a hot iron block at its crosshair and shows it
 among the cold floor, its air view shows the warm air above the iron and none of the still air, its tooltip says
 how to use it, an iron block at 1500 K warms a stone block across two blocks of air, the stone walls of a lava pool
-are refined so that their faces read hotter than the stone behind, on the thermometer too, and in a noon sun black
+are refined so that their faces read hotter than the stone behind, on the thermometer too, an iron block at 1300 K
+glows with oxidised iron's emissivity on every face but the one on the floor and the one against a stone block,
+and no longer once cooled to 300 K, while a lava pool beside it is left out, and in a noon sun black
 wool takes in more than three times the sunlight of white wool beside it, grows more than 10 K hotter on top, and
 reads so on the thermometer. A probe in a hot iron block records it cooling and a thermometer names the probe, a
 chart of it is a locked map with its line on white paper, a thermometer used while sneaking leaves a probe where it
@@ -339,7 +363,11 @@ from it is gone; the snapshot file keeps every number, those of a refined block'
 refused. The game tests load the mod from the build directories, so CI also installs a NeoForge server the way
 players do, starts it with the released jar and checks that the mod loads, its self-test passes, heat runs and can
 be paused and resumed, snapshots can be listed and are refused where heat does not run, the server stops cleanly
-and nothing is logged as an error (`.github/scripts/smoke_test.py`).
+and nothing is logged as an error (`.github/scripts/smoke_test.py`). Last, CI starts the game itself under a
+virtual display with software drawing. Started with `-Danchor.renderTest=true`, the mod's `RenderTest` creates a
+flat world, builds a dark room with two iron blocks in it, heats them to 1100 K and 1600 K, photographs them,
+cools them and photographs them again, and `.github/scripts/render_check.py` checks that both glowed where they
+are, red to orange, the hotter one brighter and yellower, and that the glow was gone once they cooled.
 
 ## Requests
 
@@ -370,6 +398,7 @@ Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable 
 temperatures are saved with the world, blocks refine where temperatures change steeply, liquids carry heat by
 moving, the sun and the night sky warm and cool the land, probes record temperatures and chart them on maps, and
 operators can pause heat, step it, run it faster or slower, send it ahead, and save an experiment as a snapshot to
-rewind it to. Next for phase 1: a laboratory world and hot metal that glows. After that come structure and fracture;
+rewind it to, and hot blocks glow in the colours of a black body. Next for phase 1: a laboratory world. After that
+come structure and fracture;
 rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

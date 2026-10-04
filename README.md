@@ -27,6 +27,11 @@ rises through the air and drains away into the weather, and blocks change when t
 - Hot surfaces radiate by the Stefan–Boltzmann law, and cold ones take in the radiation of what they face.
   Glass and water stop it, as they do for heat radiation in reality, so a thermal camera cannot see through
   them either.
+- Hot things glow, in the colour and brightness a black body has at their temperature, worked out from
+  Planck's law and how the eye sees colour: dull red from about 500 °C, then brighter and more orange, at full
+  brightness from about 1250 °C. Shiny surfaces such as gold give off less light, so they glow dimmer and only
+  when hotter. Each face glows spot by spot, so a block that is hotter on one side glows brighter there. Lava,
+  magma and other blocks that already give off light look as they always do.
 - The sun warms what it shines on, and the ground cools under the night sky. Sunlight falls straight down, as
   Minecraft's daylight does, onto the first block in its way. Dark blocks take in more of it than pale ones,
   dyed wool, concrete and terracotta by their colour, and water, ice and glass let much of it through. At night

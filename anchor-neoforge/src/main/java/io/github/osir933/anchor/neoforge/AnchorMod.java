@@ -32,6 +32,7 @@ public final class AnchorMod {
         AnchorItems.register(modEventBus);
         AnchorAttachments.register(modEventBus);
         modEventBus.addListener(AnchorDataMaps::register);
+        modEventBus.addListener(AnchorNetwork::register);
         AnchorGameTests.register(modEventBus);
         NeoForge.EVENT_BUS.addListener(AnchorCommands::register);
         HeatEvents.register(NeoForge.EVENT_BUS);

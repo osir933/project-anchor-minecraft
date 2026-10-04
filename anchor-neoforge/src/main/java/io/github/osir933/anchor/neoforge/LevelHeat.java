@@ -2,6 +2,7 @@ package io.github.osir933.anchor.neoforge;
 
 import com.mojang.logging.LogUtils;
 import io.github.osir933.anchor.core.host.BlockAppearance;
+import io.github.osir933.anchor.core.host.GlowingBlock;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.ImportPlanner;
 import io.github.osir933.anchor.core.host.Pacer;
@@ -113,6 +114,7 @@ final class LevelHeat {
     private final int ticksPerStep;
     private final int sectionsPerStep;
     private final Pacer pacer;
+    private final GlowSender glow;
     /** How the level is paced, as saved with it. */
     private final LevelPace pace;
     /**
@@ -164,6 +166,7 @@ final class LevelHeat {
                 AtmosphereModel.DEFAULT_RELAXATION_SECONDS, Climate.kelvin(0.8, 64), calmRate,
                 ThermalActivity.DEFAULT_CALM_STEPS, AUDIT_INTERVAL, refinement);
         this.hosted = new HostedWorld(world, mapper::forStateId, settings);
+        this.glow = new GlowSender(level, hosted);
         this.planner = new ImportPlanner(AnchorConfig.get(AnchorConfig.RADIUS),
                 AnchorConfig.get(AnchorConfig.VERTICAL_RADIUS), MARGIN);
         DimensionType type = level.dimensionType();
@@ -188,6 +191,7 @@ final class LevelHeat {
         }
         try {
             takeInChanges();
+            glow.tick();
             if (--ticksUntilSave <= 0) {
                 ticksUntilSave = SAVE_INTERVAL_TICKS;
                 saveAll();
@@ -357,6 +361,25 @@ final class LevelHeat {
             stop(e);
             return false;
         }
+    }
+
+    /**
+     * Lists the blocks of a block's section that glow with heat, as players near it are told.
+     *
+     * @param pos a block of the section
+     * @return the glowing blocks; empty if none glow or the section is not simulated
+     */
+    List<GlowingBlock> glowingBlocks(BlockPos pos) {
+        return failure != null ? List.of() : GlowSender.glowingBlocks(hosted, sectionKey(pos));
+    }
+
+    /**
+     * Forgets what glowing blocks a player was told about, as their client forgets them on leaving the level.
+     *
+     * @param player the player
+     */
+    void forgetPlayer(ServerPlayer player) {
+        glow.forget(player);
     }
 
     /**

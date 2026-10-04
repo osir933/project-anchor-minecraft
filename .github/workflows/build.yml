@@ -47,6 +47,33 @@ jobs:
       - name: Smoke test the jar
         run: python3 .github/scripts/smoke_test.py --dir "$RUNNER_TEMP/server"
 
+      # Starts the game itself under a virtual display, with software drawing. The mod's render test heats two iron
+      # blocks in a dark room and photographs them hot and cooled; the check makes sure they glowed where they are,
+      # in a black body's colours, and stopped once cooled.
+      - name: Render test
+        run: |
+          sudo apt-get update -q > /dev/null
+          sudo apt-get install -y -q xvfb libgl1-mesa-dri mesa-vulkan-drivers > /dev/null
+          log="$RUNNER_TEMP/render.log"
+          code=0
+          timeout 900 xvfb-run -a -s "-screen 0 1280x720x24" ./gradlew :anchor-neoforge:runRenderTest \
+            --stacktrace --warning-mode all > "$log" 2>&1 || code=$?
+          grep 'ANCHOR RENDER TEST' "$log" || true
+          if [ "$code" -ne 0 ] || ! grep -q 'ANCHOR RENDER TEST PASSED' "$log"; then
+            echo "The game ended with code $code. The end of its log:"
+            tail -100 "$log"
+            exit 1
+          fi
+          python3 .github/scripts/render_check.py anchor-neoforge/build/render-test/anchor-render-test
+
+      - name: Upload render test pictures
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: render-test-${{ github.sha }}
+          path: anchor-neoforge/build/render-test/anchor-render-test/
+          if-no-files-found: ignore
+
       - name: Upload mod jar
         uses: actions/upload-artifact@v6
         with:
