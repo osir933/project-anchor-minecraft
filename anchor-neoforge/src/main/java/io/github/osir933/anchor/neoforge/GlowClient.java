@@ -29,8 +29,8 @@ import org.slf4j.Logger;
 /**
  * Draws hot blocks glowing, as the server describes them: on each face a block shows, a thin sheet of light just in
  * front of it, in the colour and brightness of a black body at the face's temperature, spot by spot. The light adds
- * to whatever is drawn behind it, as the light a hot surface gives off adds to the light it reflects, so a block
- * glows dull red in the dark yet hardly shows in daylight until it is hot enough to outshine the day.
+ * to whatever is drawn behind it, as the light a hot surface gives off adds to the light it reflects, so the glow
+ * stands out most in the dark.
  *
  * <p>Blocks that give off light of their own, such as lava, are left as the game draws them, and so are faces that a
  * full block next to them hides.
@@ -47,6 +47,8 @@ final class GlowClient {
     private static final Map<Long, List<Glowing>> SECTIONS = new HashMap<>();
     /** The level the glowing blocks are in; a client that changes level forgets them. */
     private static ClientLevel shownIn;
+    /** Set if drawing the glow ever fails; the glow is only for show, so the game carries on without it. */
+    private static boolean failed;
 
     /** A glowing block, ready to draw. */
     private record Glowing(BlockPos pos, int faces, int uniform, int[] colours) {
@@ -135,23 +137,29 @@ final class GlowClient {
             SECTIONS.clear();
             shownIn = level;
         }
-        if (level == null || SECTIONS.isEmpty()) {
+        if (failed || level == null || SECTIONS.isEmpty()) {
             return;
         }
-        Vec3 camera = event.getLevelRenderState().cameraRenderState.pos;
-        Quads quads = new Quads();
-        for (List<Glowing> blocks : SECTIONS.values()) {
-            for (Glowing block : blocks) {
-                add(level, block, camera, quads);
+        try {
+            Vec3 camera = event.getLevelRenderState().cameraRenderState.pos;
+            Quads quads = new Quads();
+            for (List<Glowing> blocks : SECTIONS.values()) {
+                for (Glowing block : blocks) {
+                    add(level, block, camera, quads);
+                }
             }
-        }
-        if (quads.count > 0) {
-            event.getSubmitNodeCollector().submitCustomGeometry(event.getPoseStack(), RenderTypes.lightning(),
-                    quads::emit);
+            if (quads.count > 0) {
+                event.getSubmitNodeCollector().submitCustomGeometry(event.getPoseStack(), RenderTypes.lightning(),
+                        quads::emit);
+            }
+        } catch (RuntimeException e) {
+            failed = true;
+            SECTIONS.clear();
+            LOGGER.error("Anchor stopped drawing glowing blocks", e);
         }
     }
 
-    /** Adds the glowing faces of a block, along the boxes of its shape, so that slabs and stairs glow where they are. */
+    /** Adds the glowing faces of a block along the boxes of its shape, so that slabs and stairs glow where they are. */
     private static void add(ClientLevel level, Glowing block, Vec3 camera, Quads quads) {
         BlockState state = level.getBlockState(block.pos());
         if (state.isAir() || state.getLightEmission() > 0) {

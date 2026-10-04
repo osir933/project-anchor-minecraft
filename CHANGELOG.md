@@ -16,6 +16,10 @@ Java 25, on both the client and the server.
 - **Heat radiates.** Hot surfaces send heat across air and vacuum onto whatever they face, by the
   Stefan–Boltzmann law, and cold ones take in their surroundings' radiation. Glass and water stop it. Lava
   and magma are strong enough sources to stay hot while they radiate.
+- **Hot things glow.** Blocks hot enough glow in the colour and brightness of a black body at their
+  temperature, from Planck's law and how the eye sees colour: dull red from about 500 °C, brightening through
+  orange as they heat. Shiny surfaces such as gold glow dimmer. Each face glows spot by spot, so a block that is
+  hotter on one side glows brighter there. Lava and other blocks that already give off light look as before.
 - **Liquids stir themselves.** Water and lava carry heat by moving, from their measured viscosity and thermal
   expansion: warmed from below or cooled from above they turn over, and beside something hotter or colder they
   flow along it. Water is densest at 4 °C, so cooled from above it keeps its coldest water on top and freezes
@@ -77,3 +81,5 @@ Known limits of this alpha:
   more slowly than it would.
 - Snapshots keep blocks and heat, not things that move such as items and animals, and restoring a box leaves the
   blocks around it alone, so water that ran out of the box stays where it went.
+- The glow is drawn as an eye used to the dark sees it, so in bright daylight it shows more than a real glow
+  would, and glowing blocks do not light up what is around them.
