@@ -170,6 +170,97 @@ class MaterialTest {
     }
 
     @Test
+    void everySolidAndLiquidSaysHowItMeetsSunlight() {
+        for (Material m : MaterialLibrary.all()) {
+            for (PhaseRegion r : m.thermal().regions()) {
+                Surface surface = r.surface();
+                if (r.phase() == Phase.GAS) {
+                    assertNull(surface, "a gas lets sunlight through: " + m.id());
+                    assertNull(r.surfaceOrDefault(), m.id());
+                    continue;
+                }
+                assertNotNull(surface, m.id() + " " + r.structure());
+                assertTrue(m.sources().containsKey(surface.source().key()), m.id());
+                assertTrue(surface.albedo() > 0.0 && surface.albedo() < 0.9, m.id() + " " + r.structure());
+            }
+        }
+    }
+
+    @Test
+    void waterTakesInSunlightAsPaulsonAndSimpsonFound() {
+        Surface water = WATER.surface(WATER.specificEnthalpy(290.0));
+        assertEquals(StrictMath.exp(-1.0 / 23.0), water.blueGreenTransmittance(), 1e-3);
+        assertEquals(StrictMath.exp(-1.0 / 0.35), water.redInfraredTransmittance(), 1e-3);
+        assertEquals(0.0, water.evaporationResistance());
+        assertTrue(water.translucent() && water.wet());
+
+        Surface ice = WATER.surface(WATER.specificEnthalpy(260.0));
+        assertTrue(ice.translucent() && ice.wet());
+        assertTrue(ice.blueGreenTransmittance() < water.blueGreenTransmittance(), "ice is cloudier than water");
+        assertTrue(ice.albedo() > water.albedo());
+
+        Surface snow = MaterialLibrary.POWDER_SNOW.surface(MaterialLibrary.POWDER_SNOW.specificEnthalpy(260.0));
+        assertFalse(snow.translucent(), "snow takes in sunlight within centimetres");
+        assertTrue(snow.albedo() > 0.75, "fresh snow is the brightest natural surface");
+
+        Surface glass = MaterialLibrary.GLASS.surface(0.0);
+        assertTrue(glass.blueGreenTransmittance() > 0.9 && !glass.wet(), "a glass block is a window");
+        Surface granite = MaterialLibrary.GRANITE.surface(0.0);
+        assertFalse(granite.translucent() || granite.wet(), "rock is opaque and dry");
+        assertTrue(MaterialLibrary.SOIL.surface(0.0).wet() && MaterialLibrary.FOLIAGE.surface(0.0).wet());
+        assertNull(WATER.surface(WATER.specificEnthalpy(400.0)), "steam lets sunlight through");
+        assertNull(MaterialLibrary.AIR.surface(0.0));
+    }
+
+    @Test
+    void theDominantRegionMatchesTheFullState() {
+        for (Material m : MaterialLibrary.all()) {
+            double lo = m.specificEnthalpy(m.thermal().minTemperatureK() - 50.0);
+            double hi = m.specificEnthalpy(m.thermal().maxTemperatureK() + 50.0);
+            for (int i = 0; i <= 4000; i++) {
+                double h = lo + (hi - lo) * i / 4000.0;
+                ThermalState state = m.stateFor(h);
+                int expected = state.transitionFraction() > 0.5 ? state.region() + 1 : state.region();
+                assertEquals(expected, m.dominantRegion(h), m.id() + " at " + h + " J/kg");
+                assertEquals(m.dominantPhase(state), m.thermal().regions().get(m.dominantRegion(h)).phase());
+            }
+            for (int t = 0; t < m.thermal().transitions().size(); t++) {
+                double end = m.thermal().regionEndEnthalpy(t);
+                double latent = m.thermal().transitions().get(t).latentHeat();
+                assertEquals(t, m.dominantRegion(end + 0.25 * latent), m.id());
+                assertEquals(t + 1, m.dominantRegion(end + 0.75 * latent), m.id());
+            }
+        }
+    }
+
+    @Test
+    void aSolidWithoutSurfaceDataIsOpaqueAndDry() {
+        PropertyCurve one = PropertyCurve.constant(1.0, MaterialLibrary.PROPERTY_ESTIMATE);
+        PhaseRegion bare = new PhaseRegion(Phase.SOLID, "bare", 100.0, 200.0, one, one, one, one);
+        assertNull(bare.surface());
+        assertEquals(PhaseRegion.UNKNOWN_SURFACE, bare.surfaceOrDefault());
+        assertFalse(bare.surfaceOrDefault().translucent() || bare.surfaceOrDefault().wet());
+        Surface painted = Surface.opaque(0.8, MaterialLibrary.ALBEDO);
+        assertEquals(painted, bare.withSurface(painted).surfaceOrDefault());
+        assertThrows(IllegalArgumentException.class,
+                () -> new PhaseRegion(Phase.GAS, "fog", 100.0, 200.0, one, one, one, one).withSurface(painted));
+    }
+
+    @Test
+    void surfacesKeepTheirValuesPhysical() {
+        Source source = MaterialLibrary.ALBEDO;
+        assertThrows(IllegalArgumentException.class, () -> Surface.opaque(1.2, source));
+        assertThrows(IllegalArgumentException.class, () -> Surface.opaque(Double.NaN, source));
+        assertThrows(IllegalArgumentException.class, () -> new Surface(0.1, 1.1, 0.0, 0.0, source));
+        assertThrows(IllegalArgumentException.class, () -> new Surface(0.1, 0.5, -0.1, 0.0, source));
+        assertThrows(IllegalArgumentException.class, () -> Surface.opaque(0.1, source).evaporating(-1.0));
+        Surface grass = Surface.opaque(0.23, source).evaporating(70.0);
+        assertTrue(grass.wet() && !grass.translucent());
+        assertEquals(0.05, grass.withAlbedo(0.05).albedo());
+        assertEquals(70.0, grass.withAlbedo(0.05).evaporationResistance());
+    }
+
+    @Test
     void everyMaterialHasAUniqueId() {
         TreeSet<String> ids = new TreeSet<>();
         for (Material m : MaterialLibrary.all()) {

@@ -132,6 +132,12 @@ final class HeatText {
                 lines.add("  Refined into smaller cells from " + celsius(i.coolestK()) + " to " + celsius(i.hottestK())
                         + "; the figures above are for the whole block");
             }
+            if (!Double.isNaN(i.surfaceK())) {
+                lines.add("  Its top, open to the sky, is at " + celsius(i.surfaceK()));
+            }
+            if (i.sunlightW() > 0) {
+                lines.add("  Taking in " + power(i.sunlightW()) + " of sunlight");
+            }
         }
         BlockAppearance a = i.appearance();
         if (a.presentable()) {
@@ -178,6 +184,12 @@ final class HeatText {
                 s.lastStepMillis(), s.averageStepMillis()));
         lines.add(String.format(Locale.ROOT, "  %d blocks refined into %d smaller cells where temperatures change "
                 + "steeply", w.refinedBlocks(), w.refinedCells()));
+        if (Double.isNaN(w.sunlightW())) {
+            lines.add("  No sun or night sky here");
+        } else {
+            lines.add((w.sunlightW() > 0 ? "  Sunlight " + power(w.sunlightW()) + "/m² on level ground" : "  Night")
+                    + "; " + w.skySurfaces() + " surfaces open to the sky");
+        }
         lines.add(String.format(Locale.ROOT, "  %d block changes followed; %d blocks changed to show melting, "
                 + "freezing or boiling", w.reconciled(), s.shownPhaseChanges()));
         if (s.restoredBlocks() > 0) {

@@ -69,6 +69,9 @@ import java.util.function.LongToDoubleFunction;
  * <p>Given a {@link ThermalRefinement}, the model reports the temperature drop each cell needs between its
  * centre and a radiating face to pass on what it takes in or gives off there, at the step's starting
  * temperatures, so that cells too coarse for strong radiation, such as beside lava, can be split.
+ *
+ * <p>Given a {@link SkyModel}, the rays that escape from a top face the sky model keeps reach the sky that model
+ * balances the face with, so they are left to it; the rays such a face sends to other faces still count.
  */
 public final class RadiationModel implements PhysicsModel {
 
@@ -109,6 +112,7 @@ public final class RadiationModel implements PhysicsModel {
     private final double range;
     private final double radiatingDifferenceK;
     private final ThermalRefinement refinement;
+    private final SkyModel sky;
 
     private final TreeMap<Long, Opacity> opacity = new TreeMap<>();
     private final TreeMap<Long, SectionRays> raysBySection = new TreeMap<>();
@@ -161,7 +165,21 @@ public final class RadiationModel implements PhysicsModel {
      * @param refinement where to report cells that should be split, or {@code null} to report none
      */
     public RadiationModel(LongToDoubleFunction environment, ThermalRefinement refinement) {
-        this(environment, DEFAULT_RAYS_PER_FACE, DEFAULT_RANGE_BLOCKS, DEFAULT_RADIATING_DIFFERENCE_K, refinement);
+        this(environment, refinement, null);
+    }
+
+    /**
+     * Creates the model with the default rays, range and radiating difference, reporting cells too coarse for
+     * the radiation they take in or give off, and leaving the exchange with the sky above the top faces a sky model
+     * keeps to it.
+     *
+     * @param environment the environment temperature of each section, in kelvin, by packed section key
+     * @param refinement where to report cells that should be split, or {@code null} to report none
+     * @param sky the sky model that keeps the top faces of surfaces open to the sky, or {@code null} for none
+     */
+    public RadiationModel(LongToDoubleFunction environment, ThermalRefinement refinement, SkyModel sky) {
+        this(environment, DEFAULT_RAYS_PER_FACE, DEFAULT_RANGE_BLOCKS, DEFAULT_RADIATING_DIFFERENCE_K, refinement,
+                sky);
     }
 
     /**
@@ -190,6 +208,11 @@ public final class RadiationModel implements PhysicsModel {
      */
     public RadiationModel(LongToDoubleFunction environment, int raysPerFace, double rangeBlocks,
             double radiatingDifferenceK, ThermalRefinement refinement) {
+        this(environment, raysPerFace, rangeBlocks, radiatingDifferenceK, refinement, null);
+    }
+
+    private RadiationModel(LongToDoubleFunction environment, int raysPerFace, double rangeBlocks,
+            double radiatingDifferenceK, ThermalRefinement refinement, SkyModel sky) {
         this.environment = Objects.requireNonNull(environment, "environment");
         if (!(rangeBlocks > 0) || !Double.isFinite(rangeBlocks)) {
             throw new IllegalArgumentException("range must be positive: " + rangeBlocks);
@@ -202,6 +225,7 @@ public final class RadiationModel implements PhysicsModel {
         this.range = rangeBlocks;
         this.radiatingDifferenceK = radiatingDifferenceK;
         this.refinement = refinement;
+        this.sky = sky;
     }
 
     @Override
@@ -295,6 +319,7 @@ public final class RadiationModel implements PhysicsModel {
                 continue;
             }
             SectionRays cache = null;
+            long[] tops = sky == null ? null : sky.openTops(key);
             section.copyBlocks(scratchMaterial, scratchMass, scratchEnthalpy, null, 0);
             for (int b = 0; b < SectionPos.BLOCKS; b++) {
                 boolean radiates = section.isRefined(b) ? refinedHot(section.refinedBlock(b), own, b)
@@ -324,7 +349,10 @@ public final class RadiationModel implements PhysicsModel {
                         cast += pattern.rays();
                     }
                     int from = surface(slot, d.ordinal());
-                    x.escape(from, rays.escaped);
+                    if (d != Direction.UP || tops == null || (tops[b >>> 6] & (1L << b)) == 0) {
+                        // The sky model balances what a surface open to the sky exchanges with it.
+                        x.escape(from, rays.escaped);
+                    }
                     for (int t = 0; t < rays.count.length; t++) {
                         int target = slot(world, rays.section[t], rays.block[t]);
                         x.link(from, surface(target, rays.face[t]), rays.count[t]);

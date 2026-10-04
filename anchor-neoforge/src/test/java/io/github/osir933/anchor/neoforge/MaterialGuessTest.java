@@ -1,6 +1,7 @@
 package io.github.osir933.anchor.neoforge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.osir933.anchor.core.matter.Phase;
@@ -82,5 +83,26 @@ class MaterialGuessTest {
             String m = material(path);
             assertTrue(registry.indexOf(m) >= 0, path + " is guessed as " + m + ", which is not registered");
         }
+    }
+
+    @Test
+    void woolConcreteAndTerracottaReflectSunlightByTheirColour() {
+        assertTrue(MaterialGuess.isDyed("black_wool"));
+        assertTrue(MaterialGuess.isDyed("lime_concrete_powder"));
+        assertTrue(MaterialGuess.isDyed("terracotta"));
+        assertTrue(MaterialGuess.isDyed("purple_glazed_terracotta"));
+        assertFalse(MaterialGuess.isDyed("stone"));
+        assertFalse(MaterialGuess.isDyed("woolly_mammoth_statue"), "whole words only");
+        assertEquals(MaterialGuess.WHITE_ALBEDO, MaterialGuess.albedoOfColour(0xFFFFFF), 1e-12);
+        assertEquals(MaterialGuess.BLACK_ALBEDO, MaterialGuess.albedoOfColour(0x000000), 1e-12);
+        // Minecraft's black wool is 0x191919 on maps, its white wool 0xFFFFFF.
+        assertEquals(0.058, MaterialGuess.albedoOfColour(0x191919), 1e-3);
+        // Green looks brighter than red, and red brighter than blue, at the same strength.
+        double green = MaterialGuess.albedoOfColour(0x00FF00);
+        double red = MaterialGuess.albedoOfColour(0xFF0000);
+        double blue = MaterialGuess.albedoOfColour(0x0000FF);
+        assertTrue(green > red && red > blue, green + " " + red + " " + blue);
+        double halfway = (MaterialGuess.BLACK_ALBEDO + MaterialGuess.WHITE_ALBEDO) / 2;
+        assertEquals(halfway, MaterialGuess.albedoOfColour(0xBCBCBC), 0.01, "grey 188 gives off half white's light");
     }
 }

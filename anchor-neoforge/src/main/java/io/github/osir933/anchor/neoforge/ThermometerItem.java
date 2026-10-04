@@ -15,9 +15,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Measures temperature. Used on a block it reads that block where it touches it, which for a block refined into
- * smaller cells is the cell there; used in the air it reads the air around the player's head. The reading appears
- * above the hotbar.
+ * Measures temperature. Used on a block it reads that block where it touches it: the cell there, for a block refined
+ * into smaller cells, and the top of a block open to the sky, which the sun warms and a clear night chills faster
+ * than the block as a whole. Used in the air it reads the air around the player's head. The reading appears above
+ * the hotbar.
  */
 final class ThermometerItem extends Item {
 
@@ -66,7 +67,7 @@ final class ThermometerItem extends Item {
             return Component.translatableWithFallback("message.anchor.thermometer.waiting",
                     "No reading yet: this area is still being loaded into the simulation");
         }
-        double kelvin = found.get().refined() ? heat.get().temperatureAt(pos, at) : found.get().temperatureK();
+        double kelvin = heat.get().temperatureAt(pos, at);
         if (Double.isNaN(kelvin)) {
             return Component.translatableWithFallback("message.anchor.thermometer.empty", "Nothing here to measure");
         }

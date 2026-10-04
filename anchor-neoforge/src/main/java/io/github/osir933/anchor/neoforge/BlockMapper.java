@@ -33,6 +33,10 @@ import org.slf4j.Logger;
  * (see {@link MaterialGuess}) or its sound, and its fill from its collision shape. Blocks filling less than a
  * fifth of their space, such as torches, flowers, rails and panes, count as the air around them; heat sources
  * among them heat that air.
+ *
+ * <p>Where a guessed block's look says more about the sunlight it takes in than its material does, its appearance
+ * carries an albedo: the grass on a grass block, and the colour of wool, concrete and terracotta, from the colour
+ * the block has on maps.
  */
 final class BlockMapper {
 
@@ -40,6 +44,9 @@ final class BlockMapper {
 
     /** Blocks filling less than this fraction of their space count as the air or water around them. */
     static final double THIN = 0.2;
+
+    /** The share of sunlight the grass on a grass block reflects, that of a short green crop. */
+    static final double GRASS_ALBEDO = 0.23;
 
     static final HeatSourceModel.Source TORCH = new HeatSourceModel.Source(1300.0, 1500.0);
     static final HeatSourceModel.Source LANTERN = new HeatSourceModel.Source(1000.0, 300.0);
@@ -219,6 +226,12 @@ final class BlockMapper {
         BlockAppearance a = BlockAppearance.of(guess.material()).withFill(fill);
         if (guess.phase() != null) {
             a = a.shownAs(guess.phase());
+        }
+        if (MaterialGuess.isDyed(path)) {
+            a = a.withAlbedo(MaterialGuess.albedoOfColour(
+                    state.getMapColor(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).col));
+        } else if (words.contains("grass") && guess.material().equals("anchor:soil")) {
+            a = a.withAlbedo(GRASS_ALBEDO);
         }
         boolean furnace = words.contains("furnace") || words.contains("smoker") || words.contains("kiln")
                 || words.contains("oven");

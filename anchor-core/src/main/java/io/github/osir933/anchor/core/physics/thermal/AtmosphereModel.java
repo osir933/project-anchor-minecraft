@@ -40,9 +40,13 @@ public final class AtmosphereModel implements PhysicsModel {
     /** The default time constant, in seconds, of a gas cell's exchange with the weather. */
     public static final double DEFAULT_RELAXATION_SECONDS = 300.0;
 
+    /** The relative humidity of sections without their own, a typical value for temperate air. */
+    public static final double DEFAULT_HUMIDITY = 0.6;
+
     private final double relaxationSeconds;
     private final double defaultEnvironmentK;
     private final TreeMap<Long, Double> environment = new TreeMap<>();
+    private final TreeMap<Long, Double> humidity = new TreeMap<>();
     private double lastEnergy;
 
     /**
@@ -76,12 +80,37 @@ public final class AtmosphereModel implements PhysicsModel {
     }
 
     /**
-     * Forgets a section's environment temperature.
+     * Forgets a section's environment temperature and humidity.
      *
      * @param sectionKey the packed section position
      */
     public void removeEnvironment(long sectionKey) {
         environment.remove(sectionKey);
+        humidity.remove(sectionKey);
+    }
+
+    /**
+     * Sets the relative humidity of the air around a section, which decides how fast water evaporates there and
+     * how much heat the sky sends back down.
+     *
+     * @param sectionKey the packed section position
+     * @param relativeHumidity the relative humidity, from 0 for dry air to 1 for saturated air
+     */
+    public void setHumidity(long sectionKey, double relativeHumidity) {
+        if (!(relativeHumidity >= 0 && relativeHumidity <= 1)) {
+            throw new IllegalArgumentException("relative humidity must lie between 0 and 1: " + relativeHumidity);
+        }
+        humidity.put(sectionKey, relativeHumidity);
+    }
+
+    /**
+     * Returns the relative humidity of the air around a section.
+     *
+     * @param sectionKey the packed section position
+     * @return the relative humidity, {@link #DEFAULT_HUMIDITY} for a section without its own
+     */
+    public double humidity(long sectionKey) {
+        return humidity.getOrDefault(sectionKey, DEFAULT_HUMIDITY);
     }
 
     /**

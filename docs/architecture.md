@@ -126,12 +126,49 @@ than the calm rate, its cells' net changes added regardless of sign over the who
 refined room still falls asleep. Snapshots store refined blocks' totals, so a block is saved and restored whole
 and splits again if its heat is still steep.
 
-Three models connect the simulated region to the rest of the world, and all declare the energy they exchange:
+**Sunlight and the night sky** (`physics.thermal.SkyModel`) reach the ground through the top faces of blocks.
+Light falls straight down each column, as Minecraft's skylight does, so a shadow lies right under whatever
+casts it, and the host says where the open sky begins in each column. The first block below the sky that is
+not gas is the column's surface. Each phase of a material says how it meets the light (`matter.Surface`): its
+albedo and, for translucent matter, the fraction of each of two bands that crosses a metre of it, after Paulson
+and Simpson's split of sunlight in clear water into blue-green light that crosses tens of metres and red and
+near-infrared light that is gone within the first. Light that gets through warms the blocks below, down to 32
+blocks, and the bed under a body of liquid hands its share to the liquid on it. `physics.thermal.SkyPhysics`
+gives the sunlight on level ground from Meinel and Meinel's clear-sky fit with Kasten and Young's air mass,
+dimmed by cloud as Kasten and Czeplak found, and the sky's own thermal radiation from Brutsaert's clear-sky
+emissivity, raised by cloud as Unsworth and Monteith found.
+
+At an ordinary surface the model takes the top face over from conduction and radiation and balances it, solving
+implicitly for the surface temperature: the sunlight taken in, the sky's radiation, the surface's emission, the
+heat the air carries off at 10 W/(m²·K), and latent heat as water evaporates from a wet surface or dew and frost
+settle on it, held back by the air and by the surface's own resistance, as in the Penman-Monteith equation. A
+block is much thicker than the layer a day's warming reaches, so a solid's surface is a skin that follows
+Deardorff's force-restore method: it has the heat capacity per area the daily cycle stirs, e/√(2ω) for the
+thermal effusivity e and the day's angular frequency ω, and is pulled back towards its block's temperature at
+the rate ω. A skin is no warmer than the melting point of a solid that melts, so sunlit snow stays at 0 °C and
+melts. A liquid mixes, so its surface is the whole block. The heat the air carries off goes to the open
+atmosphere rather than into the cell above, which would warm by tens of kelvin over sunlit ground; that cell
+only relaxes through the surface, so a fire's warm air still reaches the ground. Refined blocks, heat sources
+and solids more than 50 K from their weather only take sunlight, and conduction and radiation keep their top
+faces, so warm air still rises from a hot block of iron.
+
+The sky's heat is declared as forced, so sunshine keeps no section awake: it reaches sleeping sections too, each
+column every fourth step over the time it waited, and only a phase change it finishes or starts wakes a section,
+so a host sees the snow it melted. Heat flows below the surface only where sections are simulated, so light
+bound for a block in a sleeping section warms the column's surface instead; kept where it fell, it would pile up
+there without end. Measured at Anchor's clock with a clear sky: a layer of snow in air at 5 °C melts in about 10
+hours of sunshine and 19 under cloud, and lasts in air at 0 °C; a pond's top swings by about 3 °C over a day and
+evaporates about 6 mm of water a day in the plains, and about 14 mm in a desert whose air stays at 42 °C through
+the night; and the sky costs about 0.5 ms a step for 125 sleeping sections with 6 400 surfaces.
+
+Four models connect the simulated region to the rest of the world, and all declare the energy they exchange:
 
 - **Heat sources** (`physics.thermal.HeatSourceModel`) stand for things the simulation does not model yet,
   such as a flame. Each heats its block towards a temperature with at most a set power, and never cools it.
 - **Radiation** that leaves the simulated region, described above, reaches surroundings at the weather
   temperature.
+- **The sky**, described above, brings sunlight in and exchanges thermal radiation, heat and vapour with the
+  weather over each surface.
 - **The atmosphere** (`physics.thermal.AtmosphereModel`) relaxes gas cells towards their section's weather
   temperature with a time constant, exactly for any step length. Without it the simulated region would be a
   closed box in which heat piles up.
@@ -143,7 +180,7 @@ changes awake: an edit or a new source wakes a section, each step simulates the 
 neighbours, a neighbour that starts changing faster than the calm rate wakes in turn, and a section that has
 changed slower than one kelvin per hour for a while falls asleep. Change is measured net over a step, so a
 room that a torch heats exactly as fast as it loses heat counts as calm and sleeps in that steady state.
-Sleeping sections are paused, not cooled.
+Sleeping sections are paused, not cooled, apart from what the sky does to their surfaces.
 
 ## Hosting
 
@@ -192,7 +229,17 @@ the game's block there; a block that changed while the section was not simulated
   temperature.
 - **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
   snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
-  vanilla does, and the result is held between −30 and 45 °C (`Climate`).
+  vanilla does, and the result is held between −30 and 45 °C (`Climate`). Its air has a relative humidity of
+  20 % plus 65 % of the biome's downfall: 20 % in deserts, 46 % in plains, 72 % in forests.
+- **Sun and sky.** A dimension with skylight, no ceiling and the Overworld's kind of sky has a sun: each step
+  takes the sky from Minecraft's `sun_angle` environment attribute and its rain and thunder levels, so rain
+  overcasts the sky and moistens the air and thunder brings storm clouds; clear weather is a cloudless sky. The
+  attribute may differ from place to place, so it is read at the first simulated section. Where the open sky
+  begins in each column comes from the `WORLD_SURFACE` heightmap, the highest block that is not air, when a
+  section comes in, when a block changes and as each section is compared with the level; whether what lies
+  under it lets light through is the engine's to judge. Dyed wool, concrete and terracotta reflect by their map
+  colour, their linear luminance between black's 0.05 and white's 0.85, and grass blocks reflect 23 %
+  (`BlockMapper`). The Nether and the End have no sun or sky in the simulation.
 - **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
   simulation steps every four game ticks. Both are settings.
 - **Saving.** `ChunkHeat` holds the snapshots of a chunk's sections as a NeoForge data attachment, so they
@@ -213,17 +260,17 @@ the game's block there; a block that changed while the section was not simulated
   widens at once and narrows slowly.
 
 The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
-(`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled
-below it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes
-the temperature, a torch warms the air above it, a section written into its chunk and brought in again comes
-back exactly, the save format keeps every number, a thermal camera reads a hot iron block at its crosshair and
-shows it among the cold floor, its air view shows the warm air above the iron and none of the still air, its
-tooltip says how to use it, an iron block at 1500 K warms a stone block across two blocks of air, and the stone
-walls of a lava pool are refined so that their faces read hotter than the stone behind, on the thermometer
-too. The game tests load the mod from the build directories, so CI also installs a
-NeoForge server the way players do, starts it with the released jar and checks that the mod loads, its
-self-test passes, heat runs, the server stops cleanly and nothing is logged as an error
-(`.github/scripts/smoke_test.py`).
+(`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled below
+it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes the
+temperature, a torch warms the air above it, a section written into its chunk and brought in again comes back
+exactly, the save format keeps every number, a thermal camera reads a hot iron block at its crosshair and shows it
+among the cold floor, its air view shows the warm air above the iron and none of the still air, its tooltip says
+how to use it, an iron block at 1500 K warms a stone block across two blocks of air, the stone walls of a lava pool
+are refined so that their faces read hotter than the stone behind, on the thermometer too, and in a noon sun black
+wool takes in more than three times the sunlight of white wool beside it, grows more than 10 K hotter on top, and
+reads so on the thermometer. The game tests load the mod from the build directories, so CI also installs a NeoForge
+server the way players do, starts it with the released jar and checks that the mod loads, its self-test passes,
+heat runs, the server stops cleanly and nothing is logged as an error (`.github/scripts/smoke_test.py`).
 
 ## Requests
 
@@ -250,9 +297,10 @@ The same world and the same inputs give bit-identical results on every machine. 
 
 ## Roadmap
 
-Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces
-radiate, temperatures are saved with the world, blocks refine where temperatures change steeply, and liquids
-carry heat by moving. Next for heat: sunlight and the night sky. After that come structure and fracture; rigid
-bodies, contact and emergent
-tools; materials processing and microstructure; fluids and chemistry; electricity and control; causal
-targeting and molecular dynamics; and finally life and society, on the way to 1.0.
+Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces radiate,
+temperatures are saved with the world, blocks refine where temperatures change steeply, liquids carry heat by
+moving, and the sun and the night sky warm and cool the land. Next for phase 1: instruments for experiments
+(probes, graphs and a simulation console), a laboratory world, and hot metal that glows. After that come structure
+and fracture; rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and
+chemistry; electricity and control; causal targeting and molecular dynamics; and finally life and society, on the
+way to 1.0.

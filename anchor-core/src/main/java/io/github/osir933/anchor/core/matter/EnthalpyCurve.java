@@ -154,6 +154,30 @@ public final class EnthalpyCurve {
     }
 
     /**
+     * Returns the phase region that holds most of the matter at a specific enthalpy, the same one that
+     * {@link Material#dominantPhase} picks from the full state, without building it: during a transition, the
+     * region being left until more than half the matter has changed.
+     *
+     * @param specificEnthalpy the specific enthalpy in J/kg
+     * @return the region index
+     */
+    public int dominantRegion(double specificEnthalpy) {
+        // The same search as stateFor; the two must agree exactly.
+        int n = regions.size();
+        for (int i = 0; i < n - 1; i++) {
+            double[] hs = enthalpyAt[i];
+            double end = hs[hs.length - 1];
+            if (specificEnthalpy <= end) {
+                return i;
+            }
+            if (specificEnthalpy < enthalpyAt[i + 1][0]) {
+                return (specificEnthalpy - end) / latentHeat[i] > 0.5 ? i + 1 : i;
+            }
+        }
+        return n - 1;
+    }
+
+    /**
      * Returns the temperature for a specific enthalpy.
      *
      * @param specificEnthalpy the specific enthalpy in J/kg

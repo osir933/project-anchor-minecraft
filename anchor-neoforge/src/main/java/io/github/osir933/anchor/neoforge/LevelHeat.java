@@ -8,6 +8,7 @@ import io.github.osir933.anchor.core.host.PhaseChange;
 import io.github.osir933.anchor.core.host.SectionSnapshot;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
+import io.github.osir933.anchor.core.physics.thermal.Sky;
 import io.github.osir933.anchor.core.physics.thermal.ThermalActivity;
 import io.github.osir933.anchor.core.physics.thermal.ThermalRefinement;
 import io.github.osir933.anchor.core.space.GridPos;
@@ -30,11 +31,14 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.dimension.DimensionType;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 
@@ -51,6 +55,12 @@ import org.slf4j.Logger;
  * <p>The state of simulated sections is saved with their chunks as {@link ChunkHeat}: when a section is let
  * go or its chunk unloads, when the level is saved, and every minute in between. A section brought in again
  * takes its saved state back.
+ *
+ * <p>In a level with a sun, such as the Overworld, each step takes the sun's place and the weather from the level (see
+ * {@link Climate#sky}), and the simulation learns where the open sky begins in each column from the level's
+ * heightmap of its highest blocks: when a section comes in, when a block in it changes, and again as each section
+ * is compared with the level. The Nether, under its ceiling, and the End, under its black sky, have no sun or sky
+ * in the simulation.
  */
 final class LevelHeat {
 
@@ -80,6 +90,11 @@ final class LevelHeat {
     private final ImportPlanner planner;
     private final int ticksPerStep;
     private final int sectionsPerStep;
+    /**
+     * Whether the level has a sun and a sky open above it: skylight, no ceiling and the Overworld's kind of sky with
+     * its sun and moon, unlike the Nether and the End.
+     */
+    private final boolean hasSun;
     private final TreeSet<Long> changed = new TreeSet<>();
     private final TreeMap<Long, Integer> pinned = new TreeMap<>();
     private final ArrayDeque<PhaseChange> toShow = new ArrayDeque<>();
@@ -95,6 +110,8 @@ final class LevelHeat {
     private double lastStepMillis;
     private double averageStepMillis;
     private String failure;
+    /** A sky held in place of the level's own, or {@code null}. */
+    private Sky heldSky;
 
     /**
      * Starts heat in a level, with the current settings.
@@ -119,6 +136,8 @@ final class LevelHeat {
         this.hosted = new HostedWorld(world, mapper::forStateId, settings);
         this.planner = new ImportPlanner(AnchorConfig.get(AnchorConfig.RADIUS),
                 AnchorConfig.get(AnchorConfig.VERTICAL_RADIUS), MARGIN);
+        DimensionType type = level.dimensionType();
+        this.hasSun = type.hasSkyLight() && !type.hasCeiling() && type.skybox() == DimensionType.Skybox.OVERWORLD;
     }
 
     /**
@@ -148,6 +167,7 @@ final class LevelHeat {
             long start = System.nanoTime();
             followPlayers();
             verifyNext();
+            followSky();
             HostedWorld.TickResult result = hosted.tick();
             toShow.addAll(result.phaseChanges());
             show();
@@ -281,6 +301,17 @@ final class LevelHeat {
     }
 
     /**
+     * Holds the sky over the simulation still, in place of the level's own sun and weather, as for an experiment
+     * that needs the noon sun, or lets it follow the level again. A level without a sun, or with the sun and sky
+     * switched off, stays without one.
+     *
+     * @param sky the sky to hold, or {@code null} to follow the level's own
+     */
+    void holdSky(Sky sky) {
+        heldSky = sky;
+    }
+
+    /**
      * Returns how many blocks have been changed to show melting, freezing or boiling.
      *
      * @return the count
@@ -366,6 +397,7 @@ final class LevelHeat {
         changed.remove(pos.asLong());
         if (hosted.isImported(sectionKey(pos)) && level.isLoaded(pos)) {
             hosted.reconcile(grid(pos), Block.getId(level.getBlockState(pos)), Double.NaN);
+            followSkyHeight(pos);
         }
     }
 
@@ -375,8 +407,56 @@ final class LevelHeat {
             BlockPos pos = BlockPos.of(changed.pollFirst());
             if (level.isLoaded(pos)) {
                 hosted.reconcile(grid(pos), Block.getId(level.getBlockState(pos)), Double.NaN);
+                followSkyHeight(pos);
             }
         }
+    }
+
+    /**
+     * Sets the sky for the next step from the level's sun and weather, or none if the level has no sun. Minecraft
+     * lets the sun's angle differ from place to place, though its own biomes keep it the same everywhere; the one
+     * sky over the simulation takes it at the first simulated section.
+     */
+    private void followSky() {
+        SortedSet<Long> sections = hosted.importedSections();
+        if (!hasSun || !AnchorConfig.get(AnchorConfig.SUN_AND_SKY)) {
+            hosted.setSky(null);
+        } else if (heldSky != null) {
+            hosted.setSky(heldSky);
+        } else if (!sections.isEmpty()) {
+            BlockPos at = centre(sections.first());
+            hosted.setSky(Climate.sky(level.environmentAttributes().getValue(EnvironmentAttributes.SUN_ANGLE, at),
+                    level.getRainLevel(1.0f), level.getThunderLevel(1.0f)));
+        }
+    }
+
+    /** Tells the simulation where the open sky begins in each column of a chunk. */
+    private void followSkyHeights(LevelChunk chunk) {
+        if (!hasSun) {
+            return;
+        }
+        int baseX = chunk.getPos().x() << 4;
+        int baseZ = chunk.getPos().z() << 4;
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                hosted.setSkyHeight(baseX + x, baseZ + z, firstOpenY(chunk, x, z));
+            }
+        }
+    }
+
+    /** Tells the simulation where the open sky begins in the column of a block that changed. */
+    private void followSkyHeight(BlockPos pos) {
+        if (hasSun) {
+            hosted.setSkyHeight(pos.getX(), pos.getZ(), firstOpenY(level.getChunkAt(pos), pos.getX(), pos.getZ()));
+        }
+    }
+
+    /**
+     * Returns the lowest height open to the sky in a column of a chunk: just above its highest block that is not
+     * air. Whether the blocks below let light through, as glass, water and flowers do, is the simulation's to judge.
+     */
+    private static int firstOpenY(LevelChunk chunk, int x, int z) {
+        return chunk.getHeight(Heightmap.Types.WORLD_SURFACE, x & 15, z & 15) + 1;
     }
 
     /** Brings in sections near players and lets go of those no player is near. */
@@ -407,7 +487,8 @@ final class LevelHeat {
     private void bringIn(LevelChunk chunk, long key, LevelChunkSection section) {
         ChunkHeat saved = chunk.getExistingDataOrNull(AnchorAttachments.CHUNK_HEAT);
         SectionSnapshot snapshot = saved == null ? null : saved.section(SectionPos.y(key));
-        int restored = hosted.importSection(key, ids(section), climate(key), snapshot);
+        int restored = hosted.importSection(key, ids(section), climate(key), humidity(key), snapshot);
+        followSkyHeights(chunk);
         if (restored > 0) {
             restoredBlocks += restored;
             restoredSections++;
@@ -462,11 +543,13 @@ final class LevelHeat {
                 : imported.tailSet(lastVerified + 1);
         long key = after.isEmpty() ? imported.first() : after.first();
         lastVerified = key;
-        LevelChunkSection section = section(key);
+        LevelChunk chunk = chunk(key);
+        LevelChunkSection section = chunk == null ? null : section(chunk, key);
         if (section == null) {
             forget(key);
         } else {
             hosted.verifySection(key, ids(section));
+            followSkyHeights(chunk);
         }
     }
 
@@ -497,6 +580,7 @@ final class LevelHeat {
         }
         level.setBlock(pos, replacement.get(), Block.UPDATE_ALL);
         hosted.reconcile(change.pos(), Block.getId(level.getBlockState(pos)), change.temperatureK());
+        followSkyHeight(pos);
         shown++;
         if (change.now() == Phase.GAS) {
             level.sendParticles(ParticleTypes.CLOUD, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 6, 0.3,
@@ -540,9 +624,17 @@ final class LevelHeat {
 
     /** Returns the temperature of a section's surroundings, from the biome at its centre. */
     private double climate(long key) {
-        BlockPos centre = new BlockPos((SectionPos.x(key) << 4) + 8, (SectionPos.y(key) << 4) + 8,
-                (SectionPos.z(key) << 4) + 8);
+        BlockPos centre = centre(key);
         return Climate.kelvin(level.getBiome(centre).value().getBaseTemperature(), centre.getY());
+    }
+
+    /** Returns the relative humidity of a section's surroundings, from the biome at its centre. */
+    private double humidity(long key) {
+        return Climate.relativeHumidity(level.getBiome(centre(key)).value().getModifiedClimateSettings().downfall());
+    }
+
+    private static BlockPos centre(long key) {
+        return new BlockPos((SectionPos.x(key) << 4) + 8, (SectionPos.y(key) << 4) + 8, (SectionPos.z(key) << 4) + 8);
     }
 
     private void stop(RuntimeException e) {

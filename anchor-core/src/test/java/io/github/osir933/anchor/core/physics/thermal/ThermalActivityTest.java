@@ -185,6 +185,41 @@ class ThermalActivityTest {
     }
 
     @Test
+    void heatFromOutsideTheWorldDoesNotCount() {
+        // The sun warming a block is declared as forced, so a section only the sky changes can sleep; heat that
+        // moves on from there still counts.
+        PhysicalWorld world = vacuumWorld();
+        long key = SectionPos.pack(0, 0, 0);
+        GridPos pos = new GridPos(1, 1, 1);
+        world.placeMaterial(pos, MaterialLibrary.GRANITE, 300.0);
+        double capacity = world.readBlock(pos).mass() * MaterialLibrary.GRANITE.minSpecificHeat();
+        ThermalActivity activity = new ThermalActivity(world.materials(), 1e-3, 1);
+        world.addWriteListener(activity);
+        heat(world, pos, 0.5 * capacity);
+        activity.forced(key, pos.indexInSection(), 0.5 * capacity);
+        activity.endStep(world, 1.0);
+        assertFalse(activity.isAwake(key), "half a kelvin of sunshine in a second wakes nothing");
+        heat(world, pos, 0.5 * capacity);
+        activity.forced(key, pos.indexInSection(), 0.4 * capacity);
+        activity.endStep(world, 1.0);
+        assertTrue(activity.isAwake(key), "a tenth of a kelvin from elsewhere does");
+
+        GridPos refined = new GridPos(5, 5, 5);
+        world.placeMaterial(refined, MaterialLibrary.GRANITE, 300.0);
+        world.refine(CellId.of(refined).child(0));
+        activity.clear();
+        CellId top = CellId.of(refined).child(2);
+        heatLeaf(world, top, 0.5 * capacity);
+        activity.forced(key, refined.indexInSection(), top, 0.5 * capacity);
+        activity.endStep(world, 1.0);
+        assertFalse(activity.isAwake(key), "nor in a refined block's cell");
+        // Forced heat only counts for the step it came in.
+        heatLeaf(world, top, 0.01 * capacity);
+        activity.endStep(world, 1.0);
+        assertTrue(activity.isAwake(key));
+    }
+
+    @Test
     void nonsenseSettingsAreRejected() {
         PhysicalWorld world = vacuumWorld();
         MaterialRegistry materials = world.materials();

@@ -20,6 +20,7 @@ final class AnchorConfig {
     static final ModConfigSpec.IntValue REFINEMENT_LEVELS;
     static final ModConfigSpec.IntValue MAX_REFINED_CELLS;
     static final ModConfigSpec.BooleanValue SHOW_PHASE_CHANGES;
+    static final ModConfigSpec.BooleanValue SUN_AND_SKY;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -63,6 +64,11 @@ final class AnchorConfig {
         SHOW_PHASE_CHANGES = b.comment("Whether melting, freezing and boiling change blocks, such as ice melting "
                         + "into water or water boiling away. Takes effect at once.")
                 .define("showPhaseChanges", true);
+        SUN_AND_SKY = b.comment("Whether the sun warms what it shines on and the ground cools under the night sky, in "
+                        + "dimensions with a sun, such as the Overworld. Dark blocks take in more sunlight than pale "
+                        + "ones, rain and storms dim the sun and keep the nights mild, and water evaporates into dry "
+                        + "air. Takes effect at once.")
+                .define("sunAndSky", true);
         b.pop();
         SPEC = b.build();
     }

@@ -76,6 +76,8 @@ import java.util.TreeMap;
  * <p>Given a {@link ThermalRefinement}, the model reports the temperature drop each cell needs between its
  * centre and its faces to pass on the heat that flows through them, so that cells too coarse for the
  * gradient around them can be split.
+ *
+ * <p>Given a {@link SkyModel}, the model leaves the top faces that the sky model balances to it.
  */
 public final class ConductionModel implements PhysicsModel {
 
@@ -111,6 +113,7 @@ public final class ConductionModel implements PhysicsModel {
     private final Isotherms isotherms = new Isotherms();
     private final ThermalGraph g = new ThermalGraph();
     private final ThermalRefinement refinement;
+    private final SkyModel sky;
     private List<ValidityIssue> issues = List.of();
 
     // Work arrays, kept from step to step so a steady simulation allocates almost nothing.
@@ -152,7 +155,18 @@ public final class ConductionModel implements PhysicsModel {
      * @param refinement where to report the drops cells need, or {@code null} for nowhere
      */
     public ConductionModel(ThermalRefinement refinement) {
+        this(refinement, null);
+    }
+
+    /**
+     * Creates the model, leaving the top faces open to the sky to a sky model.
+     *
+     * @param refinement where to report the drops cells need, or {@code null} for nowhere
+     * @param sky the sky model that keeps the top faces of surfaces open to the sky, or {@code null} for none
+     */
+    public ConductionModel(ThermalRefinement refinement, SkyModel sky) {
         this.refinement = refinement;
+        this.sky = sky;
     }
 
     @Override
@@ -208,7 +222,7 @@ public final class ConductionModel implements PhysicsModel {
     public void step(StepContext context) {
         PhysicalWorld world = context.world();
         isotherms.prune(world);
-        g.rebuild(world, context.sections(Domain.THERMAL), isotherms);
+        g.rebuild(world, context.sections(Domain.THERMAL), isotherms, sky);
         MaterialRegistry registry = world.materials();
         int n = g.leafCount;
         resize(n, g.faceCount);
