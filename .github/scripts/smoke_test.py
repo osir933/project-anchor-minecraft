@@ -39,6 +39,9 @@ STEPS = [
     ("anchor time", r"Heat in minecraft:overworld: Running at normal speed", NOT_RUNNING),
     ("anchor time pause", r"Paused heat in minecraft:overworld", NOT_RUNNING),
     ("anchor time resume", r"Heat in minecraft:overworld runs again", NOT_RUNNING),
+    ("anchor snapshot list", r"No snapshots are saved in minecraft:overworld", NOT_RUNNING),
+    # No player is near, so heat runs nowhere and the snapshot cannot be taken; the command still runs through.
+    ("anchor snapshot save smoke", r"Heat does not run in all of that box", NOT_RUNNING + r"|Could not write"),
 ]
 
 # The same world every run, kept small. No player joins, so the server needs no connection to Mojang.

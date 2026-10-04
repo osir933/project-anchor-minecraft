@@ -77,6 +77,10 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 | `/anchor time step [<count>]` | For operators: takes a step of heat by hand, or as many as asked, paused or not. |
 | `/anchor time speed <multiple>` | For operators: runs heat from 0.01 to 1000 times as fast as normal, as far as the server keeps up. |
 | `/anchor time advance <time>` | For operators: sends heat ahead by a length of simulated time, such as `90s`, `15m`, `10h` or `2d`, as fast as the server allows. `/anchor time cancel` stops it. |
+| `/anchor snapshot list` | The snapshots saved in your dimension: the size of each box, where it was saved from, how many of its blocks hold heat of their own and when it was saved. `/anchor snapshot` alone does the same. |
+| `/anchor snapshot save <name> [<from> <to>]` | For operators: saves the blocks from one corner to the other, up to 64 blocks a side, or those within 16 blocks of you, with the heat of every cell in them. |
+| `/anchor snapshot restore <name> [<corner>]` | For operators: puts a snapshot's blocks back as they were saved, heat and all, where they were saved or with the box's lowest corner somewhere else. |
+| `/anchor snapshot remove <name>` | For operators: deletes a snapshot. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
 ### Thermometer
@@ -137,6 +141,21 @@ way ahead stops there when the world is closed.
 The sun and the weather keep the game's own time, so heat that runs faster or goes ahead sees the sun move more
 slowly than it would: ten hours sent ahead at noon pass under the noon sun. Vanilla's `/tick sprint` runs the whole
 game faster instead, the sun with it.
+
+### Snapshots
+
+A snapshot saves an experiment so you can run it again. `/anchor snapshot save before` keeps the blocks within 16
+blocks of you, and `/anchor snapshot save before <from> <to>` those in a box of up to 64 blocks a side: every block
+with what it holds, chests and signs included, and the heat of every cell, a refined block's cell for cell. Let the
+ice melt and the iron cool, and `/anchor snapshot restore before` puts every block back as it was saved, with
+exactly the temperatures it had, so the second run starts where the first did. Give a corner, as in
+`/anchor snapshot restore before ~5 ~ ~`, and the box goes there instead, its lowest corner at that spot, for a
+second run beside the first. Probes keep recording through a restore, so a chart shows one run after the other.
+
+Saving and restoring need heat to run in all of the box, so stay near it. Things that move, such as dropped items,
+animals and players, are not part of a snapshot, and a restore leaves the blocks around the box alone: water that
+ran out of it stays where it went until something disturbs it. Snapshots are compressed files in
+`anchor/snapshots/<dimension>` in the world's folder; copy one into another world to run the same experiment there.
 
 ### Settings
 

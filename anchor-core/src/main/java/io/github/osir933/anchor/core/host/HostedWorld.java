@@ -19,6 +19,7 @@ import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.Direction;
 import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.space.SectionPos;
+import io.github.osir933.anchor.core.world.BlockCopy;
 import io.github.osir933.anchor.core.world.CellState;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
@@ -37,6 +38,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.IntFunction;
 import java.util.function.IntUnaryOperator;
+import java.util.function.ToIntFunction;
 
 /**
  * A physical world that mirrors the parts of a host game's world that matter right now, and runs heat in it.
@@ -246,6 +248,17 @@ public final class HostedWorld {
     public record Status(int sections, int awakeSections, int simulatedSections, int sources, int radiatingFaces,
             int refinedBlocks, int refinedCells, long tick, double simulatedSeconds, long phaseChanges,
             long reconciled, boolean conserved, int skySurfaces, double sunlightW) {
+    }
+
+    /**
+     * What {@linkplain #restore restoring} a snapshot did.
+     *
+     * @param blocks the blocks in the box
+     * @param changed how many of them changed
+     * @param afresh how many saved blocks started afresh instead, because their matter no longer fits the host's
+     *     block there or is no longer registered
+     */
+    public record Restored(int blocks, int changed, int afresh) {
     }
 
     /** The host's ids for the blocks of one imported section. */
@@ -620,24 +633,14 @@ public final class HostedWorld {
         if (ids == null) {
             return false;
         }
-        int index = pos.indexInSection();
-        int old = ids.get(index);
-        if (old == hostId) {
+        if (ids.get(pos.indexInSection()) == hostId) {
             return false;
         }
-        Resolved before = resolve(old);
-        Resolved after = resolve(hostId);
-        ids.set(index, hostId);
-        if (before.equals(after)) {
+        if (!retake(ids, pos, hostId)) {
             // Only the host's id changed, as when redstone dust changes its power: the physics is untouched.
             return true;
         }
-        ids.presentable += (after.appearance().presentable() ? 1 : 0) - (before.appearance().presentable() ? 1 : 0);
-        if (after.appearance().source() != null) {
-            sources.put(pos, after.appearance().source());
-        } else {
-            sources.remove(pos);
-        }
+        Resolved after = resolve(hostId);
         if (!keeps(world.readBlock(pos), after)) {
             double surroundings = temperatureHintK > 0 && Double.isFinite(temperatureHintK)
                     ? temperatureHintK : atmosphere.environment(key);
@@ -698,6 +701,132 @@ public final class HostedWorld {
             }
         }
         return differed;
+    }
+
+    /**
+     * Tells whether every section a box of blocks touches is imported, as saving and restoring the box need.
+     *
+     * @param min the box's lowest corner, inclusive
+     * @param max the box's highest corner, inclusive
+     * @return {@code true} if they all are
+     */
+    public boolean importsAll(GridPos min, GridPos max) {
+        if (min.x() > max.x() || min.y() > max.y() || min.z() > max.z()) {
+            throw new IllegalArgumentException("no box runs from " + coordinates(min) + " to " + coordinates(max));
+        }
+        for (int sy = min.y() >> 4; sy <= max.y() >> 4; sy++) {
+            for (int sz = min.z() >> 4; sz <= max.z() >> 4; sz++) {
+                for (int sx = min.x() >> 4; sx <= max.x() >> 4; sx++) {
+                    if (!hosted.containsKey(SectionPos.pack(sx, sy, sz))) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Saves the state of a box of blocks, every cell of it exactly, to {@linkplain #restore rewind} the box to later.
+     * Blocks the host now shows with other ids than it last reported are taken in first, as by {@link #reconcile}.
+     *
+     * @param min the box's lowest corner, inclusive
+     * @param max the box's highest corner, inclusive
+     * @param hostIdAt the host's id for each block of the box
+     * @return the snapshot
+     * @throws IllegalStateException if a section the box touches is not imported
+     */
+    public RegionSnapshot capture(GridPos min, GridPos max, ToIntFunction<GridPos> hostIdAt) {
+        requireImported(min, max);
+        int sizeX = max.x() - min.x() + 1;
+        int sizeY = max.y() - min.y() + 1;
+        int sizeZ = max.z() - min.z() + 1;
+        if ((long) sizeX * sizeY * sizeZ > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("a box of " + sizeX + " by " + sizeY + " by " + sizeZ
+                    + " blocks cannot be saved");
+        }
+        MaterialRegistry registry = world.materials();
+        FreshStates fresh = new FreshStates();
+        RegionSnapshot.Builder snapshot = new RegionSnapshot.Builder(sizeX, sizeY, sizeZ);
+        for (int dy = 0; dy < sizeY; dy++) {
+            for (int dz = 0; dz < sizeZ; dz++) {
+                for (int dx = 0; dx < sizeX; dx++) {
+                    GridPos pos = min.offset(dx, dy, dz);
+                    reconcile(pos, hostIdAt.applyAsInt(pos), Double.NaN);
+                    BlockCopy copy = world.copyBlock(pos);
+                    if (!copy.isRefined() && copy.total().equals(fresh.of(pos))) {
+                        continue;
+                    }
+                    snapshot.block(dx + sizeX * (dz + sizeZ * dy));
+                    for (int c = 0; c < copy.cellCount(); c++) {
+                        CellState state = copy.state(c);
+                        snapshot.cell(copy.cell(c), new SectionSnapshot.Entry(registry.id(state.material()),
+                                state.owner(), state.provenance()), state.mass(), state.enthalpy());
+                    }
+                }
+            }
+        }
+        return snapshot.build();
+    }
+
+    /**
+     * Rewinds a box of blocks to a snapshot. This is a deliberate jump back in time, not a physical process: the
+     * conservation ledger declares it like any edit from outside, and the event log records it. The host first puts
+     * its own blocks back as they were when the snapshot was taken, then hands over their ids, and every block of
+     * the box gets the state it had, cell for cell. A saved block whose matter no longer fits the host's block there,
+     * or whose material is no longer registered, starts afresh, as do the blocks the snapshot left out. The sections
+     * the box touches wake up, and the surfaces in it start their skins again from their blocks' temperatures, as
+     * when a world loads.
+     *
+     * @param snapshot the snapshot
+     * @param min where the box's lowest corner goes
+     * @param hostIdAt the host's id for each block of the box, now that the host has put its blocks back
+     * @return what was restored
+     * @throws IllegalStateException if a section the box touches is not imported
+     */
+    public Restored restore(RegionSnapshot snapshot, GridPos min, ToIntFunction<GridPos> hostIdAt) {
+        GridPos max = min.offset(snapshot.sizeX() - 1, snapshot.sizeY() - 1, snapshot.sizeZ() - 1);
+        requireImported(min, max);
+        MaterialRegistry registry = world.materials();
+        List<SectionSnapshot.Entry> palette = snapshot.palette();
+        int[] materialOf = new int[palette.size()];
+        for (int e = 0; e < materialOf.length; e++) {
+            materialOf[e] = registry.indexOf(palette.get(e).material());
+        }
+        FreshStates fresh = new FreshStates();
+        List<GridPos> positions = new ArrayList<>(snapshot.volume());
+        List<BlockCopy> copies = new ArrayList<>(snapshot.volume());
+        int afresh = 0;
+        int k = 0;
+        for (int dy = 0; dy < snapshot.sizeY(); dy++) {
+            for (int dz = 0; dz < snapshot.sizeZ(); dz++) {
+                for (int dx = 0; dx < snapshot.sizeX(); dx++) {
+                    GridPos pos = min.offset(dx, dy, dz);
+                    Hosted ids = hosted.get(pos.sectionKey());
+                    int id = hostIdAt.applyAsInt(pos);
+                    if (ids.get(pos.indexInSection()) != id) {
+                        retake(ids, pos, id);
+                    }
+                    BlockCopy copy = null;
+                    if (k < snapshot.size() && snapshot.block(k) == snapshot.indexOf(dx, dy, dz)) {
+                        copy = saved(snapshot, k++, materialOf, resolve(id));
+                        afresh += copy == null ? 1 : 0;
+                    }
+                    positions.add(pos);
+                    copies.add(copy != null ? copy : BlockCopy.whole(fresh.of(pos)));
+                }
+            }
+        }
+        int changed = world.restoreBlocks(positions, copies, coordinates(min) + " to " + coordinates(max));
+        for (int sy = min.y() >> 4; sy <= max.y() >> 4; sy++) {
+            for (int sz = min.z() >> 4; sz <= max.z() >> 4; sz++) {
+                for (int sx = min.x() >> 4; sx <= max.x() >> 4; sx++) {
+                    activity.wake(SectionPos.pack(sx, sy, sz));
+                }
+            }
+        }
+        sky.forgetSkins(min, max);
+        return new Restored(snapshot.volume(), changed, afresh);
     }
 
     /**
@@ -951,6 +1080,72 @@ public final class HostedWorld {
                     + ", which is not registered");
         }
         return new Resolved(a, material);
+    }
+
+    /**
+     * Records the host's new id for a block, and its heat source, without touching its state.
+     *
+     * @return {@code true} if the block looks different now, {@code false} if only the id changed
+     */
+    private boolean retake(Hosted ids, GridPos pos, int hostId) {
+        int index = pos.indexInSection();
+        Resolved before = resolve(ids.get(index));
+        Resolved after = resolve(hostId);
+        ids.set(index, hostId);
+        if (before.equals(after)) {
+            return false;
+        }
+        ids.presentable += (after.appearance().presentable() ? 1 : 0) - (before.appearance().presentable() ? 1 : 0);
+        if (after.appearance().source() != null) {
+            sources.put(pos, after.appearance().source());
+        } else {
+            sources.remove(pos);
+        }
+        return true;
+    }
+
+    /** Returns a saved block as it was, or {@code null} if its matter no longer fits the host's block there. */
+    private BlockCopy saved(RegionSnapshot snapshot, int k, int[] materialOf, Resolved r) {
+        int first = snapshot.firstCell(k);
+        long[] cells = new long[snapshot.cellCount(k)];
+        List<CellState> states = new ArrayList<>(cells.length);
+        for (int c = 0; c < cells.length; c++) {
+            int material = materialOf[snapshot.paletteIndex(first + c)];
+            double mass = snapshot.mass(first + c);
+            if (material < 0 || (material == MaterialRegistry.VACUUM && mass != 0)) {
+                return null;
+            }
+            SectionSnapshot.Entry e = snapshot.entry(first + c);
+            cells[c] = snapshot.cell(first + c);
+            states.add(new CellState(material, mass, snapshot.enthalpy(first + c), e.owner(), e.provenance()));
+        }
+        BlockCopy copy = BlockCopy.of(cells, states);
+        return keeps(copy.total(), r) ? copy : null;
+    }
+
+    private void requireImported(GridPos min, GridPos max) {
+        if (!importsAll(min, max)) {
+            throw new IllegalStateException("not every section from " + coordinates(min) + " to " + coordinates(max)
+                    + " is imported");
+        }
+    }
+
+    private static String coordinates(GridPos pos) {
+        return pos.x() + " " + pos.y() + " " + pos.z();
+    }
+
+    /** The states blocks start in, made once for each climate and host id. */
+    private final class FreshStates {
+        private final TreeMap<Double, TreeMap<Integer, CellState>> made = new TreeMap<>();
+
+        /** Returns the state a block starts in; the caller must not change it. */
+        CellState of(GridPos pos) {
+            long key = pos.sectionKey();
+            int id = hosted.get(key).get(pos.indexInSection());
+            double climate = atmosphere.environment(key);
+            return made.computeIfAbsent(climate, c -> new TreeMap<>()).computeIfAbsent(id,
+                    i -> cellFor(resolve(i), climate));
+        }
     }
 
     /** Puts saved states into a section being imported where they still fit, and counts them. */

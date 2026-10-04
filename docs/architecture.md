@@ -47,8 +47,8 @@ densities that agree within tight limits. A crack, a melt pocket or a material b
 difference and keeps the cells apart. Merging sums pairwise down the tree, so a block that was refined and
 then left alone merges back to its exact original state.
 
-The only way back in time is an explicit **snapshot** restore (`world.WorldSnapshot`), recorded in the event
-log as a rewind.
+The only way back in time is an explicit **snapshot** restore, of the whole world (`world.WorldSnapshot`) or of
+a box of blocks (`host.RegionSnapshot`, see [Hosting](#hosting)), recorded in the event log.
 
 ### Conservation
 
@@ -123,8 +123,8 @@ Refined blocks radiate from their outer cells. Each face of a block casts its ra
 face share what it sends and takes in by their emissivity and area. Opacity follows the whole block, so
 refining a block changes no rays. A refined block counts as calm when its matter as a whole changes more slowly
 than the calm rate, its cells' net changes added regardless of sign over the whole block's heat capacity, so a
-refined room still falls asleep. Snapshots store refined blocks' totals, so a block is saved and restored whole
-and splits again if its heat is still steep.
+refined room still falls asleep. The snapshots sections are saved with store refined blocks' totals, so a block
+is saved and loaded whole and splits again if its heat is still steep; snapshots of experiments keep every cell.
 
 **Sunlight and the night sky** (`physics.thermal.SkyModel`) reach the ground through the top faces of blocks.
 Light falls straight down each column, as Minecraft's skylight does, so a shadow lies right under whatever
@@ -203,6 +203,15 @@ enthalpies exact and materials named by id. Everything else comes back from the 
 where nothing happened needs no snapshot, and a placed block, which starts at its surroundings' temperature,
 adds nothing. Importing a section with its snapshot puts each saved block back where its matter still fits
 the game's block there; a block that changed while the section was not simulated starts afresh.
+
+A **region snapshot** (`host.RegionSnapshot`) keeps a box of blocks for an experiment to be rewound to. The same
+rule picks the blocks it stores, comparing their provenance too, but a refined block is stored cell for cell
+(`world.BlockCopy`): each cell packed into a number that says its level and place in the block, depth first, so
+the cells of one block tell where the next begins. It holds no coordinates, so it can be restored anywhere.
+Restoring sets every block in the box, exactly as saved where the saved matter still fits the game's block there
+and afresh otherwise, as one exchange declared to the ledger and one event; a copy that would take the world past
+its budget of cells comes back as its totals. It wakes every section the box touches and makes the sky forget the
+temperatures of the surfaces in the box, which then follow the restored blocks.
 
 When a hosted world steps is up to `host.Pacer`. At normal speed it steps every few ticks of the game's clock;
 it can also be paused, take steps asked for by hand, run at a speed given in hundredths of normal, or work
@@ -283,6 +292,14 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   is saved), when the level saves, when the server stops, and every minute in between, and only if it
   changed. Land nobody is near is paused: brought in again, it carries on from its saved state without
   catching up on the time that passed.
+- **Snapshots.** `Snapshots` keeps a box of up to 64 blocks a side as one compressed NBT file in
+  `anchor/snapshots/<dimension>` in the world's folder: its blocks as a vanilla structure template, marked with
+  the game's data version so a later game can bring them up to date, and its heat as a region snapshot, masses and
+  enthalpies as the raw bits of their doubles. A file is written beside the old one and then moved over it, so a
+  crash never leaves half a snapshot. A restore places the template without updating neighbours, dropping items
+  or setting off the blocks' reactions, as vanilla's structure blocks do, takes the placed blocks into the
+  simulation and gives them their heat, all in one tick. Saving and restoring need every section the box touches
+  simulated; entities are not kept. `SnapshotCommands` holds the `/anchor snapshot` commands.
 - **Failure.** An error stops heat in that dimension, logs it and shows it in `/anchor heat status`; the game
   carries on.
 - **Probes and charts.** `LevelProbes` holds a dimension's probes and charts as a NeoForge data attachment on the
@@ -316,10 +333,13 @@ chart of it is a locked map with its line on white paper, a thermometer used whi
 touches and takes it away again, the format probes are saved in keeps every reading, and the thermometer's tooltip
 says how to use it. Paused, heat holds a hot iron block's temperature while the game runs on and a thermometer
 says heat is paused; it then takes exactly the three steps asked for and stays paused, sent 60 steps ahead it
-takes several a tick, and at twice normal speed it takes twice the steps. The game tests load the mod from the
-build directories, so CI also installs a NeoForge server the way players do, starts it with the released jar and
-checks that the mod loads, its self-test passes, heat runs and can be paused and resumed, the server stops
-cleanly and nothing is logged as an error (`.github/scripts/smoke_test.py`).
+takes several a tick, and at twice normal speed it takes twice the steps. Packed ice saved in a snapshot at
+−23 °C and then melted comes back from it as packed ice with exactly the heat it had, and the water that spread
+from it is gone; the snapshot file keeps every number, those of a refined block's cells too, and damaged files are
+refused. The game tests load the mod from the build directories, so CI also installs a NeoForge server the way
+players do, starts it with the released jar and checks that the mod loads, its self-test passes, heat runs and can
+be paused and resumed, snapshots can be listed and are refused where heat does not run, the server stops cleanly
+and nothing is logged as an error (`.github/scripts/smoke_test.py`).
 
 ## Requests
 
@@ -349,7 +369,7 @@ The same world and the same inputs give bit-identical results on every machine. 
 Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces radiate,
 temperatures are saved with the world, blocks refine where temperatures change steeply, liquids carry heat by
 moving, the sun and the night sky warm and cool the land, probes record temperatures and chart them on maps, and
-operators can pause heat, step it, run it faster or slower and send it ahead. Next for phase 1: snapshots to
-rewind an experiment to, a laboratory world, and hot metal that glows. After that come structure and fracture;
+operators can pause heat, step it, run it faster or slower, send it ahead, and save an experiment as a snapshot to
+rewind it to. Next for phase 1: a laboratory world and hot metal that glows. After that come structure and fracture;
 rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

@@ -30,7 +30,9 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
  *   to start an experiment;</li>
  *   <li>{@code /anchor probe ...} records temperatures over time and charts them; see {@link ProbeCommands};</li>
  *   <li>{@code /anchor time ...} pauses heat, steps it by hand, runs it faster or slower or sends it ahead; see
- *   {@link TimeCommands}.</li>
+ *   {@link TimeCommands};</li>
+ *   <li>{@code /anchor snapshot ...} saves a box of blocks with its heat and restores it later; see
+ *   {@link SnapshotCommands}.</li>
  * </ul>
  */
 final class AnchorCommands {
@@ -57,7 +59,8 @@ final class AnchorCommands {
                                                 BlockPosArgument.getLoadedBlockPos(context, "pos")))))
                         .then(setCommand()))
                 .then(ProbeCommands.build())
-                .then(TimeCommands.build()));
+                .then(TimeCommands.build())
+                .then(SnapshotCommands.build()));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> setCommand() {

@@ -63,6 +63,11 @@ FAKE_SERVER = textwrap.dedent("""\
             log("Paused heat in minecraft:overworld: temperatures hold while the game runs on.")
         elif command == "anchor time resume":
             log("Heat in minecraft:overworld runs again. Running at normal speed.")
+        elif command == "anchor snapshot list":
+            log("No snapshots are saved in minecraft:overworld; operators save one with /anchor snapshot save <name>.")
+        elif command == "anchor snapshot save smoke":
+            log("Heat does not run in all of that box. It runs near players, and a snapshot takes every block of its "
+                "box: come closer, or wait a moment after arriving, and try again.")
         elif command == "stop":
             log("Stopping server")
             if mode == "hang":

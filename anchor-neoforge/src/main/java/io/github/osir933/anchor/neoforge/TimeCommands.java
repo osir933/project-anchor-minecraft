@@ -179,8 +179,13 @@ final class TimeCommands {
         return 1;
     }
 
-    /** Returns the heat of the player's dimension, or tells the player why there is none running. */
-    private static Optional<LevelHeat> running(CommandSourceStack source) {
+    /**
+     * Returns the heat of the player's dimension, or tells the player why there is none running.
+     *
+     * @param source who ran the command
+     * @return the heat, or empty if it is switched off or stopped after an error
+     */
+    static Optional<LevelHeat> running(CommandSourceStack source) {
         Optional<LevelHeat> heat = HeatEvents.of(source.getLevel());
         if (heat.isEmpty()) {
             source.sendFailure(Component.literal("Temperatures are not simulated here."));
