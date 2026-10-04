@@ -23,31 +23,44 @@ clean() {
 p() { echo "=== $1"; javap -cp "$CP" -public "$1" 2>&1 | clean; }
 pf() { local cls="$1"; local re="$2"; echo "=== $cls ~ $re"; javap -cp "$CP" -public "$cls" 2>&1 | clean | grep -E "$re|^(class|interface|enum|record)|Error"; }
 
-echo "### round 18: world creation details, pipeline registration, screens"
-p 'net.minecraft.world.level.LevelSettings$DifficultySettings'
-pf net.minecraft.world.level.GameType 'CREATIVE|SPECTATOR|SURVIVAL|enum'
-pf net.minecraft.world.Difficulty 'PEACEFUL|enum'
-pf 'net.minecraft.core.Holder$Reference' 'value\(|class'
-pf net.minecraft.core.Holder 'value\(|interface'
-p net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent
-p 'net.neoforged.neoforge.client.event.RegisterRenderPipelinesEvent$Registrar'
-pf net.minecraft.client.gui.screens.AccessibilityOnboardingScreen 'class|AccessibilityOnboardingScreen\('
-pf 'net.neoforged.neoforge.client.event.ScreenEvent$Opening' 'class|setNewScreen|getNewScreen|getCurrentScreen'
-p 'net.neoforged.neoforge.client.event.RenderFrameEvent$Post'
-p net.minecraft.client.DeltaTracker
-pf net.minecraft.commands.CommandSourceStack 'withSuppressedOutput|withPermission|withMaximumPermission|class|withPosition|withLevel'
-pf net.minecraft.server.level.ServerLevel 'setDayTime|getDayTime|class'
-pf net.minecraft.server.level.ServerPlayer 'teleportTo|class|setGameMode|connection'
-pf net.minecraft.world.level.block.state.BlockState 'class|getShape|getLightEmission'
-pf 'net.minecraft.world.level.block.state.BlockBehaviour$BlockStateBase' 'getShape\(|getCollisionShape\(|isAir|getRenderShape|class'
-pf net.minecraft.world.phys.shapes.VoxelShape 'toAabbs|bounds|isEmpty|forAllBoxes|class'
-pf net.minecraft.world.phys.AABB 'minX|maxX|class'
-pf net.minecraft.world.level.block.Block 'stateById|getId|class'
-pf com.mojang.blaze3d.platform.NativeImage 'getPixel|format|Format|class'
-pf 'com.mojang.blaze3d.platform.NativeImage$Format' 'RGBA|RGB|enum'
-pf net.minecraft.client.Options 'hideGui|smoothCamera|bobView|class'
-pf net.minecraft.client.gui.Gui 'class|hide'
-pf net.minecraft.client.player.LocalPlayer 'class|setYRot|setXRot'
-pf net.minecraft.world.entity.Entity 'setYRot|setXRot|getYRot|snapTo|moveTo|absSnapTo|class'
-pf net.minecraft.core.SectionPos 'asLong|of\(|class|x\(|y\(|z\(|minBlockX|sectionToBlockCoord|blockToSectionCoord'
-pf net.minecraft.world.level.Level 'getLightEmission|getBlockState|class|isOutsideBuildHeight|getMaxY|getMinY'
+echo "### round 19: laboratory preset: data formats, game rules, levels, players, config"
+DATAJAR=""
+while IFS= read -r j; do
+  if unzip -l "$j" 2>/dev/null | grep -q 'data/minecraft/worldgen/world_preset/normal.json'; then DATAJAR="$j"; break; fi
+done < <(find anchor-neoforge/build "$HOME/.gradle/caches" -name '*.jar' 2>/dev/null)
+echo "DATAJAR=$DATAJAR"
+python3 .github/probe/json_shape.py "$DATAJAR" data/minecraft/worldgen/world_preset/normal.json \
+  data/minecraft/worldgen/world_preset/flat.json data/minecraft/worldgen/biome/plains.json \
+  data/minecraft/worldgen/biome/the_void.json data/minecraft/tags/worldgen/world_preset/normal.json \
+  data/minecraft/worldgen/flat_level_generator_preset/classic_flat.json \
+  data/minecraft/worldgen/world_preset/ data/minecraft/tags/worldgen/world_preset/
+unzip -l "$DATAJAR" | grep -E 'lang/en_us.json' | head -3
+unzip -p "$DATAJAR" assets/minecraft/lang/en_us.json 2>/dev/null | grep -oE '"(generator\.minecraft\.[a-z_]+|biome\.minecraft\.(plains|the_void))"' | head -20
+pf net.minecraft.world.level.gamerules.GameRules 'static|class|set\(|get\(|getBoolean|getInt'
+pf net.minecraft.world.level.gamerules.GameRule 'class|id\(|valueClass|defaultValue|getIdentifier|name'
+pf net.minecraft.world.level.gamerules.GameRuleType 'class|enum'
+pf net.minecraft.server.level.ServerLevel 'setDayTime|setWeatherParameters|getBiome|getGameRules|getSharedSpawnPos|getRespawnData|class|getLevelData|resetWeatherCycle'
+pf net.minecraft.world.level.Level 'getBiome|getSharedSpawnPos|getRespawnData|class|getGameRules|getLevelData'
+pf net.minecraft.server.MinecraftServer 'setDefaultGameType|getDefaultGameType|getWorldData|isHardcore|getGameRules|overworld\(|class|getForcedGameType|getWorldGenSettings'
+pf net.minecraft.world.level.storage.WorldData 'isHardcore|getGameType|setGameType|interface|getGameRules|setDifficulty'
+pf net.minecraft.world.level.storage.ServerLevelData 'setGameType|getGameType|interface|setClearWeatherTime|setDayTime'
+pf net.minecraft.server.level.ServerPlayer 'setGameMode|gameMode|class|getInventory'
+pf net.minecraft.world.entity.player.Player 'getInventory|class|addItem|isCreative'
+pf net.minecraft.world.entity.player.Inventory 'add\(|class|setItem|getSelected|placeItemBackInInventory'
+pf net.minecraft.core.Holder 'is\(|interface|unwrapKey'
+pf net.minecraft.world.level.biome.Biome 'class|getBaseTemperature|climateSettings|hasPrecipitation'
+pf net.minecraft.world.level.levelgen.FlatLevelSource 'class|settings'
+pf net.minecraft.world.level.levelgen.flat.FlatLevelGeneratorSettings 'class|getBiome|biome|getLayers'
+pf 'net.neoforged.neoforge.common.ModConfigSpec$ConfigValue' 'set\(|save\(|class|get\(|getDefault'
+pf net.neoforged.neoforge.common.ModConfigSpec 'save\(|class|isLoaded'
+pf 'net.neoforged.neoforge.event.entity.player.PlayerEvent$PlayerLoggedInEvent' 'class|getEntity'
+pf net.neoforged.neoforge.event.server.ServerStartedEvent 'class|getServer'
+pf 'net.neoforged.neoforge.attachment.AttachmentType$Builder' 'class|copyOnDeath|serialize|build'
+pf net.minecraft.world.level.GameType 'CREATIVE|class|enum|getName'
+pf net.minecraft.world.level.levelgen.presets.WorldPreset 'class|createWorldDimensions|overworld'
+pf net.minecraft.world.level.biome.Biomes 'PLAINS|THE_VOID|class'
+pf net.minecraft.core.registries.Registries 'BIOME;|WORLD_PRESET;|FLAT_LEVEL_GENERATOR_PRESET'
+pf net.minecraft.world.level.storage.LevelData 'getSpawnPos|getRespawnData|interface|getDayTime'
+pf 'net.minecraft.world.level.storage.LevelData$RespawnData' 'pos\(|class|record'
+pf net.minecraft.world.level.timers.TimerQueue 'class'
+pf net.minecraft.world.clock.WorldClock 'class'
