@@ -9,6 +9,7 @@ import io.github.osir933.anchor.core.model.TickReport;
 import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
 import io.github.osir933.anchor.core.physics.thermal.ConductionModel;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
+import io.github.osir933.anchor.core.physics.thermal.Incandescence;
 import io.github.osir933.anchor.core.physics.thermal.RadiationModel;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
 import io.github.osir933.anchor.core.physics.thermal.SkyModel;
@@ -37,6 +38,7 @@ import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.function.IntFunction;
+import java.util.function.IntPredicate;
 import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
 
@@ -312,6 +314,8 @@ public final class HostedWorld {
     private Resolved[] resolvedById = new Resolved[0];
     private final TreeMap<Integer, Resolved> resolvedByLargeId = new TreeMap<>();
     private SortedSet<Long> lastScope = NOWHERE;
+    /** For each material's registry index, its specific enthalpy where things begin to glow, or NaN if not known. */
+    private double[] glowEnthalpies = new double[0];
     private long phaseChanges;
     private long reconciled;
     private boolean conserved = true;
@@ -949,6 +953,120 @@ public final class HostedWorld {
     /** Returns which of {@code size} cells along an edge a position within a block, from 0 to 1, falls in. */
     private static int cellIndex(double within, int size) {
         return Math.max(0, Math.min(size - 1, (int) (within * size)));
+    }
+
+    /**
+     * Lists the blocks of a section hot enough to glow in the dark, with the temperatures across the faces they
+     * show. A face counts as shown unless the block next to it hides it; blocks that give off light of their own in
+     * the host, as lava does, are left out, since the host already shows them glowing, and so is gas, which has no
+     * surface to glow from. A block glows if any spot of its faces does, by {@link Incandescence#glow} at the
+     * emissivity of its matter.
+     *
+     * <p>Most blocks are passed over by comparing their enthalpy with that of their material at the lowest
+     * temperature anything glows at, so a section without glowing blocks costs little more than reading it.
+     *
+     * @param sectionKey the packed section position
+     * @param hides tells whether the host block with a given id hides the faces of the blocks next to it
+     * @param shines tells whether the host block with a given id gives off light of its own
+     * @return the glowing blocks in index order; empty if none glow or the section is not imported
+     */
+    public List<GlowingBlock> glowingBlocks(long sectionKey, IntPredicate hides, IntPredicate shines) {
+        Hosted ids = hosted.get(sectionKey);
+        Section s = ids == null ? null : world.section(sectionKey);
+        if (s == null) {
+            return List.of();
+        }
+        MaterialRegistry registry = world.materials();
+        List<GlowingBlock> found = new ArrayList<>();
+        for (int i = 0; i < SectionPos.BLOCKS; i++) {
+            if (!mayGlow(s, i) || shines.test(ids.get(i))) {
+                continue;
+            }
+            GridPos pos = s.blockPos(i);
+            int faces = 0;
+            for (Direction d : DIRECTIONS) {
+                GridPos next = pos.offset(d);
+                Hosted around = hosted.get(next.sectionKey());
+                if (around == null || !hides.test(around.get(next.indexInSection()))) {
+                    faces |= 1 << d.ordinal();
+                }
+            }
+            CellState c = s.blockState(i);
+            if (faces == 0 || c.material() == MaterialRegistry.VACUUM || !(c.mass() > 0)) {
+                continue;
+            }
+            Material m = registry.get(c.material());
+            ThermalState state = m.stateFor(c.specificEnthalpy());
+            if (m.dominantPhase(state) == Phase.GAS) {
+                continue;
+            }
+            double emissivity = m.emissivity(state);
+            double[] temperatures = faceTemperatures(pos, s.isRefined(i), faces, state.temperatureK());
+            GlowingBlock block = new GlowingBlock(i, emissivity, faces, temperatures);
+            if (Incandescence.glow(block.hottest(), emissivity).visible()) {
+                found.add(block);
+            }
+        }
+        return found;
+    }
+
+    /** Tells whether a block holds matter hot enough that it might glow, in any of its cells. */
+    private boolean mayGlow(Section s, int i) {
+        if (!s.isRefined(i)) {
+            return mayGlow(s.material(i), s.mass(i), s.enthalpy(i));
+        }
+        boolean[] hot = {false};
+        s.refinedBlock(i).forEachLeaf((cell, leaf) -> hot[0] |= mayGlow(leaf.material(), leaf.mass(), leaf.enthalpy()));
+        return hot[0];
+    }
+
+    private boolean mayGlow(int material, double mass, double enthalpy) {
+        return material != MaterialRegistry.VACUUM && mass > 0 && enthalpy / mass >= glowEnthalpy(material);
+    }
+
+    /** Returns the specific enthalpy of a material at the lowest temperature anything glows at, remembered. */
+    private double glowEnthalpy(int material) {
+        if (material >= glowEnthalpies.length) {
+            int known = glowEnthalpies.length;
+            glowEnthalpies = Arrays.copyOf(glowEnthalpies, Math.max(material + 1, 2 * known));
+            Arrays.fill(glowEnthalpies, known, glowEnthalpies.length, Double.NaN);
+        }
+        double h = glowEnthalpies[material];
+        if (Double.isNaN(h)) {
+            h = world.materials().get(material).specificEnthalpy(Incandescence.glowsFromK(1.0));
+            glowEnthalpies[material] = h;
+        }
+        return h;
+    }
+
+    /**
+     * Reads the temperatures of a block's shown faces: once for a whole block, with its top read apart where it is
+     * open to the sky, or spot by spot for a refined one.
+     */
+    private double[] faceTemperatures(GridPos pos, boolean refined, int faces, double wholeK) {
+        double[] temperatures = new double[DIRECTIONS.length * GlowingBlock.SAMPLES];
+        Arrays.fill(temperatures, Double.NaN);
+        double top = sky.surfaceTemperature(pos);
+        for (Direction d : DIRECTIONS) {
+            if ((faces & 1 << d.ordinal()) == 0) {
+                continue;
+            }
+            for (int v = 0; v < GlowingBlock.GRID; v++) {
+                for (int u = 0; u < GlowingBlock.GRID; u++) {
+                    double t;
+                    if (d == Direction.UP && !Double.isNaN(top)) {
+                        t = top;
+                    } else if (!refined) {
+                        t = wholeK;
+                    } else {
+                        double[] p = GlowingBlock.point(d, u, v);
+                        t = temperatureAt(pos.x() + p[0], pos.y() + p[1], pos.z() + p[2]);
+                    }
+                    temperatures[GlowingBlock.sample(d, u, v)] = t;
+                }
+            }
+        }
+        return temperatures;
     }
 
     /**

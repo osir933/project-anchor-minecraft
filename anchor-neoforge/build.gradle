@@ -47,6 +47,14 @@ neoForge {
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
             logLevel = org.slf4j.event.Level.INFO
         }
+        // Starts the game, heats two iron blocks in a dark room, photographs them hot and cooled, and closes the game
+        // again (see RenderTest). CI runs it under a virtual display and checks the pictures.
+        renderTest {
+            client()
+            gameDirectory = project.file('build/render-test')
+            systemProperty 'anchor.renderTest', 'true'
+            logLevel = org.slf4j.event.Level.INFO
+        }
         configureEach {
             systemProperty 'forge.logging.markers', 'REGISTRIES'
         }
