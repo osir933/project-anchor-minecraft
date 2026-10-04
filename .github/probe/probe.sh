@@ -23,44 +23,46 @@ clean() {
 p() { echo "=== $1"; javap -cp "$CP" -public "$1" 2>&1 | clean; }
 pf() { local cls="$1"; local re="$2"; echo "=== $cls ~ $re"; javap -cp "$CP" -public "$cls" 2>&1 | clean | grep -E "$re|^(class|interface|enum|record)|Error"; }
 
-echo "### round 19: laboratory preset: data formats, game rules, levels, players, config"
+echo "### round 20: laboratory: create-world screen, level generator, chat events, blocks for experiments"
+CLS=net.minecraft.client.gui.screens.worldselection
+pf $CLS.CreateWorldScreen 'getUiState|class|static|openFresh'
+p $CLS.WorldCreationUiState
+p "$CLS.WorldCreationUiState\$SelectedGameMode"
+p "$CLS.WorldCreationUiState\$WorldTypeEntry"
+p 'net.neoforged.neoforge.client.event.ScreenEvent$Init$Post'
+pf 'net.neoforged.neoforge.client.event.ScreenEvent$Init' 'class|getScreen|addListener|getListenersList'
+pf net.neoforged.neoforge.client.event.ScreenEvent 'class|getScreen'
+pf net.neoforged.neoforge.client.event.RegisterPresetEditorsEvent 'class|register'
+pf net.minecraft.server.level.ServerChunkCache 'getGenerator|class'
+pf net.minecraft.world.level.chunk.ChunkGenerator 'getBiomeSource|class'
+pf net.minecraft.world.level.biome.BiomeSource 'possibleBiomes|class'
+pf net.minecraft.world.level.LevelReader 'getBiome|interface'
+pf net.minecraft.server.MinecraftServer 'isSingleplayer|isDedicatedServer|getPlayerList|registryAccess|getCommands|isSingleplayerOwner|getWorldPath|isPublished'
+pf net.minecraft.server.players.PlayerList 'class|setAllowCommandsForAllPlayers|isAllowCommands|sendPlayerPermissionLevel|isOp'
+pf net.minecraft.world.level.storage.WorldData 'interface|isAllowCommands|getAllowCommands|setAllowCommands|isAllowCheats'
+pf net.minecraft.world.level.storage.PrimaryLevelData 'class|isAllowCommands|setAllowCommands|getAllowCommands'
+pf net.minecraft.world.item.ItemStack 'ItemStack\(|class'
+pf net.neoforged.neoforge.event.entity.player.PlayerEvent 'class|getEntity'
+pf net.neoforged.neoforge.event.server.ServerLifecycleEvent 'class|getServer'
+p net.minecraft.network.chat.ClickEvent
+pf 'net.minecraft.network.chat.ClickEvent$SuggestCommand' 'class|record|SuggestCommand\('
+pf 'net.minecraft.network.chat.ClickEvent$RunCommand' 'class|record|RunCommand\('
+pf 'net.minecraft.network.chat.HoverEvent$ShowText' 'class|record|ShowText\('
+pf net.minecraft.network.chat.Style 'class|withClickEvent|withHoverEvent|withUnderlined|EMPTY'
+pf net.minecraft.network.chat.MutableComponent 'class|withStyle|setStyle|append'
+pf net.minecraft.world.entity.Entity 'class|getDirection\(|getYRot\(|blockPosition\(|getMotionDirection'
+pf net.minecraft.core.Direction 'class|getClockWise\(|getCounterClockWise\(|getStepX|getStepZ|getOpposite\(|getUnitVec3i|fromYRot|getAxis\(|toYRot'
+pf net.minecraft.world.level.levelgen.presets.WorldPresets 'class|static'
+pf net.minecraft.world.level.block.Blocks 'class|WOOL|CONCRETE|COPPER_BLOCK|IRON_BLOCK| GLASS;|OAK_PLANKS|GRANITE;|MAGMA_BLOCK|ICE;|PACKED_ICE|BLUE_ICE|SNOW_BLOCK|WATER;|LAVA;|STONE;|SMOOTH_STONE;|GOLD_BLOCK|QUARTZ_BLOCK|OBSIDIAN|BRICKS;|TERRACOTTA|AIR;|BARRIER|POLISHED_ANDESITE|STONE_BRICKS'
+pf net.minecraft.world.level.block.ColorCollection 'class|white\(|lightGray\(|black\(|get\(|record'
+pf net.minecraft.world.item.Items 'class|FILLED_MAP|MAP;|ITEM_FRAME'
+pf net.minecraft.server.level.ServerPlayer 'class|sendSystemMessage|displayClientMessage|getRespawnConfig|getRespawnPosition'
+pf net.minecraft.world.level.levelgen.WorldDimensions 'class|get\(|dimensions|overworld'
+pf net.minecraft.world.level.dimension.LevelStem 'class|generator\(|type\(|OVERWORLD'
+unzip -p "$GAME" assets/minecraft/lang/en_us.json 2>/dev/null | grep -oE '"block\.minecraft\.(light_gray_concrete|white_concrete|copper_block|iron_block|oak_planks|white_wool|magma_block)"' | head -20
 DATAJAR=""
 while IFS= read -r j; do
   if unzip -l "$j" 2>/dev/null | grep -q 'data/minecraft/worldgen/world_preset/normal.json'; then DATAJAR="$j"; break; fi
 done < <(find anchor-neoforge/build "$HOME/.gradle/caches" -name '*.jar' 2>/dev/null)
-echo "DATAJAR=$DATAJAR"
-python3 .github/probe/json_shape.py "$DATAJAR" data/minecraft/worldgen/world_preset/normal.json \
-  data/minecraft/worldgen/world_preset/flat.json data/minecraft/worldgen/biome/plains.json \
-  data/minecraft/worldgen/biome/the_void.json data/minecraft/tags/worldgen/world_preset/normal.json \
-  data/minecraft/worldgen/flat_level_generator_preset/classic_flat.json \
-  data/minecraft/worldgen/world_preset/ data/minecraft/tags/worldgen/world_preset/
-unzip -l "$DATAJAR" | grep -E 'lang/en_us.json' | head -3
-unzip -p "$DATAJAR" assets/minecraft/lang/en_us.json 2>/dev/null | grep -oE '"(generator\.minecraft\.[a-z_]+|biome\.minecraft\.(plains|the_void))"' | head -20
-pf net.minecraft.world.level.gamerules.GameRules 'static|class|set\(|get\(|getBoolean|getInt'
-pf net.minecraft.world.level.gamerules.GameRule 'class|id\(|valueClass|defaultValue|getIdentifier|name'
-pf net.minecraft.world.level.gamerules.GameRuleType 'class|enum'
-pf net.minecraft.server.level.ServerLevel 'setDayTime|setWeatherParameters|getBiome|getGameRules|getSharedSpawnPos|getRespawnData|class|getLevelData|resetWeatherCycle'
-pf net.minecraft.world.level.Level 'getBiome|getSharedSpawnPos|getRespawnData|class|getGameRules|getLevelData'
-pf net.minecraft.server.MinecraftServer 'setDefaultGameType|getDefaultGameType|getWorldData|isHardcore|getGameRules|overworld\(|class|getForcedGameType|getWorldGenSettings'
-pf net.minecraft.world.level.storage.WorldData 'isHardcore|getGameType|setGameType|interface|getGameRules|setDifficulty'
-pf net.minecraft.world.level.storage.ServerLevelData 'setGameType|getGameType|interface|setClearWeatherTime|setDayTime'
-pf net.minecraft.server.level.ServerPlayer 'setGameMode|gameMode|class|getInventory'
-pf net.minecraft.world.entity.player.Player 'getInventory|class|addItem|isCreative'
-pf net.minecraft.world.entity.player.Inventory 'add\(|class|setItem|getSelected|placeItemBackInInventory'
-pf net.minecraft.core.Holder 'is\(|interface|unwrapKey'
-pf net.minecraft.world.level.biome.Biome 'class|getBaseTemperature|climateSettings|hasPrecipitation'
-pf net.minecraft.world.level.levelgen.FlatLevelSource 'class|settings'
-pf net.minecraft.world.level.levelgen.flat.FlatLevelGeneratorSettings 'class|getBiome|biome|getLayers'
-pf 'net.neoforged.neoforge.common.ModConfigSpec$ConfigValue' 'set\(|save\(|class|get\(|getDefault'
-pf net.neoforged.neoforge.common.ModConfigSpec 'save\(|class|isLoaded'
-pf 'net.neoforged.neoforge.event.entity.player.PlayerEvent$PlayerLoggedInEvent' 'class|getEntity'
-pf net.neoforged.neoforge.event.server.ServerStartedEvent 'class|getServer'
-pf 'net.neoforged.neoforge.attachment.AttachmentType$Builder' 'class|copyOnDeath|serialize|build'
-pf net.minecraft.world.level.GameType 'CREATIVE|class|enum|getName'
-pf net.minecraft.world.level.levelgen.presets.WorldPreset 'class|createWorldDimensions|overworld'
-pf net.minecraft.world.level.biome.Biomes 'PLAINS|THE_VOID|class'
-pf net.minecraft.core.registries.Registries 'BIOME;|WORLD_PRESET;|FLAT_LEVEL_GENERATOR_PRESET'
-pf net.minecraft.world.level.storage.LevelData 'getSpawnPos|getRespawnData|interface|getDayTime'
-pf 'net.minecraft.world.level.storage.LevelData$RespawnData' 'pos\(|class|record'
-pf net.minecraft.world.level.timers.TimerQueue 'class'
-pf net.minecraft.world.clock.WorldClock 'class'
+unzip -p "$DATAJAR" assets/minecraft/lang/en_us.json 2>/dev/null | grep -oE '"block\.minecraft\.(light_gray_concrete|white_concrete|copper_block|iron_block|oak_planks|white_wool|magma_block)"' | head -20
+python3 .github/probe/json_shape.py "$DATAJAR" data/minecraft/dimension_type/overworld.json data/minecraft/worldgen/world_preset/single_biome_surface.json
