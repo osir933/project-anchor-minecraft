@@ -21,8 +21,8 @@ import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
  */
 final class ProbeCharts {
 
-    /** Charts are drawn again every this many simulation steps: about once a second at the usual speed. */
-    static final int DRAW_EVERY_STEPS = 5;
+    /** Charts are drawn again at most every this many game ticks, once a second, while the simulation steps. */
+    static final int DRAW_EVERY_TICKS = 20;
 
     /**
      * Where the chart maps say they are centred, far beyond where anyone builds, so that the game never marks an

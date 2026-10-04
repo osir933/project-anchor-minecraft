@@ -8,6 +8,7 @@
   "message.anchor.thermometer.reading": "%s: %s",
   "message.anchor.thermometer.recording": ", recorded as %s",
   "message.anchor.thermometer.trend": ", recorded as %s: %s",
+  "message.anchor.thermometer.paused": " (heat is paused)",
   "item.anchor.thermal_camera": "Thermal Camera",
   "item.anchor.thermal_camera.hold": "Hold it to see temperatures",
   "item.anchor.thermal_camera.use": "Use it to switch between surfaces and air",

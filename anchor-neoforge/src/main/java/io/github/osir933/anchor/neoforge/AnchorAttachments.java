@@ -20,6 +20,10 @@ final class AnchorAttachments {
     static final Supplier<AttachmentType<LevelProbes>> PROBES = TYPES.register("probes",
             () -> AttachmentType.builder(() -> new LevelProbes()).serialize(LevelProbes.SERIALIZER).build());
 
+    /** Whether heat in a level is paused and how fast it runs, saved with the level; see {@link LevelPace}. */
+    static final Supplier<AttachmentType<LevelPace>> PACE = TYPES.register("pace",
+            () -> AttachmentType.builder(() -> new LevelPace()).serialize(LevelPace.SERIALIZER).build());
+
     private AnchorAttachments() {
     }
 

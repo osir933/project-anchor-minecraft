@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.ImportPlanner;
+import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.host.PhaseChange;
 import io.github.osir933.anchor.core.host.SectionSnapshot;
 import io.github.osir933.anchor.core.matter.Phase;
@@ -16,6 +17,7 @@ import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
 import io.github.osir933.anchor.core.world.PhysicalWorld;
 import io.github.osir933.anchor.core.world.WorldSettings;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,13 +26,17 @@ import java.util.Optional;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.function.IntUnaryOperator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.BossEvent;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
@@ -49,11 +55,14 @@ import org.slf4j.Logger;
  *
  * <p>Each game tick it takes in the blocks that changed since the last tick. Every
  * {@linkplain AnchorConfig#GAME_TICKS_PER_STEP few ticks} it brings in sections that players have come near
- * and lets go of those they have left, compares one section with the level to catch changes nobody reported,
- * and steps the simulation. An error stops heat in this level and is logged; the game carries on.
+ * and lets go of those they have left, and compares one section with the level to catch changes nobody reported.
+ * It steps the simulation when its {@link Pacer} says: every few ticks at normal speed, and as {@code /anchor time}
+ * asks otherwise, paused, by hand, faster or slower, or sent ahead as fast as a budget of time per tick allows
+ * (see {@link TimeCommands}); how it is paced is saved with the level as {@link LevelPace}. An error stops heat in
+ * this level and is logged; the game carries on.
  *
  * <p>After each step the level's probes record the temperatures they measure, and their charts are drawn again
- * every few steps; see {@link LevelProbes}.
+ * about once a second while it steps; see {@link LevelProbes}.
  *
  * <p>The state of simulated sections is saved with their chunks as {@link ChunkHeat}: when a section is let
  * go or its chunk unloads, when the level is saved, and every minute in between. A section brought in again
@@ -87,12 +96,21 @@ final class LevelHeat {
     /** Changed sections are written into their chunks at least this often, in game ticks, so a crash loses little. */
     private static final int SAVE_INTERVAL_TICKS = 1200;
 
+    /** Sending heat ahead by more than this many steps shows players a bar of how far it has come. */
+    private static final long AHEAD_BAR_STEPS = 20;
+
+    /** The bar of how far heat has gone ahead is brought up to date every this many game ticks. */
+    private static final int AHEAD_BAR_TICKS = 5;
+
     private final ServerLevel level;
     private final BlockMapper mapper;
     private final HostedWorld hosted;
     private final ImportPlanner planner;
     private final int ticksPerStep;
     private final int sectionsPerStep;
+    private final Pacer pacer;
+    /** How the level is paced, as saved with it. */
+    private final LevelPace pace;
     /**
      * Whether the level has a sun and a sky open above it: skylight, no ceiling and the Overworld's kind of sky with
      * its sun and moon, unlike the Nether and the End.
@@ -107,7 +125,7 @@ final class LevelHeat {
     private long shown;
     private long restoredBlocks;
     private int restoredSections;
-    private int ticksUntilStep = 1;
+    private int ticksUntilFollow = 1;
     private int ticksUntilSave = SAVE_INTERVAL_TICKS;
     private long lastVerified = Long.MIN_VALUE;
     private double lastStepMillis;
@@ -115,6 +133,11 @@ final class LevelHeat {
     private String failure;
     /** A sky held in place of the level's own, or {@code null}. */
     private Sky heldSky;
+    /** The bar showing players how far heat sent ahead has come, or {@code null}. */
+    private ServerBossEvent aheadBar;
+    private long aheadSteps;
+    private long aheadTicks;
+    private long aheadStartNanos;
 
     /**
      * Starts heat in a level, with the current settings.
@@ -141,6 +164,12 @@ final class LevelHeat {
                 AnchorConfig.get(AnchorConfig.VERTICAL_RADIUS), MARGIN);
         DimensionType type = level.dimensionType();
         this.hasSun = type.hasSkyLight() && !type.hasCeiling() && type.skybox() == DimensionType.Skybox.OVERWORLD;
+        this.pacer = new Pacer(ticksPerStep, AnchorConfig.get(AnchorConfig.STEP_BUDGET_MILLIS));
+        this.pace = level.getData(AnchorAttachments.PACE);
+        pacer.setSpeed(pace.speed());
+        if (pace.paused()) {
+            pacer.pause();
+        }
     }
 
     /**
@@ -163,23 +192,45 @@ final class LevelHeat {
                 return;
             }
             show();
-            if (--ticksUntilStep > 0) {
-                return;
+            // Sections follow players at the usual pace even while heat is paused, so what they walk to can be read.
+            if (--ticksUntilFollow <= 0) {
+                ticksUntilFollow = ticksPerStep;
+                followPlayers();
+                verifyNext();
             }
-            ticksUntilStep = ticksPerStep;
-            long start = System.nanoTime();
-            followPlayers();
-            verifyNext();
-            followSky();
+            step();
+            drawCharts(pacer.stepsThisTick() > 0);
+            followAhead();
+        } catch (RuntimeException e) {
+            stop(e);
+        }
+    }
+
+    /**
+     * Takes the steps the pacer asks for in this tick, under one sky: one every few ticks at normal speed, none
+     * while paused, and as many as fit into the budget while running faster or sent ahead.
+     */
+    private void step() {
+        pacer.beginTick();
+        long start = System.nanoTime();
+        double spent = 0.0;
+        while (pacer.wantsStep(spent)) {
+            if (pacer.stepsThisTick() == 0) {
+                followSky();
+            }
+            long stepStart = System.nanoTime();
             HostedWorld.TickResult result = hosted.tick();
             record();
             toShow.addAll(result.phaseChanges());
-            show();
-            lastStepMillis = (System.nanoTime() - start) / 1e6;
+            lastStepMillis = (System.nanoTime() - stepStart) / 1e6;
             averageStepMillis = averageStepMillis == 0.0 ? lastStepMillis
                     : 0.95 * averageStepMillis + 0.05 * lastStepMillis;
-        } catch (RuntimeException e) {
-            stop(e);
+            pacer.stepped(lastStepMillis);
+            spent = (System.nanoTime() - start) / 1e6;
+        }
+        pacer.endTick();
+        if (pacer.stepsThisTick() > 0) {
+            show();
         }
     }
 
@@ -390,7 +441,92 @@ final class LevelHeat {
      */
     HeatReport report() {
         return new HeatReport(hosted.status(), hosted.settings().tickSeconds(), lastStepMillis, averageStepMillis,
-                shown, restoredBlocks, restoredSections, failure);
+                shown, restoredBlocks, restoredSections, failure, pacer.status(), ticksPerStep);
+    }
+
+    /**
+     * Returns how the simulation is paced.
+     *
+     * @return where its pacer stands
+     */
+    Pacer.Status pace() {
+        return pacer.status();
+    }
+
+    /**
+     * Returns how long a step covers.
+     *
+     * @return simulated seconds per step
+     */
+    double stepSeconds() {
+        return hosted.settings().tickSeconds();
+    }
+
+    /**
+     * Tells whether the simulation follows a sun and a sky here.
+     *
+     * @return {@code true} if the level has a sun and the sun and sky are switched on
+     */
+    boolean hasSky() {
+        return hasSun && AnchorConfig.get(AnchorConfig.SUN_AND_SKY);
+    }
+
+    /**
+     * Returns how many game ticks apart steps come at normal speed.
+     *
+     * @return the ticks per step
+     */
+    int ticksPerStep() {
+        return ticksPerStep;
+    }
+
+    /** Pauses heat in this level, dropping any steps still waiting, and remembers it with the level. */
+    void pause() {
+        pacer.pause();
+        pace.set(true, pacer.speed());
+        hideAhead(false);
+    }
+
+    /** Lets heat in this level run at its speed again, and remembers it with the level. */
+    void resume() {
+        pacer.resume();
+        pace.set(false, pacer.speed());
+    }
+
+    /**
+     * Sets how fast heat runs in this level, and remembers it with the level.
+     *
+     * @param hundredths the speed in hundredths of normal, from {@link Pacer#MIN_SPEED} to {@link Pacer#MAX_SPEED}
+     */
+    void setSpeed(int hundredths) {
+        pacer.setSpeed(hundredths);
+        pace.set(pacer.paused(), hundredths);
+    }
+
+    /**
+     * Asks for steps to be taken as fast as the budget allows, paused or not, adding to any still waiting.
+     *
+     * @param steps how many
+     * @throws IllegalArgumentException if that would leave more than {@link Pacer#MAX_REQUESTED} waiting
+     */
+    void request(long steps) {
+        pacer.request(steps);
+    }
+
+    /**
+     * Drops the steps still waiting to be taken.
+     *
+     * @return how many were dropped
+     */
+    long cancel() {
+        long dropped = pacer.cancel();
+        hideAhead(false);
+        return dropped;
+    }
+
+    /** Lets go of what the level shows players, for when the level is unloaded. */
+    void close() {
+        hideAhead(false);
     }
 
     /**
@@ -417,15 +553,79 @@ final class LevelHeat {
     }
 
     /**
-     * Gives each of the level's probes a reading of the step just simulated, and draws its charts again when they are
-     * due. A probe whose block is not simulated records a missing reading.
+     * Gives each of the level's probes a reading of the step just simulated. A probe whose block is not simulated
+     * records a missing reading.
      */
     private void record() {
         LevelProbes probes = level.getData(AnchorAttachments.PROBES);
         probes.set().record(hosted.settings().tickSeconds(), p -> hosted.temperatureAt(p.x(), p.y(), p.z()));
-        if (probes.chartsDue(ProbeCharts.DRAW_EVERY_STEPS) && !probes.charts().isEmpty()) {
+    }
+
+    /** Draws the level's charts again when they are due. */
+    private void drawCharts(boolean stepped) {
+        LevelProbes probes = level.getData(AnchorAttachments.PROBES);
+        if (probes.chartsDue(stepped, ProbeCharts.DRAW_EVERY_TICKS) && !probes.charts().isEmpty()) {
             ProbeCharts.drawAll(level, probes);
         }
+    }
+
+    /**
+     * Shows the players in the level how far heat sent ahead has come, on a bar like a boss's, and tells them when it
+     * arrives. A few steps, or steps all taken in the tick they were asked for, show no bar.
+     */
+    private void followAhead() {
+        long waiting = pacer.requested();
+        if (waiting == 0) {
+            hideAhead(true);
+            return;
+        }
+        long total = pacer.requestTotal();
+        if (aheadBar == null) {
+            if (total <= AHEAD_BAR_STEPS) {
+                return;
+            }
+            UUID id = UUID.nameUUIDFromBytes(("anchor:ahead:" + level.dimension().identifier())
+                    .getBytes(StandardCharsets.UTF_8));
+            aheadBar = new ServerBossEvent(id, Component.literal("Heat going ahead"), BossEvent.BossBarColor.YELLOW,
+                    BossEvent.BossBarOverlay.PROGRESS);
+            aheadSteps = 0;
+            aheadTicks = 0;
+            aheadStartNanos = System.nanoTime();
+        }
+        aheadSteps = Math.max(aheadSteps, total);
+        if (aheadTicks++ % AHEAD_BAR_TICKS != 0) {
+            return;
+        }
+        double stepSeconds = hosted.settings().tickSeconds();
+        aheadBar.setName(Component.literal("Heat going ahead: " + HeatText.duration((total - waiting) * stepSeconds)
+                + " of " + HeatText.duration(total * stepSeconds)));
+        aheadBar.setProgress((float) ((double) (total - waiting) / total));
+        List<ServerPlayer> players = level.players();
+        for (ServerPlayer player : players) {
+            aheadBar.addPlayer(player);
+        }
+        for (ServerPlayer player : new ArrayList<>(aheadBar.getPlayers())) {
+            if (!players.contains(player)) {
+                aheadBar.removePlayer(player);
+            }
+        }
+    }
+
+    /** Takes the bar of how far heat has gone ahead away, telling its players if heat arrived. */
+    private void hideAhead(boolean arrived) {
+        if (aheadBar == null) {
+            return;
+        }
+        if (arrived) {
+            Component message = Component.literal("Heat in " + level.dimension().identifier() + " went "
+                    + HeatText.duration(aheadSteps * hosted.settings().tickSeconds()) + " ahead in "
+                    + HeatText.duration((System.nanoTime() - aheadStartNanos) / 1e9) + ".");
+            for (ServerPlayer player : aheadBar.getPlayers()) {
+                player.sendSystemMessage(message);
+            }
+        }
+        aheadBar.removeAllPlayers();
+        aheadBar = null;
     }
 
     /**
@@ -659,6 +859,7 @@ final class LevelHeat {
         toShow.clear();
         LOGGER.error("Anchor: heat in {} stopped after an error; it starts again when the world is next loaded",
                 level.dimension().identifier(), e);
+        hideAhead(false);
     }
 
     private static GridPos grid(BlockPos pos) {

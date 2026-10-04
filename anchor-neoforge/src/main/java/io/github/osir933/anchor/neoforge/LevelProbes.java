@@ -143,7 +143,8 @@ final class LevelProbes {
 
     private final ProbeSet probes;
     private final List<Chart> charts = new ArrayList<>();
-    private int stepsSinceDrawn;
+    private int ticksSinceDrawn;
+    private boolean steppedSinceDrawn;
 
     /** Creates a level's probes with none yet. */
     LevelProbes() {
@@ -212,16 +213,24 @@ final class LevelProbes {
     }
 
     /**
-     * Counts a simulation step and tells whether the charts are due to be drawn again.
+     * Counts a game tick and tells whether the charts are due to be drawn again: when enough ticks have passed since
+     * they were last drawn and the simulation has stepped since, so that a paused simulation draws nothing and one
+     * running many steps a tick draws no more often than usual.
      *
-     * @param everySteps how many steps apart they are drawn
-     * @return {@code true} once every {@code everySteps} steps
+     * @param stepped whether the simulation stepped in this tick
+     * @param everyTicks how many game ticks apart charts are drawn at most
+     * @return {@code true} if they are due
      */
-    boolean chartsDue(int everySteps) {
-        if (++stepsSinceDrawn < everySteps) {
+    boolean chartsDue(boolean stepped, int everyTicks) {
+        steppedSinceDrawn |= stepped;
+        if (ticksSinceDrawn < everyTicks) {
+            ticksSinceDrawn++;
+        }
+        if (ticksSinceDrawn < everyTicks || !steppedSinceDrawn) {
             return false;
         }
-        stepsSinceDrawn = 0;
+        ticksSinceDrawn = 0;
+        steppedSinceDrawn = false;
         return true;
     }
 

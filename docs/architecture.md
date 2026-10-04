@@ -204,6 +204,16 @@ where nothing happened needs no snapshot, and a placed block, which starts at it
 adds nothing. Importing a section with its snapshot puts each saved block back where its matter still fits
 the game's block there; a block that changed while the section was not simulated starts afresh.
 
+When a hosted world steps is up to `host.Pacer`. At normal speed it steps every few ticks of the game's clock;
+it can also be paused, take steps asked for by hand, run at a speed given in hundredths of normal, or work
+through a number of steps as fast as it may. What a speed is owed is counted in whole hundredths of a tick, so
+every speed keeps an exact rhythm however long it runs. The steps normal speed would take are always taken; the
+ones beyond them only while one more step like the recent ones fits into a budget of milliseconds per tick, and
+what a speed is owed that does not fit is forgiven at the end of the tick, so a slow machine runs as fast as it
+can instead of falling ever further behind. Steps asked for by hand are never forgiven and come at least one a
+tick, and while they wait the speed earns nothing. Only how many steps fit into a tick depends on the machine;
+the steps themselves are the same everywhere.
+
 ## Instruments
 
 `instrument.ProbeSet` holds a world's probes: named points, each with a recording, and one clock of simulated
@@ -236,9 +246,10 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
 - **Dimensions.** `LevelHeat` runs one hosted world per dimension, started when the dimension first ticks.
   Block changes arrive through NeoForge's neighbour notifications and are taken in, in sorted order, at the
   start of the next tick. Every few game ticks it imports the sections players have come near, lets go of
-  those they have left, compares one imported section with the level to catch any change nobody reported,
-  and steps the simulation. Unloading a chunk saves its sections into it and lets go of them. Frozen time
-  (`/tick freeze`) pauses heat with everything else.
+  those they have left and compares one imported section with the level to catch any change nobody reported,
+  paused or not. It steps the simulation when its `Pacer` says, every step of a tick under the same sky.
+  Unloading a chunk saves its sections into it and lets go of them. Frozen time (`/tick freeze`) pauses heat
+  with everything else, and `/tick sprint` runs it faster with everything else.
 - **Phase changes.** A step returns the blocks whose matter now shows a different phase. `LevelHeat` checks
   that block and matter still agree with the step, then places the replacement the appearance names. Ice
   holds the same matter as water, so the block keeps its exact state: water frozen at −5 °C becomes ice at
@@ -258,7 +269,13 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   colour, their linear luminance between black's 0.05 and white's 0.85, and grass blocks reflect 23 %
   (`BlockMapper`). The Nether and the End have no sun or sky in the simulation.
 - **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
-  simulation steps every four game ticks. Both are settings.
+  simulation steps every four game ticks. Both are settings. `TimeCommands` holds the `/anchor time` commands,
+  with which operators pause a dimension's heat, step it by hand, run it from 0.01 to 1000 times as fast, or
+  send it ahead by a stretch of simulated time; steps beyond the usual ones fit into `stepBudgetMillis` (20 ms)
+  of each tick. While heat goes ahead by more than 20 steps, the dimension's players see a boss bar of how far
+  it has come and are told when it arrives. The pause and the speed are saved with the level as the `LevelPace`
+  attachment; steps still waiting are not. The sun and the weather keep the game's time, so heat running faster
+  sees the sun move more slowly.
 - **Saving.** `ChunkHeat` holds the snapshots of a chunk's sections as a NeoForge data attachment, so they
   are written and read with the chunk: a short palette per section, then each saved block's position and
   palette index packed in an int array, and masses and enthalpies as the raw bits of their doubles in long
@@ -273,9 +290,10 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   the temperature at its point, the same reading a thermometer touching there gets, or a missing reading if the
   point is not simulated. A chart is an ordinary filled map, locked so the game never draws the land on it,
   centred far beyond the world border so item frames holding it leave no marker on it, and `ProbeCharts` draws its
-  picture again every five steps, changing only the pixels that differ so players are sent only those. A chart
-  whose map data is gone is forgotten, and a dimension keeps drawing at most 16 charts. `ProbeCommands` holds the
-  `/anchor probe` commands; the thermometer leaves and takes probes when used while sneaking.
+  picture again once a second while heat steps, however fast it runs, changing only the pixels that differ so
+  players are sent only those. A chart whose map data is gone is forgotten, and a dimension keeps drawing at most
+  16 charts. `ProbeCommands` holds the `/anchor probe` commands; the thermometer leaves and takes probes when used
+  while sneaking.
 - **Thermal camera.** While a player holds one, `ThermalCamera` takes an image of what they look at every ten
   game ticks: 24 by 14 rays across 48° stop at the first block outline or fluid within 24 blocks, and each hit
   becomes a dot on that face showing the temperature of the cell it hit, or in the air view the air along the
@@ -296,9 +314,12 @@ wool takes in more than three times the sunlight of white wool beside it, grows 
 reads so on the thermometer. A probe in a hot iron block records it cooling and a thermometer names the probe, a
 chart of it is a locked map with its line on white paper, a thermometer used while sneaking leaves a probe where it
 touches and takes it away again, the format probes are saved in keeps every reading, and the thermometer's tooltip
-says how to use it. The game tests load the mod from the build directories, so CI also installs a NeoForge
-server the way players do, starts it with the released jar and checks that the mod loads, its self-test passes,
-heat runs, the server stops cleanly and nothing is logged as an error (`.github/scripts/smoke_test.py`).
+says how to use it. Paused, heat holds a hot iron block's temperature while the game runs on and a thermometer
+says heat is paused; it then takes exactly the three steps asked for and stays paused, sent 60 steps ahead it
+takes several a tick, and at twice normal speed it takes twice the steps. The game tests load the mod from the
+build directories, so CI also installs a NeoForge server the way players do, starts it with the released jar and
+checks that the mod loads, its self-test passes, heat runs and can be paused and resumed, the server stops
+cleanly and nothing is logged as an error (`.github/scripts/smoke_test.py`).
 
 ## Requests
 
@@ -327,8 +348,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 
 Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces radiate,
 temperatures are saved with the world, blocks refine where temperatures change steeply, liquids carry heat by
-moving, the sun and the night sky warm and cool the land, and probes record temperatures and chart them on maps.
-Next for phase 1: a simulation console, a laboratory world, and hot metal that glows. After that come structure
-and fracture; rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and
-chemistry; electricity and control; causal targeting and molecular dynamics; and finally life and society, on the
-way to 1.0.
+moving, the sun and the night sky warm and cool the land, probes record temperatures and chart them on maps, and
+operators can pause heat, step it, run it faster or slower and send it ahead. Next for phase 1: snapshots to
+rewind an experiment to, a laboratory world, and hot metal that glows. After that come structure and fracture;
+rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
+electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

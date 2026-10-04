@@ -2,18 +2,26 @@ package io.github.osir933.anchor.neoforge;
 
 import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
+import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.world.Provenance;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Words and numbers for what the heat simulation knows, as players read them. */
 final class HeatText {
 
     private static final double ZERO_CELSIUS_K = 273.15;
+
+    /** One part of a length of time as players type it: a number and a unit, such as {@code 1.5h}. */
+    private static final Pattern DURATION_PART = Pattern.compile("(\\d+(?:\\.\\d+)?)(d|h|min|m|s)");
 
     private HeatText() {
     }
@@ -195,6 +203,83 @@ final class HeatText {
     }
 
     /**
+     * Formats a multiple, such as a speed, with at most two decimals.
+     *
+     * @param multiple the multiple
+     * @return for example {@code 10}, {@code 0.25} or {@code 3.33}
+     */
+    static String multiple(double multiple) {
+        return BigDecimal.valueOf(multiple).setScale(2, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString();
+    }
+
+    /**
+     * Describes how a level's heat is paced, as {@code /anchor time} and {@code /anchor heat status} show it.
+     *
+     * @param pace where the level's pacer stands
+     * @param stepSeconds simulated seconds per step
+     * @param ticksPerStep how many game ticks apart steps come at normal speed
+     * @return for example {@code Running at normal speed, a step of 14 s every 4 game ticks}
+     */
+    static String pace(Pacer.Status pace, double stepSeconds, int ticksPerStep) {
+        String step = duration(stepSeconds);
+        if (pace.requested() > 0) {
+            long total = pace.requestTotal();
+            return "Going ahead: " + duration((total - pace.requested()) * stepSeconds) + " of "
+                    + duration(total * stepSeconds) + " done, at " + multiple(pace.achievedSpeed())
+                    + "× normal speed lately, then " + (pace.paused() ? "paused again" : "running on");
+        }
+        if (pace.paused()) {
+            return "Paused: temperatures hold until /anchor time resume, and /anchor time step takes steps by hand";
+        }
+        double factor = (double) pace.speed() / Pacer.NORMAL_SPEED;
+        String speed = pace.speed() == Pacer.NORMAL_SPEED ? "normal speed" : multiple(factor) + "× normal speed";
+        double perTick = factor / ticksPerStep;
+        String rhythm;
+        if (perTick > 1.0) {
+            rhythm = multiple(perTick) + " steps of " + step + " every game tick";
+        } else if (perTick == 1.0) {
+            rhythm = "a step of " + step + " every game tick";
+        } else {
+            rhythm = "a step of " + step + " every " + multiple(1.0 / perTick) + " game ticks";
+        }
+        String text = "Running at " + speed + ", " + rhythm;
+        return pace.keepingUp() ? text
+                : text + "; this server keeps up with only " + multiple(pace.achievedSpeed()) + "× lately";
+    }
+
+    /**
+     * Reads a length of time as players type it: numbers with the units {@code d}, {@code h}, {@code min} or
+     * {@code m}, and {@code s}, one after another, such as {@code 10h}, {@code 1.5d} or {@code 1h30m}.
+     *
+     * @param text what was typed
+     * @return the time in seconds, more than 0
+     * @throws IllegalArgumentException if the text is not such a time
+     */
+    static double parseDuration(String text) {
+        String t = text.trim().toLowerCase(Locale.ROOT);
+        Matcher m = DURATION_PART.matcher(t);
+        double seconds = 0.0;
+        int end = 0;
+        while (m.find()) {
+            if (m.start() != end) {
+                break;
+            }
+            double unit = switch (m.group(2)) {
+                case "d" -> 86_400.0;
+                case "h" -> 3600.0;
+                case "min", "m" -> 60.0;
+                default -> 1.0;
+            };
+            seconds += Double.parseDouble(m.group(1)) * unit;
+            end = m.end();
+        }
+        if (end == 0 || end != t.length() || !(seconds > 0.0) || !Double.isFinite(seconds)) {
+            throw new IllegalArgumentException("'" + text + "' is not a length of time such as 90s, 15m, 10h or 2d");
+        }
+        return seconds;
+    }
+
+    /**
      * Summarises a level's heat simulation.
      *
      * @param dimension the level's name
@@ -215,6 +300,7 @@ final class HeatText {
         lines.add(String.format(Locale.ROOT, "  %s simulated in %d steps of %s; the last took %.2f ms, on average"
                 + " %.2f ms", duration(w.simulatedSeconds()), w.tick(), duration(s.stepSeconds()),
                 s.lastStepMillis(), s.averageStepMillis()));
+        lines.add("  " + pace(s.pace(), s.stepSeconds(), s.ticksPerStep()));
         lines.add(String.format(Locale.ROOT, "  %d blocks refined into %d smaller cells where temperatures change "
                 + "steeply", w.refinedBlocks(), w.refinedCells()));
         if (Double.isNaN(w.sunlightW())) {

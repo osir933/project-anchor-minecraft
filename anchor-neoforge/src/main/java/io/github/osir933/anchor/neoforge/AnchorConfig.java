@@ -13,6 +13,7 @@ final class AnchorConfig {
     static final ModConfigSpec.BooleanValue HEAT_ENABLED;
     static final ModConfigSpec.DoubleValue SECONDS_PER_GAME_TICK;
     static final ModConfigSpec.IntValue GAME_TICKS_PER_STEP;
+    static final ModConfigSpec.DoubleValue STEP_BUDGET_MILLIS;
     static final ModConfigSpec.IntValue RADIUS;
     static final ModConfigSpec.IntValue VERTICAL_RADIUS;
     static final ModConfigSpec.IntValue SECTIONS_LOADED_PER_STEP;
@@ -36,6 +37,12 @@ final class AnchorConfig {
                         + "slowly; each step covers secondsPerGameTick times this many simulated seconds.")
                 .worldRestart()
                 .defineInRange("gameTicksPerStep", 4, 1, 100);
+        STEP_BUDGET_MILLIS = b.comment("Milliseconds of each game tick that heat may spend on steps beyond its "
+                        + "usual pace, when /anchor time makes it run faster than normal or sends it ahead. A game "
+                        + "tick lasts 50 ms, so larger values run heat faster at the cost of the game's own speed. "
+                        + "The usual steps are always taken.")
+                .worldRestart()
+                .defineInRange("stepBudgetMillis", 20.0, 1.0, 1000.0);
         RADIUS = b.comment("How many 16-block sections to each side of a player are simulated.")
                 .worldRestart()
                 .defineInRange("radius", 2, 0, 8);

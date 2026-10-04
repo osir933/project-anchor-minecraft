@@ -1,6 +1,7 @@
 package io.github.osir933.anchor.neoforge;
 
 import io.github.osir933.anchor.core.host.HostedWorld;
+import io.github.osir933.anchor.core.host.Pacer;
 
 /**
  * How a level's heat simulation is doing.
@@ -13,7 +14,10 @@ import io.github.osir933.anchor.core.host.HostedWorld;
  * @param restoredBlocks how many blocks took back the state saved with their chunk
  * @param restoredSections how many sections those blocks were in
  * @param failure why the simulation stopped, or {@code null} while it runs
+ * @param pace how the simulation is paced: paused or not, its speed and the steps asked for by hand
+ * @param ticksPerStep how many game ticks apart steps come at normal speed
  */
 record HeatReport(HostedWorld.Status world, double stepSeconds, double lastStepMillis, double averageStepMillis,
-        long shownPhaseChanges, long restoredBlocks, int restoredSections, String failure) {
+        long shownPhaseChanges, long restoredBlocks, int restoredSections, String failure, Pacer.Status pace,
+        int ticksPerStep) {
 }

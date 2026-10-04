@@ -72,6 +72,11 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 | `/anchor probe chart [<names>]` | Turns an empty map from your inventory into a live chart of as many as four probes. |
 | `/anchor probe export [<name>]` | Writes recordings into the world's folder as CSV files, for spreadsheets and plotting tools. |
 | `/anchor probe rename`, `reset`, `remove` | Renames a probe, makes it start recording afresh, or removes it. Operators can remove them all with `/anchor probe clear`. |
+| `/anchor time` | How heat is paced in your dimension: paused, or at what speed and how fast the server has kept up, or how far it has gone ahead. |
+| `/anchor time pause`, `resume` | For operators: holds every temperature in your dimension while the game runs on, and lets heat run again. |
+| `/anchor time step [<count>]` | For operators: takes a step of heat by hand, or as many as asked, paused or not. |
+| `/anchor time speed <multiple>` | For operators: runs heat from 0.01 to 1000 times as fast as normal, as far as the server keeps up. |
+| `/anchor time advance <time>` | For operators: sends heat ahead by a length of simulated time, such as `90s`, `15m`, `10h` or `2d`, as fast as the server allows. `/anchor time cancel` stops it. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
 ### Thermometer
@@ -80,7 +85,8 @@ Craft a thermometer from a glass pane, redstone and a copper ingot stacked in a 
 on a block to read the block's temperature where you touch it, or in the air to read the air around your head.
 On a refined block it reads the cell you touch, and on the top of a block open to the sky it reads the top
 itself, which the sun warms and a clear night chills far faster than the block as a whole. Sneak and use it on a
-block to leave a probe where you touch it, and again to take the probe away.
+block to leave a probe where you touch it, and again to take the probe away. A reading taken while heat is paused
+says so.
 
 ### Thermal camera
 
@@ -113,13 +119,32 @@ two neighbouring stretches merge into one, keeping the lowest, mean and highest 
 their recordings are saved with the world. `/anchor probe export` writes them as CSV files, one row per stretch,
 to `anchor/probes/<dimension>` in the world's folder. A dimension holds up to 32 probes.
 
+### Time control
+
+Heat normally runs on the clock of the game: a step of 14.4 simulated seconds every four game ticks. Operators
+can change that in their dimension for an experiment. `/anchor time pause` holds every temperature while the game
+runs on, so you can build, read thermometers and compare probes at leisure, and `/anchor time step` then moves heat
+on a step at a time. `/anchor time speed 10` runs heat ten times as fast as normal and `/anchor time speed 0.25`
+a quarter as fast. `/anchor time advance 10h` sends heat ten simulated hours ahead as fast as the server allows,
+showing everyone in the dimension a bar of how far it has come and telling them when it arrives.
+
+Running faster never makes heat slower than normal. The steps beyond the usual ones are taken only while they fit
+into 20 milliseconds of each 50-millisecond game tick (the `stepBudgetMillis` setting), leaving the rest to the
+game, so how much faster heat runs depends on how much is going on near players and on the server. `/anchor time`
+says how fast it has managed lately. Whether heat is paused, and its speed, are saved with the world; heat on its
+way ahead stops there when the world is closed.
+
+The sun and the weather keep the game's own time, so heat that runs faster or goes ahead sees the sun move more
+slowly than it would: ten hours sent ahead at noon pass under the noon sun. Vanilla's `/tick sprint` runs the whole
+game faster instead, the sun with it.
+
 ### Settings
 
 Anchor's settings are kept with each world, under `[heat]` in its config file, and each is described there:
-`enabled`, `secondsPerGameTick` (3.6), `gameTicksPerStep` (4), `radius` and `verticalRadius` (2 sections),
-`sectionsLoadedPerStep` (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns
-refinement off), `maxRefinedCells` (16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky`
-(true).
+`enabled`, `secondsPerGameTick` (3.6), `gameTicksPerStep` (4), `stepBudgetMillis` (20), `radius` and
+`verticalRadius` (2 sections), `sectionsLoadedPerStep` (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for
+25 cm cells; 0 turns refinement off), `maxRefinedCells` (16384 in each dimension), `showPhaseChanges` (true) and
+`sunAndSky` (true).
 
 ### Describing blocks in a data pack
 

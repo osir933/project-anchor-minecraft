@@ -1,6 +1,7 @@
 package io.github.osir933.anchor.neoforge;
 
 import io.github.osir933.anchor.core.host.HostedWorld;
+import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.host.SectionSnapshot;
 import io.github.osir933.anchor.core.instrument.ChartImage;
 import io.github.osir933.anchor.core.instrument.ProbeSet;
@@ -11,6 +12,7 @@ import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.world.Provenance;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
@@ -48,7 +50,8 @@ import net.neoforged.neoforge.registries.DeferredRegister;
  * which CI runs too. Each test builds a small scene on a stone floor, keeps it simulated, and waits for the
  * simulation to do what physics says it should. The game puts a roof of barriers over each test, which keeps the
  * sun off; tests of the sun run in an environment of their own without one, so the game runs them apart from the
- * rest, and hold the sky still.
+ * rest, and hold the sky still. Tests that pause heat or change its speed do so for the whole dimension, so they too
+ * run in an environment of their own.
  */
 final class AnchorGameTests {
 
@@ -57,6 +60,9 @@ final class AnchorGameTests {
 
     /** The environment of tests open to the sky, which hold the sky still. */
     private static final String SUNLIT = "sunlit";
+
+    /** The environment of tests that pace heat in the whole dimension, which the game runs apart from the rest. */
+    private static final String CLOCK = "clock";
 
     /** A test: its name, how many game ticks it may take, what it does and the environment it runs in. */
     private record Case(String name, int maxTicks, Consumer<GameTestHelper> body, String environment) {
@@ -88,7 +94,9 @@ final class AnchorGameTests {
             new Case("probe_records_a_cooling_block", 400, AnchorGameTests::probeRecordsACoolingBlock),
             new Case("thermometer_leaves_and_takes_a_probe", 200, AnchorGameTests::thermometerLeavesAndTakesAProbe),
             new Case("saved_probes_keep_their_numbers", 20, AnchorGameTests::savedProbesKeepTheirNumbers),
-            new Case("thermometer_explains_itself", 20, AnchorGameTests::thermometerExplainsItself));
+            new Case("thermometer_explains_itself", 20, AnchorGameTests::thermometerExplainsItself),
+            new Case("paused_heat_holds_and_steps_by_hand", 600, AnchorGameTests::pausedHeatHoldsAndStepsByHand,
+                    CLOCK));
 
     private AnchorGameTests() {
     }
@@ -612,6 +620,101 @@ final class AnchorGameTests {
                     + wanted + ": " + lines);
         }
         helper.succeed();
+    }
+
+    /**
+     * Paused, heat holds every temperature while the game runs on, and a thermometer says it is paused; it then takes
+     * exactly the steps asked for by hand and stays paused. Sent ahead, it takes several steps a tick while they fit
+     * into the budget, and at twice normal speed it takes twice the steps.
+     */
+    private static void pausedHeatHoldsAndStepsByHand(GameTestHelper helper) {
+        BlockPos relative = new BlockPos(2, 1, 2);
+        helper.setBlock(relative, Blocks.IRON_BLOCK);
+        BlockPos pos = helper.absolutePos(relative);
+        long[] mark = {0L};
+        double[] held = {Double.NaN};
+        int[] stage = {0};
+        int[] ticks = {0};
+        long[] least = {38L};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (stage[0] == 0) {
+                heat.keepSimulated(pos);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (!heat.setTemperature(pos, 700.0)) {
+                    throw helper.assertionException(Component.literal("waiting for the iron to be simulated"));
+                }
+                heat.pause();
+                mark[0] = heat.pace().steps();
+                held[0] = heat.temperature(pos);
+                ticks[0] = 0;
+                stage[0] = 2;
+            }
+            if (stage[0] == 2) {
+                helper.assertTrue(heat.pace().steps() == mark[0], "paused heat took "
+                        + (heat.pace().steps() - mark[0]) + " steps");
+                helper.assertTrue(heat.temperature(pos) == held[0], "paused, the iron went from "
+                        + HeatText.temperature(held[0]) + " to " + HeatText.temperature(heat.temperature(pos)));
+                if (++ticks[0] < 20) {
+                    throw helper.assertionException(Component.literal("watching paused heat"));
+                }
+                Component reading = ThermometerItem.reading(helper.getLevel(), pos, Vec3.atCenterOf(pos));
+                helper.assertTrue(reading.getString().contains("paused"), "a thermometer on the iron says: "
+                        + reading.getString());
+                heat.request(3);
+                stage[0] = 3;
+            }
+            if (stage[0] == 3) {
+                if (heat.pace().requested() > 0) {
+                    throw helper.assertionException(Component.literal("waiting for the steps asked for"));
+                }
+                helper.assertTrue(heat.pace().steps() == mark[0] + 3, "asked for 3 steps, heat took "
+                        + (heat.pace().steps() - mark[0]));
+                helper.assertTrue(heat.temperature(pos) < held[0], "three steps left the iron at "
+                        + HeatText.temperature(heat.temperature(pos)));
+                helper.assertTrue(heat.pace().paused(), "heat did not stay paused after the steps asked for");
+                heat.resume();
+                mark[0] = heat.pace().steps();
+                heat.request(60);
+                ticks[0] = 0;
+                stage[0] = 4;
+            }
+            if (stage[0] == 4) {
+                if (heat.pace().requested() > 0) {
+                    ticks[0]++;
+                    throw helper.assertionException(Component.literal("sending heat ahead: "
+                            + heat.pace().requested() + " steps to go"));
+                }
+                // At least one step asked for is taken every tick, and more while they fit into the budget.
+                double millis = heat.pace().millisPerStep();
+                int most = millis < AnchorConfig.get(AnchorConfig.STEP_BUDGET_MILLIS) / 4 ? 30 : 60;
+                helper.assertTrue(heat.pace().steps() >= mark[0] + 60 && ticks[0] <= most, "sent 60 steps ahead, "
+                        + "heat took " + (heat.pace().steps() - mark[0]) + " steps in " + ticks[0] + " ticks, at "
+                        + String.format(Locale.ROOT, "%.2f", millis) + " ms a step");
+                heat.setSpeed(Pacer.speedOf(2.0));
+                mark[0] = heat.pace().steps();
+                ticks[0] = 0;
+                stage[0] = 5;
+            }
+            if (stage[0] == 5) {
+                if (ticks[0]++ < 80) {
+                    throw helper.assertionException(Component.literal("running at twice normal speed"));
+                }
+                mark[0] = heat.pace().steps() - mark[0];
+                // Steps beyond the normal ones are taken only while they fit into the budget; if they did not, the
+                // pacer says it could not keep up, and the normal ones must still have been taken.
+                if (!heat.pace().keepingUp()) {
+                    least[0] = 19L;
+                }
+                heat.setSpeed(Pacer.NORMAL_SPEED);
+                heat.release(pos);
+                stage[0] = 6;
+            }
+            helper.assertTrue(mark[0] >= least[0] && mark[0] <= 42, "at twice normal speed heat took " + mark[0]
+                    + " steps in 80 ticks, not 40" + (least[0] < 38 ? ", and could not keep up" : ""));
+        });
     }
 
     /** Returns the translation key of a message, or an empty string if it has none. */
