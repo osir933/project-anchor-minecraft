@@ -68,6 +68,12 @@ FAKE_SERVER = textwrap.dedent("""\
         elif command == "anchor snapshot save smoke":
             log("Heat does not run in all of that box. It runs near players, and a snapshot takes every block of its "
                 "box: come closer, or wait a moment after arriving, and try again.")
+        elif command == "anchor experiment list":
+            log("Ready-made experiments, which operators build in front of them with /anchor experiment build <name>:")
+            log("  cooling: Glowing iron cools. A block of iron at 1227 °C cools in still air.")
+        elif command == "anchor experiment build cooling":
+            log("Heat does not run in all of the space Glowing iron cools needs yet: wait a moment after arriving and "
+                "try again.")
         elif command == "stop":
             log("Stopping server")
             if mode == "hang":
