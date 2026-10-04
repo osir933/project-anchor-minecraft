@@ -69,14 +69,14 @@ report where they are being used outside their assumptions; those reports go to 
 
 ## Heat
 
-Heat moves by **conduction** (`physics.thermal.ConductionModel`): Fourier's law between touching cells,
-solved with explicit finite volumes. Every face moves the same heat out of one cell and into the other, so
-energy is conserved to rounding, and phase changes happen by themselves as enthalpy crosses a material's
-latent heat. Each cell takes substeps short enough to be stable for it alone, the step halved as often as it
-needs: a hot plume above a flame may take hundreds of substeps while the rock around it takes one. Until the fluid model exists, two correlations stand in for moving
-air: surfaces in gas exchange heat with a natural-convection coefficient of 10 W/(m²·K), and warm gas below
-cooler gas mixes with a coefficient that grows with the square root of the temperature difference, so heat
-rises.
+Heat moves by **conduction** (`physics.thermal.ConductionModel`): Fourier's law between touching cells, solved
+with explicit finite volumes. Every face moves the same heat out of one cell and into the other, so energy is
+conserved to rounding, and phase changes happen by themselves as enthalpy crosses a material's latent heat. Each
+cell takes substeps short enough to be stable for it alone, the step halved as often as it needs: a hot plume
+above a flame may take hundreds of substeps while the rock around it takes one. Until the fluid model exists, two
+correlations stand in for moving air: surfaces in gas exchange heat with a natural-convection coefficient of
+10 W/(m²·K), and warm gas below cooler gas mixes with a coefficient that grows with the square root of the
+temperature difference, so heat rises.
 
 Liquids carry heat by moving too, and their measured viscosity and thermal expansion say how fast, so the same
 model estimates it from each liquid's own properties. A liquid against other matter uses the natural-convection
@@ -204,6 +204,23 @@ where nothing happened needs no snapshot, and a placed block, which starts at it
 adds nothing. Importing a section with its snapshot puts each saved block back where its matter still fits
 the game's block there; a block that changed while the section was not simulated starts afresh.
 
+## Instruments
+
+`instrument.ProbeSet` holds a world's probes: named points, each with a recording, and one clock of simulated
+seconds that every step moves on, so all probes share one time line. A recording (`instrument.TimeSeries`) keeps
+any length of readings in fixed memory: readings fill buckets one each, and when the buckets run out neighbours
+merge in pairs, each bucket keeping its time span, its count of readings and missing ones, and the lowest, highest
+and sum of its values. A long recording so keeps its whole span at a coarser grain without averaging a peak away.
+The latest sixteen readings are also kept one by one, and a least-squares line through them gives the current
+rate of change. A missing reading, for a point that is not simulated, takes time but no value, and leaves a gap.
+
+`instrument.ChartImage` draws as many as four recordings as a 128 by 128 picture in a handful of inks, the size
+of a Minecraft map: time from the first reading to now along the bottom, marked in one unit at round intervals,
+values up the side on round marks of 1, 2 or 5 times a power of ten, each recording a line through its buckets'
+means over a band from their lowest to their highest values, and a legend with each recording's latest value,
+written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a line of block characters, and
+`instrument.TimeSeriesCsv` writes one bucket per row.
+
 ## In Minecraft
 
 `anchor-neoforge` connects a hosted world to each Minecraft dimension and holds no physical rules of its own.
@@ -251,6 +268,14 @@ the game's block there; a block that changed while the section was not simulated
   catching up on the time that passed.
 - **Failure.** An error stops heat in that dimension, logs it and shows it in `/anchor heat status`; the game
   carries on.
+- **Probes and charts.** `LevelProbes` holds a dimension's probes and charts as a NeoForge data attachment on the
+  level, saved with it, recordings as the raw bits of their doubles. After each step `LevelHeat` gives every probe
+  the temperature at its point, the same reading a thermometer touching there gets, or a missing reading if the
+  point is not simulated. A chart is an ordinary filled map, locked so the game never draws the land on it,
+  centred far beyond the world border so item frames holding it leave no marker on it, and `ProbeCharts` draws its
+  picture again every five steps, changing only the pixels that differ so players are sent only those. A chart
+  whose map data is gone is forgotten, and a dimension keeps drawing at most 16 charts. `ProbeCommands` holds the
+  `/anchor probe` commands; the thermometer leaves and takes probes when used while sneaking.
 - **Thermal camera.** While a player holds one, `ThermalCamera` takes an image of what they look at every ten
   game ticks: 24 by 14 rays across 48° stop at the first block outline or fluid within 24 blocks, and each hit
   becomes a dot on that face showing the temperature of the cell it hit, or in the air view the air along the
@@ -268,7 +293,10 @@ among the cold floor, its air view shows the warm air above the iron and none of
 how to use it, an iron block at 1500 K warms a stone block across two blocks of air, the stone walls of a lava pool
 are refined so that their faces read hotter than the stone behind, on the thermometer too, and in a noon sun black
 wool takes in more than three times the sunlight of white wool beside it, grows more than 10 K hotter on top, and
-reads so on the thermometer. The game tests load the mod from the build directories, so CI also installs a NeoForge
+reads so on the thermometer. A probe in a hot iron block records it cooling and a thermometer names the probe, a
+chart of it is a locked map with its line on white paper, a thermometer used while sneaking leaves a probe where it
+touches and takes it away again, the format probes are saved in keeps every reading, and the thermometer's tooltip
+says how to use it. The game tests load the mod from the build directories, so CI also installs a NeoForge
 server the way players do, starts it with the released jar and checks that the mod loads, its self-test passes,
 heat runs, the server stops cleanly and nothing is logged as an error (`.github/scripts/smoke_test.py`).
 
@@ -299,8 +327,8 @@ The same world and the same inputs give bit-identical results on every machine. 
 
 Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable alpha) are in, surfaces radiate,
 temperatures are saved with the world, blocks refine where temperatures change steeply, liquids carry heat by
-moving, and the sun and the night sky warm and cool the land. Next for phase 1: instruments for experiments
-(probes, graphs and a simulation console), a laboratory world, and hot metal that glows. After that come structure
+moving, the sun and the night sky warm and cool the land, and probes record temperatures and chart them on maps.
+Next for phase 1: a simulation console, a laboratory world, and hot metal that glows. After that come structure
 and fracture; rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and
 chemistry; electricity and control; causal targeting and molecular dynamics; and finally life and society, on the
 way to 1.0.

@@ -2,7 +2,12 @@ package io.github.osir933.anchor.neoforge;
 
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.SectionSnapshot;
+import io.github.osir933.anchor.core.instrument.ChartImage;
+import io.github.osir933.anchor.core.instrument.ProbeSet;
+import io.github.osir933.anchor.core.instrument.TimeSeries;
+import io.github.osir933.anchor.core.instrument.TimeSeriesCsv;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
+import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.world.Provenance;
 import java.util.ArrayList;
 import java.util.List;
@@ -10,6 +15,7 @@ import java.util.TreeMap;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.FunctionGameTestInstance;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -22,6 +28,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
@@ -29,6 +36,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.saveddata.maps.MapId;
+import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
@@ -75,7 +84,11 @@ final class AnchorGameTests {
             new Case("thermal_camera_explains_itself", 20, AnchorGameTests::thermalCameraExplainsItself),
             new Case("hot_iron_warms_stone_across_air", 600, AnchorGameTests::hotIronWarmsStoneAcrossAir),
             new Case("stone_beside_lava_is_refined", 200, AnchorGameTests::stoneBesideLavaIsRefined),
-            new Case("black_wool_warms_more_in_the_sun", 400, AnchorGameTests::blackWoolWarmsMoreInTheSun, SUNLIT));
+            new Case("black_wool_warms_more_in_the_sun", 400, AnchorGameTests::blackWoolWarmsMoreInTheSun, SUNLIT),
+            new Case("probe_records_a_cooling_block", 400, AnchorGameTests::probeRecordsACoolingBlock),
+            new Case("thermometer_leaves_and_takes_a_probe", 200, AnchorGameTests::thermometerLeavesAndTakesAProbe),
+            new Case("saved_probes_keep_their_numbers", 20, AnchorGameTests::savedProbesKeepTheirNumbers),
+            new Case("thermometer_explains_itself", 20, AnchorGameTests::thermometerExplainsItself));
 
     private AnchorGameTests() {
     }
@@ -457,6 +470,153 @@ final class AnchorGameTests {
             heat.release(black);
             heat.release(white);
         });
+    }
+
+    /**
+     * A probe on top of a hot iron block records it cooling, a thermometer on the block names the probe, and a chart
+     * of the probe is a locked map with the probe's line drawn on white paper. The probe measures the top, which cools
+     * from the first step, rather than the middle, which a refined block keeps hot for a while.
+     */
+    private static void probeRecordsACoolingBlock(GameTestHelper helper) {
+        BlockPos relative = new BlockPos(2, 1, 2);
+        helper.setBlock(relative, Blocks.IRON_BLOCK);
+        BlockPos pos = helper.absolutePos(relative);
+        Vec3 top = new Vec3(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
+        ServerLevel level = helper.getLevel();
+        String name = "cooling_iron";
+        int[] stage = {0};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            LevelProbes probes = ProbeCommands.probes(level);
+            if (stage[0] == 0) {
+                heat.keepSimulated(pos);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (!heat.setTemperature(pos, 700.0)) {
+                    throw helper.assertionException(Component.literal("waiting for the iron to be simulated"));
+                }
+                ProbeCommands.Outcome added = ProbeCommands.add(level, pos, top, name);
+                helper.assertTrue(added.done(), "the probe was not added: " + added.message().getString());
+                stage[0] = 2;
+            }
+            ProbeSet.Probe probe = probes.set().get(name).orElseThrow(
+                    () -> helper.assertionException(Component.literal("the probe is gone")));
+            TimeSeries s = probe.series();
+            if (s.samples() < 20) {
+                throw helper.assertionException(Component.literal("waiting for readings: " + s.samples()));
+            }
+            helper.assertTrue(s.bucket(0).mean() > s.last() && s.recentRate() < 0, "the probe saw the iron go from "
+                    + HeatText.temperature(s.bucket(0).mean()) + " to " + HeatText.temperature(s.last()) + ", "
+                    + HeatText.rate(s.recentRate()));
+            Component reading = ThermometerItem.reading(level, pos, top);
+            helper.assertTrue(reading.getString().contains("recorded as " + name), "a thermometer on the iron says: "
+                    + reading.getString());
+            ItemStack chart = ProbeCharts.create(level, probes, List.of(probe));
+            MapId id = chart.get(DataComponents.MAP_ID);
+            MapItemSavedData data = id == null ? null : level.getMapData(id);
+            helper.assertTrue(data != null, "the chart's map was not saved");
+            int line = 0;
+            int paper = 0;
+            for (byte b : data.colors) {
+                line += b == ProbeCharts.colour(ChartImage.Ink.LINE_1) ? 1 : 0;
+                paper += b == ProbeCharts.colour(ChartImage.Ink.PAPER) ? 1 : 0;
+            }
+            helper.assertTrue(line > 30 && paper > 8000, "the chart has " + line + " pixels of line and " + paper
+                    + " of paper");
+            helper.assertTrue(data.locked, "the chart's map is not locked, so the game would draw the land on it");
+            String csv = TimeSeriesCsv.write(s, "C", HeatText::toCelsius);
+            helper.assertTrue(csv.lines().count() == s.size() + 1, "the CSV has " + csv.lines().count()
+                    + " lines for " + s.size() + " stretches of time");
+            probes.removeChart(id.id());
+            probes.set().remove(name);
+            heat.release(pos);
+        });
+    }
+
+    /**
+     * Using a thermometer on a block while sneaking leaves a probe where it touched, and doing it again takes the
+     * probe away.
+     */
+    private static void thermometerLeavesAndTakesAProbe(GameTestHelper helper) {
+        BlockPos relative = new BlockPos(2, 1, 2);
+        helper.setBlock(relative, Blocks.STONE);
+        BlockPos pos = helper.absolutePos(relative);
+        GridPos block = new GridPos(pos.getX(), pos.getY(), pos.getZ());
+        ServerLevel level = helper.getLevel();
+        boolean[] pinned = {false};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (!pinned[0]) {
+                heat.keepSimulated(pos);
+                pinned[0] = true;
+            }
+            if (heat.inspect(pos).isEmpty()) {
+                throw helper.assertionException(Component.literal("waiting for the stone to be simulated"));
+            }
+            Vec3 top = new Vec3(pos.getX() + 0.25, pos.getY() + 1.0, pos.getZ() + 0.75);
+            ProbeCommands.Outcome added = ProbeCommands.toggle(level, pos, top);
+            helper.assertTrue(added.done() && key(added.message()).equals("message.anchor.probe.added"),
+                    "leaving a probe said: " + added.message().getString());
+            ProbeSet.Probe probe = ProbeCommands.probes(level).set().in(block).orElseThrow(
+                    () -> helper.assertionException(Component.literal("no probe was left in the stone")));
+            helper.assertTrue(probe.x() == pos.getX() + 0.25 && probe.y() == Math.nextDown(pos.getY() + 1.0)
+                    && probe.z() == pos.getZ() + 0.75, "the probe measures " + probe.x() + " " + probe.y() + " "
+                    + probe.z() + ", not the top of the stone where the thermometer touched");
+            ProbeCommands.Outcome removed = ProbeCommands.toggle(level, pos, top);
+            helper.assertTrue(removed.done() && key(removed.message()).equals("message.anchor.probe.removed"),
+                    "taking the probe said: " + removed.message().getString());
+            helper.assertTrue(ProbeCommands.probes(level).set().in(block).isEmpty(), "the probe is still there");
+            heat.release(pos);
+        });
+    }
+
+    /**
+     * The format probes are saved in keeps every reading exactly, stores recordings as compact arrays, and drops probes
+     * that do not fit together instead of guessing.
+     */
+    private static void savedProbesKeepTheirNumbers(GameTestHelper helper) {
+        LevelProbes probes = new LevelProbes();
+        ProbeSet set = probes.set();
+        set.add("north", new GridPos(1, 64, 1), 1.5, 64.999, 1.5);
+        set.add(null, new GridPos(-7, -3, 12), -6.5, -2.5, 12.5);
+        for (int i = 0; i < 700; i++) {
+            double t = i;
+            set.record(14.4, p -> p.number() == 1 ? 290.0 + StrictMath.sin(t / 30.0)
+                    : t % 50 == 0 ? Double.NaN : 1000.0 - t);
+        }
+        probes.addChart(new LevelProbes.Chart(17, List.of(2L, 1L)));
+        Tag tag = LevelProbes.CODEC.encodeStart(NbtOps.INSTANCE, probes).getOrThrow();
+        LevelProbes back = LevelProbes.CODEC.parse(NbtOps.INSTANCE, tag).getOrThrow();
+        helper.assertValueEqual(probes.set().state(), back.set().state(), "the probes read back");
+        helper.assertValueEqual(probes.charts(), back.charts(), "the charts read back");
+        CompoundTag first = ((CompoundTag) tag).getCompoundOrEmpty("probes").getListOrEmpty("probes")
+                .getCompoundOrEmpty(0);
+        helper.assertTrue(first.getCompoundOrEmpty("series").getLongArray("maximum").isPresent(),
+                "recordings are not saved as arrays: " + first);
+        first.putDouble("x", 100.0);
+        helper.assertTrue(LevelProbes.CODEC.parse(NbtOps.INSTANCE, tag).getOrThrow().isEmpty(),
+                "a probe measuring outside its block was read");
+        ((CompoundTag) tag).remove("probes");
+        helper.assertTrue(LevelProbes.CODEC.parse(NbtOps.INSTANCE, tag).result().isEmpty(),
+                "probes saved without their list were read");
+        helper.succeed();
+    }
+
+    /** The thermometer's tooltip says how to use it. */
+    private static void thermometerExplainsItself(GameTestHelper helper) {
+        List<Component> lines = new ItemStack(AnchorItems.THERMOMETER.get()).getTooltipLines(
+                Item.TooltipContext.of(helper.getLevel()), null, TooltipFlag.NORMAL);
+        for (String wanted : List.of("item.anchor.thermometer.use", "item.anchor.thermometer.sneak")) {
+            helper.assertTrue(lines.stream().anyMatch(line -> key(line).equals(wanted)), "the tooltip has no line "
+                    + wanted + ": " + lines);
+        }
+        helper.succeed();
+    }
+
+    /** Returns the translation key of a message, or an empty string if it has none. */
+    private static String key(Component message) {
+        return message.getContents() instanceof TranslatableContents t ? t.getKey() : "";
     }
 
     /** Builds a one-block pool of still water in stone and returns where the water is. */

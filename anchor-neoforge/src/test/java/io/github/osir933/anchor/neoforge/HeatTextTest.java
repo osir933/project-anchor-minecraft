@@ -33,6 +33,17 @@ class HeatTextTest {
     }
 
     @Test
+    void ratesReadPerMinuteOrPerHour() {
+        assertEquals("rising 3.0 K/min", HeatText.rate(0.05));
+        assertEquals("falling 120.0 K/min", HeatText.rate(-2.0));
+        assertEquals("falling 0.4 K/h", HeatText.rate(-0.4 / 3600));
+        assertEquals("steady", HeatText.rate(0.01 / 3600));
+        assertEquals("steady", HeatText.rate(0.0));
+        assertEquals("", HeatText.rate(Double.NaN), "not known yet");
+        assertEquals(26.85, HeatText.toCelsius(300.0), 1e-12);
+    }
+
+    @Test
     void anInspectionSaysWhatTheBlockIsAndHowSureTheSimulationIs() {
         BlockAppearance[] looks = {
             BlockAppearance.of("anchor:air"),

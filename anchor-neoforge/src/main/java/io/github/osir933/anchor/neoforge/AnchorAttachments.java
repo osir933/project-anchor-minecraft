@@ -16,6 +16,10 @@ final class AnchorAttachments {
     static final Supplier<AttachmentType<ChunkHeat>> CHUNK_HEAT = TYPES.register("chunk_heat",
             () -> AttachmentType.builder(() -> new ChunkHeat()).serialize(ChunkHeat.SERIALIZER).build());
 
+    /** The probes of a level and the charts drawn from them, saved with the level; see {@link LevelProbes}. */
+    static final Supplier<AttachmentType<LevelProbes>> PROBES = TYPES.register("probes",
+            () -> AttachmentType.builder(() -> new LevelProbes()).serialize(LevelProbes.SERIALIZER).build());
+
     private AnchorAttachments() {
     }
 

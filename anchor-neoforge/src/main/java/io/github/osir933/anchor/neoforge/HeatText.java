@@ -29,6 +29,39 @@ final class HeatText {
     }
 
     /**
+     * Converts a temperature to degrees Celsius.
+     *
+     * @param kelvin the temperature in kelvin
+     * @return the temperature in degrees Celsius
+     */
+    static double toCelsius(double kelvin) {
+        return kelvin - ZERO_CELSIUS_K;
+    }
+
+    /**
+     * Describes how fast a temperature is changing, per simulated minute or, if slower, per simulated hour.
+     *
+     * @param kelvinPerSecond the rate in kelvin per simulated second, or {@link Double#NaN} if it is not known
+     * @return for example {@code rising 3.2 K/min}, {@code falling 0.4 K/h} or {@code steady}; empty if the rate is
+     *     not known
+     */
+    static String rate(double kelvinPerSecond) {
+        if (Double.isNaN(kelvinPerSecond)) {
+            return "";
+        }
+        String way = kelvinPerSecond > 0 ? "rising " : "falling ";
+        double perMinute = Math.abs(kelvinPerSecond) * 60.0;
+        if (perMinute >= 0.1) {
+            return way + String.format(Locale.ROOT, "%.1f K/min", perMinute);
+        }
+        double perHour = perMinute * 60.0;
+        if (perHour >= 0.1) {
+            return way + String.format(Locale.ROOT, "%.1f K/h", perHour);
+        }
+        return "steady";
+    }
+
+    /**
      * Formats a temperature in degrees Celsius and kelvin.
      *
      * @param kelvin the temperature in kelvin
