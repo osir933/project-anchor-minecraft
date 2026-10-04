@@ -92,7 +92,10 @@ final class HeatEvents {
 
     private static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel level) {
-            LEVELS.remove(level);
+            LevelHeat heat = LEVELS.remove(level);
+            if (heat != null) {
+                heat.close();
+            }
         }
     }
 

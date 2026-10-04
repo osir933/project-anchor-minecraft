@@ -1,10 +1,12 @@
 package io.github.osir933.anchor.neoforge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
+import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
@@ -17,6 +19,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class HeatTextTest {
+
+    /** A world running at normal speed. */
+    private static final Pacer.Status NORMAL = new Pacer(4, 20.0).status();
 
     @Test
     void numbersReadNaturally() {
@@ -91,9 +96,65 @@ class HeatTextTest {
 
         HostedWorld.Status status = hosted.status();
         List<String> summary = HeatText.status("minecraft:overworld",
-                new HeatReport(status, 14.4, 1.0, 1.0, 0L, 0L, 0, null));
+                new HeatReport(status, 14.4, 1.0, 1.0, 0L, 0L, 0, null, NORMAL, 4));
         assertTrue(summary.contains("  " + status.refinedBlocks() + " blocks refined into " + status.refinedCells()
                 + " smaller cells where temperatures change steeply"), summary.toString());
+    }
+
+    @Test
+    void thePaceSaysHowFastHeatRuns() {
+        Pacer pacer = new Pacer(4, 20.0);
+        assertEquals("Running at normal speed, a step of 14 s every 4 game ticks",
+                HeatText.pace(pacer.status(), 14.4, 4));
+        pacer.setSpeed(1000);
+        assertEquals("Running at 10× normal speed, 2.5 steps of 14 s every game tick",
+                HeatText.pace(pacer.status(), 14.4, 4));
+        pacer.setSpeed(400);
+        assertEquals("Running at 4× normal speed, a step of 14 s every game tick",
+                HeatText.pace(pacer.status(), 14.4, 4));
+        pacer.setSpeed(25);
+        assertEquals("Running at 0.25× normal speed, a step of 14 s every 16 game ticks",
+                HeatText.pace(pacer.status(), 14.4, 4));
+
+        pacer.setSpeed(10_000);
+        for (int t = 0; t < 10; t++) {
+            pacer.beginTick();
+            double spent = 0.0;
+            while (pacer.wantsStep(spent)) {
+                pacer.stepped(5.0);
+                spent += 5.0;
+            }
+            pacer.endTick();
+        }
+        assertEquals("Running at 100× normal speed, 25 steps of 14 s every game tick; this server keeps up with only "
+                + "16× lately", HeatText.pace(pacer.status(), 14.4, 4));
+
+        pacer.pause();
+        assertEquals("Paused: temperatures hold until /anchor time resume, and /anchor time step takes steps by hand",
+                HeatText.pace(pacer.status(), 14.4, 4));
+        pacer.request(2500);
+        assertTrue(HeatText.pace(pacer.status(), 14.4, 4).startsWith("Going ahead: 0 s of 10 h 0 min done, at "),
+                HeatText.pace(pacer.status(), 14.4, 4));
+        assertTrue(HeatText.pace(pacer.status(), 14.4, 4).endsWith(", then paused again"),
+                HeatText.pace(pacer.status(), 14.4, 4));
+    }
+
+    @Test
+    void lengthsOfTimeReadAsPlayersTypeThem() {
+        assertEquals(90.0, HeatText.parseDuration("90s"));
+        assertEquals(900.0, HeatText.parseDuration("15m"));
+        assertEquals(900.0, HeatText.parseDuration("15min"));
+        assertEquals(36_000.0, HeatText.parseDuration("10h"));
+        assertEquals(5400.0, HeatText.parseDuration("1h30m"));
+        assertEquals(129_600.0, HeatText.parseDuration("1.5d"));
+        assertEquals(36_000.0, HeatText.parseDuration(" 10H "));
+        for (String bad : List.of("", "10", "h", "10x", "10ms", "1h 30m", "0s", "-5m", "1..5h")) {
+            assertThrows(IllegalArgumentException.class, () -> HeatText.parseDuration(bad), bad);
+        }
+        assertEquals("10", HeatText.multiple(10.0));
+        assertEquals("0.25", HeatText.multiple(0.25));
+        assertEquals("3.33", HeatText.multiple(3.333));
+        assertEquals("0", HeatText.multiple(0.0));
     }
 
     @Test
@@ -103,13 +164,15 @@ class HeatTextTest {
                 HostedWorld.Settings.defaults());
         hosted.tick();
         List<String> lines = HeatText.status("minecraft:overworld",
-                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, 1200L, 3, null));
+                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, 1200L, 3, null, NORMAL, 4));
         assertEquals("Heat in minecraft:overworld", lines.get(0));
         assertTrue(lines.get(2).contains(" steps of 14 s"), lines.get(2));
         assertTrue(lines.get(2).contains("1.25 ms"), lines.get(2));
         assertTrue(lines.contains("  1200 blocks in 3 sections came back as they were saved"), lines.toString());
+        assertEquals("  Running at normal speed, a step of 14 s every 4 game ticks", lines.get(3));
         List<String> stopped = HeatText.status("minecraft:the_nether",
-                new HeatReport(hosted.status(), 14.4, 0.0, 0.0, 0L, 0L, 0, "java.lang.IllegalStateException: boom"));
+                new HeatReport(hosted.status(), 14.4, 0.0, 0.0, 0L, 0L, 0, "java.lang.IllegalStateException: boom",
+                        NORMAL, 4));
         assertEquals("Heat in minecraft:the_nether: stopped after an error", stopped.get(0));
         assertEquals("  java.lang.IllegalStateException: boom", stopped.get(1));
         assertTrue(stopped.stream().noneMatch(l -> l.contains("came back")), "nothing restored, nothing said");
@@ -148,6 +211,7 @@ class HeatTextTest {
     }
 
     private static List<String> status(HostedWorld hosted) {
-        return HeatText.status("minecraft:overworld", new HeatReport(hosted.status(), 14.4, 1.0, 1.0, 0L, 0L, 0, null));
+        return HeatText.status("minecraft:overworld", new HeatReport(hosted.status(), 14.4, 1.0, 1.0, 0L, 0L, 0, null,
+                NORMAL, 4));
     }
 }

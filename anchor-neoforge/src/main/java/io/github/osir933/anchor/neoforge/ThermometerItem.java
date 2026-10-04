@@ -30,7 +30,8 @@ import net.minecraft.world.phys.Vec3;
  *
  * <p>Used on a block while sneaking, it leaves a probe there that records the temperature where it touched every
  * simulation step, or takes away the probe already in the block; see {@link ProbeCommands}. Reading a block with a
- * probe also tells how fast the probe finds it warming or cooling.
+ * probe also tells how fast the probe finds it warming or cooling, and a reading taken while heat is paused with
+ * {@code /anchor time pause} says so.
  */
 final class ThermometerItem extends Item {
 
@@ -111,6 +112,10 @@ final class ThermometerItem extends Item {
                             probe.get().name())
                     : Component.translatableWithFallback("message.anchor.thermometer.trend", ", recorded as %s: %s",
                             probe.get().name(), rate));
+        }
+        if (heat.get().pace().paused()) {
+            reading.append(Component.translatableWithFallback("message.anchor.thermometer.paused",
+                    " (heat is paused)"));
         }
         return reading;
     }

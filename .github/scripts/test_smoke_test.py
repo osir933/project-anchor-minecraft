@@ -57,6 +57,12 @@ FAKE_SERVER = textwrap.dedent("""\
         elif command == "anchor heat status":
             log("Heat in minecraft:overworld")
             log("  Energy and mass balanced at the last audit")
+        elif command == "anchor time":
+            log("Heat in minecraft:overworld: Running at normal speed, a step of 14 s every 4 game ticks")
+        elif command == "anchor time pause":
+            log("Paused heat in minecraft:overworld: temperatures hold while the game runs on.")
+        elif command == "anchor time resume":
+            log("Heat in minecraft:overworld runs again. Running at normal speed.")
         elif command == "stop":
             log("Stopping server")
             if mode == "hang":

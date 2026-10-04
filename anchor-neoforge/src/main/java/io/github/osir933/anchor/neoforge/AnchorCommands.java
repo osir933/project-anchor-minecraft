@@ -28,7 +28,9 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
  *   operators can name any block with {@code /anchor heat inspect <pos>};</li>
  *   <li>{@code /anchor heat set <pos> <celsius>} lets operators set a block's temperature, keeping its matter,
  *   to start an experiment;</li>
- *   <li>{@code /anchor probe ...} records temperatures over time and charts them; see {@link ProbeCommands}.</li>
+ *   <li>{@code /anchor probe ...} records temperatures over time and charts them; see {@link ProbeCommands};</li>
+ *   <li>{@code /anchor time ...} pauses heat, steps it by hand, runs it faster or slower or sends it ahead; see
+ *   {@link TimeCommands}.</li>
  * </ul>
  */
 final class AnchorCommands {
@@ -54,7 +56,8 @@ final class AnchorCommands {
                                         .executes(context -> inspect(context,
                                                 BlockPosArgument.getLoadedBlockPos(context, "pos")))))
                         .then(setCommand()))
-                .then(ProbeCommands.build()));
+                .then(ProbeCommands.build())
+                .then(TimeCommands.build()));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> setCommand() {

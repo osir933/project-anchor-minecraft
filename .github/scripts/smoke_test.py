@@ -29,11 +29,16 @@ from release import ROOT, USER_AGENT, properties
 INSTALLER = "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar"
 
 # What the test asks the server, what it must answer and what counts as a wrong answer. The core's self-test
-# shows that the core is inside the jar and works; the heat status shows that the mod's side runs.
+# shows that the core is inside the jar and works; the heat status shows that the mod's side runs, and the time
+# commands that heat can be paced.
+NOT_RUNNING = r"not simulated|stopped after an error|Unknown or incomplete command"
 STEPS = [
     ("anchor selftest", r"Anchor self-test passed: \d+ checks\.", r"Anchor self-test failed"),
     ("anchor heat status", r"Energy and mass balanced at the last audit",
      r"Heat is not simulated|stopped after an error|NOT balanced"),
+    ("anchor time", r"Heat in minecraft:overworld: Running at normal speed", NOT_RUNNING),
+    ("anchor time pause", r"Paused heat in minecraft:overworld", NOT_RUNNING),
+    ("anchor time resume", r"Heat in minecraft:overworld runs again", NOT_RUNNING),
 ]
 
 # The same world every run, kept small. No player joins, so the server needs no connection to Mojang.

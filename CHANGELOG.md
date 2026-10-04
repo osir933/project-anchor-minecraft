@@ -48,6 +48,12 @@ Java 25, on both the client and the server.
   to four probes that can hang in an item frame, and `/anchor probe export` writes recordings as CSV files. A
   probe keeps its whole recording in fixed memory, keeping the lowest and highest temperature of every stretch so
   brief peaks survive, and probes are saved with the world.
+- **Time control.** Operators can pause heat in their dimension while the game runs on and take steps by hand with
+  `/anchor time pause` and `/anchor time step`, run heat from 0.01 to 1000 times as fast as normal with
+  `/anchor time speed`, or send it ahead by a stretch of simulated time such as `10h` with `/anchor time advance`,
+  which shows a bar of how far it has come. Faster heat takes extra steps only while they fit into a budget of
+  each game tick, 20 ms unless the `stepBudgetMillis` setting says otherwise, and `/anchor time` says how fast
+  heat has managed. The pause and the speed are saved with the world, and a thermometer says when heat is paused.
 
 Known limits of this alpha:
 
@@ -63,3 +69,5 @@ Known limits of this alpha:
   stays in its block. In land where nothing else is happening, light that sinks into water or through glass
   warms the top block instead.
 - Land nobody is near is paused, not cooled: it carries on from where it was when a player returns.
+- The sun and the weather keep the game's own time, so heat that runs faster or is sent ahead sees the sun move
+  more slowly than it would.
