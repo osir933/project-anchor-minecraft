@@ -23,10 +23,4 @@ clean() {
 p() { echo "=== $1"; javap -cp "$CP" -public "$1" 2>&1 | clean; }
 pf() { local cls="$1"; local re="$2"; echo "=== $cls ~ $re"; javap -cp "$CP" -public "$cls" 2>&1 | clean | grep -E "$re|^(class|interface|enum|record)|Error"; }
 
-echo "### round 22: clocks, weather data, dimension type"
-pf net.minecraft.world.level.dimension.DimensionType 'class|[Cc]lock|timelines|record'
-p net.minecraft.world.clock.WorldClocks
-p 'net.minecraft.world.clock.ServerClockManager$MoveResult'
-p 'net.minecraft.world.clock.ServerClockManager$ServerClockInstance'
-p net.minecraft.world.level.saveddata.WeatherData
-pf net.minecraft.world.level.Level 'class|getDefaultClock|getOverworldClock|dimensionTypeRegistration|registryAccess'
+echo "### round 23: settings file location (see the next step)"
