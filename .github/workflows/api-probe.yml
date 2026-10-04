@@ -22,9 +22,3 @@ jobs:
         run: ./gradlew :anchor-neoforge:compileJava --stacktrace -q
       - name: Print signatures
         run: ./.github/probe/probe.sh
-      - name: Where the settings file goes
-        run: |
-          timeout 900 ./gradlew :anchor-neoforge:runGameTestServer -q > "$RUNNER_TEMP/gametest.log" 2>&1 || true
-          grep -E 'required tests passed|ConfigTracker|config' "$RUNNER_TEMP/gametest.log" | grep -iE 'anchor|synced|serverconfig|tests passed' | head -20
-          find . -name '*.toml' -not -path './.git/*' -not -path './gradle/*' | grep -v '/build/moddev/' | head -30
-          for f in $(find . -name 'anchor*.toml' -not -path './.git/*' | head -3); do echo "== $f"; head -12 "$f"; done

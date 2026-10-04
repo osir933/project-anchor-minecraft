@@ -23,4 +23,15 @@ clean() {
 p() { echo "=== $1"; javap -cp "$CP" -public "$1" 2>&1 | clean; }
 pf() { local cls="$1"; local re="$2"; echo "=== $cls ~ $re"; javap -cp "$CP" -public "$cls" 2>&1 | clean | grep -E "$re|^(class|interface|enum|record)|Error"; }
 
-echo "### round 23: settings file location (see the next step)"
+echo "### round 24: copper blocks, block flags, chat run command, game test helpers"
+p net.minecraft.world.level.block.WeatheringCopperCollection
+for c in $(unzip -l "$GAME" | grep -oE 'net/minecraft/world/level/block/WeatheringCopperCollection[^ ]*\.class|net/minecraft/world/level/block/WeatheringCopper\$[^ ]*\.class' | sed 's/\.class$//; s#/#.#g' | sort -u); do p "$c"; done
+for c in $(unzip -l "$GAME" | grep -oE 'net/minecraft/world/level/block/[A-Za-z]*ByState[^ ]*\.class|net/minecraft/util/[A-Za-z]*ByState[^ ]*\.class' | sed 's/\.class$//; s#/#.#g' | sort -u); do p "$c"; done
+unzip -l "$GAME" | grep -oE 'net/minecraft/[a-z/]*ByState[^ ]*\.class' | sort -u | head
+pf net.minecraft.world.level.block.Blocks 'COPPER_BLOCK|BRICKS|SMOOTH_STONE|PACKED_ICE|WAXED'
+pf net.minecraft.network.chat.ClickEvent 'RunCommand|SuggestCommand'
+pf net.minecraft.world.entity.Entity 'getDirection|getYRot|blockPosition'
+pf net.minecraft.core.Direction 'getClockWise|getCounterClockWise|getStepX|getStepZ|fromYRot|getNearest|Plane'
+pf net.minecraft.gametest.framework.GameTestHelper 'makeMockPlayer|absolutePos|getLevel|relativePos|getTestRotation|getBounds|testInfo'
+pf net.minecraft.world.level.block.Block 'UPDATE_'
+pf net.minecraft.world.level.block.state.BlockBehaviour\$BlockStateBase 'canBeReplaced|hasBlockEntity|isAir|getFluidState'
