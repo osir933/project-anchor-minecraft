@@ -28,6 +28,9 @@ import java.util.TreeMap;
  * <p>Each face is found once, from the leaf on its negative side, whatever the sizes of the two leaves; a
  * coarse leaf facing finer ones gets one face per finer leaf. Whole blocks facing whole blocks, by far the
  * most common case, are paired by index arithmetic without building cell ids.
+ *
+ * <p>The top faces of blocks open to the sky, whose exchange with the air above a {@link SkyModel} balances,
+ * are left out.
  */
 final class ThermalGraph {
 
@@ -72,7 +75,7 @@ final class ThermalGraph {
     /** Builds a graph from scratch. */
     static ThermalGraph build(PhysicalWorld world, SortedSet<Long> scope, Isotherms isotherms) {
         ThermalGraph g = new ThermalGraph();
-        g.rebuild(world, scope, isotherms);
+        g.rebuild(world, scope, isotherms, null);
         return g;
     }
 
@@ -82,8 +85,11 @@ final class ThermalGraph {
         return id != null ? id : CellId.of(sections[leafSection[leaf]].blockPos(leafBlock[leaf]));
     }
 
-    /** Rebuilds the graph for a new step, reusing the arrays of the last one. */
-    void rebuild(PhysicalWorld world, SortedSet<Long> scope, Isotherms isotherms) {
+    /**
+     * Rebuilds the graph for a new step, reusing the arrays of the last one, without the top faces a sky model
+     * keeps, if there is one.
+     */
+    void rebuild(PhysicalWorld world, SortedSet<Long> scope, Isotherms isotherms, SkyModel sky) {
         List<Section> included = new ArrayList<>();
         int leaves = 0;
         for (long key : scope) {
@@ -138,6 +144,7 @@ final class ThermalGraph {
                 index.get(SectionPos.offset(s.key(), 0, 0, 1))};
             int[] first = self.firstLeaf;
             boolean whole = s.leafCount() == 0;
+            long[] tops = sky == null ? null : sky.openTops(s.key());
             for (int b = 0; b < SectionPos.BLOCKS; b++) {
                 if (!whole && s.isRefined(b)) {
                     for (int leaf = first[b]; leaf < first[b + 1]; leaf++) {
@@ -148,6 +155,9 @@ final class ThermalGraph {
                     continue;
                 }
                 for (int axis = 0; axis < 3; axis++) {
+                    if (axis == 1 && tops != null && (tops[b >>> 6] & (1L << b)) != 0) {
+                        continue;
+                    }
                     boolean inside = ((b >> SHIFT[axis]) & 15) < 15;
                     SectionIndex target = inside ? self : next[axis];
                     if (target == null) {

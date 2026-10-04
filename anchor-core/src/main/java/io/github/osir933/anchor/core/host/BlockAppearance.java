@@ -26,9 +26,12 @@ import java.util.Objects;
  *     {@code null}
  * @param becomes for each phase the matter can end up in, the id of the host block to show instead; ids the
  *     engine passes back to the host without interpreting them
+ * @param albedo the fraction of sunlight the block's top reflects, for a block whose colour its material does not
+ *     say, such as dyed wool; {@link Double#NaN} to take its material's. It applies while the block holds its
+ *     material in the phase it is shown in.
  */
 public record BlockAppearance(String material, double fill, Phase phase, double temperatureK,
-        HeatSourceModel.Source source, Map<Phase, String> becomes) {
+        HeatSourceModel.Source source, Map<Phase, String> becomes, double albedo) {
 
     /**
      * Validates the appearance and takes an unmodifiable copy of {@code becomes}.
@@ -39,6 +42,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @param temperatureK the starting temperature, or NaN
      * @param source the heat source, or {@code null}
      * @param becomes the replacement blocks per phase
+     * @param albedo the albedo of the block's top, or NaN
      */
     public BlockAppearance {
         Objects.requireNonNull(material, "material");
@@ -50,6 +54,9 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
         }
         if (!Double.isNaN(temperatureK) && !(temperatureK > 0 && Double.isFinite(temperatureK))) {
             throw new IllegalArgumentException("temperature must be positive or NaN: " + temperatureK);
+        }
+        if (!Double.isNaN(albedo) && !(albedo >= 0 && albedo <= 1)) {
+            throw new IllegalArgumentException("albedo must lie between 0 and 1, or be NaN: " + albedo);
         }
         EnumMap<Phase, String> copy = new EnumMap<>(Phase.class);
         for (Map.Entry<Phase, String> e : Objects.requireNonNull(becomes, "becomes").entrySet()) {
@@ -65,6 +72,21 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
             copy.put(key, block);
         }
         becomes = Collections.unmodifiableMap(copy);
+    }
+
+    /**
+     * Creates an appearance whose colour its material says.
+     *
+     * @param material the material id
+     * @param fill the filled fraction
+     * @param phase the shown phase, or {@code null}
+     * @param temperatureK the starting temperature, or NaN
+     * @param source the heat source, or {@code null}
+     * @param becomes the replacement blocks per phase
+     */
+    public BlockAppearance(String material, double fill, Phase phase, double temperatureK,
+            HeatSourceModel.Source source, Map<Phase, String> becomes) {
+        this(material, fill, phase, temperatureK, source, becomes, Double.NaN);
     }
 
     /**
@@ -84,7 +106,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance withFill(double newFill) {
-        return new BlockAppearance(material, newFill, phase, temperatureK, source, becomes);
+        return new BlockAppearance(material, newFill, phase, temperatureK, source, becomes, albedo);
     }
 
     /**
@@ -94,7 +116,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance shownAs(Phase newPhase) {
-        return new BlockAppearance(material, fill, newPhase, temperatureK, source, becomes);
+        return new BlockAppearance(material, fill, newPhase, temperatureK, source, becomes, albedo);
     }
 
     /**
@@ -104,7 +126,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance startingAt(double newTemperatureK) {
-        return new BlockAppearance(material, fill, phase, newTemperatureK, source, becomes);
+        return new BlockAppearance(material, fill, phase, newTemperatureK, source, becomes, albedo);
     }
 
     /**
@@ -114,7 +136,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance heatedBy(HeatSourceModel.Source newSource) {
-        return new BlockAppearance(material, fill, phase, temperatureK, newSource, becomes);
+        return new BlockAppearance(material, fill, phase, temperatureK, newSource, becomes, albedo);
     }
 
     /**
@@ -128,7 +150,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
         EnumMap<Phase, String> map = new EnumMap<>(Phase.class);
         map.putAll(becomes);
         map.put(newPhase, hostBlock);
-        return new BlockAppearance(material, fill, phase, temperatureK, source, map);
+        return new BlockAppearance(material, fill, phase, temperatureK, source, map, albedo);
     }
 
     /**
@@ -137,7 +159,18 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance withoutReplacements() {
-        return new BlockAppearance(material, fill, phase, temperatureK, source, new EnumMap<>(Phase.class));
+        return new BlockAppearance(material, fill, phase, temperatureK, source, new EnumMap<>(Phase.class), albedo);
+    }
+
+    /**
+     * Returns this appearance with the albedo of its top given, as for a block dyed a colour its material does not
+     * say.
+     *
+     * @param newAlbedo the fraction of sunlight the top reflects, from 0 to 1, or NaN for the material's
+     * @return the new appearance
+     */
+    public BlockAppearance withAlbedo(double newAlbedo) {
+        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, newAlbedo);
     }
 
     /**

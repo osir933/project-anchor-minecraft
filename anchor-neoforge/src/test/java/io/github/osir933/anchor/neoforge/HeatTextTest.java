@@ -7,6 +7,7 @@ import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
+import io.github.osir933.anchor.core.physics.thermal.Sky;
 import io.github.osir933.anchor.core.space.GridPos;
 import io.github.osir933.anchor.core.space.SectionPos;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
@@ -101,5 +102,41 @@ class HeatTextTest {
         assertEquals("Heat in minecraft:the_nether: stopped after an error", stopped.get(0));
         assertEquals("  java.lang.IllegalStateException: boom", stopped.get(1));
         assertTrue(stopped.stream().noneMatch(l -> l.contains("came back")), "nothing restored, nothing said");
+    }
+
+    @Test
+    void sunlitGroundSaysHowWarmItsTopIsAndHowMuchSunlightItTakesIn() {
+        BlockAppearance[] looks = {BlockAppearance.of("anchor:air"), BlockAppearance.of("anchor:granite")};
+        PhysicalWorld world = new PhysicalWorld(WorldSettings.airAt20C(1), MaterialRegistry.withLibrary());
+        HostedWorld hosted = new HostedWorld(world, id -> looks[id], HostedWorld.Settings.defaults());
+        hosted.importSection(SectionPos.pack(0, 0, 0), i -> SectionPos.localY(i) < 8 ? 1 : 0, 290.0);
+        for (int x = 0; x < 16; x++) {
+            for (int z = 0; z < 16; z++) {
+                hosted.setSkyHeight(x, z, 8);
+            }
+        }
+        hosted.setSky(Sky.clear(90.0));
+        hosted.tick();
+        HostedWorld.Inspection ground = hosted.inspect(new GridPos(3, 7, 3)).orElseThrow();
+        List<String> lines = HeatText.describe(ground, "minecraft:stone");
+        assertTrue(lines.contains("  Its top, open to the sky, is at " + HeatText.celsius(ground.surfaceK())),
+                lines.toString());
+        assertTrue(lines.contains("  Taking in " + HeatText.power(ground.sunlightW()) + " of sunlight"),
+                lines.toString());
+        List<String> below = HeatText.describe(hosted.inspect(new GridPos(3, 6, 3)).orElseThrow(), "minecraft:stone");
+        assertTrue(below.stream().noneMatch(l -> l.contains("sky") || l.contains("sunlight")), below.toString());
+
+        assertTrue(status(hosted).contains("  Sunlight " + HeatText.power(hosted.status().sunlightW())
+                + "/m² on level ground; 256 surfaces open to the sky"), status(hosted).toString());
+        hosted.setSky(Sky.clear(-90.0));
+        hosted.tick();
+        assertTrue(status(hosted).contains("  Night; 256 surfaces open to the sky"), status(hosted).toString());
+        hosted.setSky(null);
+        hosted.tick();
+        assertTrue(status(hosted).contains("  No sun or night sky here"), status(hosted).toString());
+    }
+
+    private static List<String> status(HostedWorld hosted) {
+        return HeatText.status("minecraft:overworld", new HeatReport(hosted.status(), 14.4, 1.0, 1.0, 0L, 0L, 0, null));
     }
 }

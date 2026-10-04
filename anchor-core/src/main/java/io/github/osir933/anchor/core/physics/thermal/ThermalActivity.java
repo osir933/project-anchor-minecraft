@@ -35,6 +35,10 @@ import java.util.TreeSet;
  * cells, added up regardless of sign, divided by the whole block's capacity: the average change of its matter,
  * so heat moving inside the block counts but refining a block does not change when its section sleeps.
  *
+ * <p>Heat a model brings in from outside the world and {@linkplain #forced declares as forced}, such as the
+ * sunlight on the ground, does not count: the sun warms the ground every day, and a section that only the sky
+ * changes can sleep while it does. Only heat moving within the world keeps a section awake.
+ *
  * <p>Register the tracker with {@link PhysicalWorld#addWriteListener} so it sees what the models write, take
  * the scope for each step from {@link #scope}, and call {@link #endStep} after the models have run.
  */
@@ -59,14 +63,24 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
     private long lastKey;
     private Written last;
 
-    /** A written leaf and its enthalpy before its first write in the step. */
-    private record LeafStart(CellId leaf, double enthalpy) {
+    /** A written leaf, its enthalpy before its first write in the step, and the forced heat it took since. */
+    private static final class LeafStart {
+        final CellId leaf;
+        final double enthalpy;
+        double forced;
+
+        LeafStart(CellId leaf, double enthalpy) {
+            this.leaf = leaf;
+            this.enthalpy = enthalpy;
+        }
     }
 
     /** The writes to one section during a step. */
     private static final class Written {
         /** Each written block's enthalpy before its first write in the step. */
         final double[] start = new double[SectionPos.BLOCKS];
+        /** The heat from outside the world each written block took since its first write in the step. */
+        final double[] forced = new double[SectionPos.BLOCKS];
         /** Which blocks were written, one bit each. */
         final long[] touched = new long[SectionPos.BLOCKS / 64];
         /**
@@ -193,7 +207,7 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
             return;
         }
         if (leaf != null) {
-            long key = ((long) block << 34) | ((long) leaf.mortonCode() << 4) | leaf.level();
+            long key = leafKey(block, leaf);
             if (!w.leafStart.containsKey(key)) {
                 w.leafStart.put(key, new LeafStart(leaf, before.enthalpy()));
             }
@@ -204,7 +218,45 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
         if ((w.touched[word] & bit) == 0) {
             w.touched[word] |= bit;
             w.start[block] = before.enthalpy();
+            w.forced[block] = 0;
         }
+    }
+
+    /**
+     * Declares that some of the heat a model just wrote into a block that is not refined came from outside the
+     * world, such as sunlight, so that it does not count as change. Call it after the write.
+     *
+     * @param sectionKey the packed section position
+     * @param block the block's index in the section
+     * @param joules the heat from outside, negative for heat the block lost to the outside
+     */
+    public void forced(long sectionKey, int block, double joules) {
+        Written w = written.get(sectionKey);
+        if (w != null && (w.touched[block >>> 6] & (1L << (block & 63))) != 0) {
+            w.forced[block] += joules;
+        }
+    }
+
+    /**
+     * Declares that some of the heat a model just wrote into a leaf of a refined block came from outside the
+     * world, so that it does not count as change. Call it after the write.
+     *
+     * @param sectionKey the packed section position
+     * @param block the block's index in the section
+     * @param leaf the leaf
+     * @param joules the heat from outside, negative for heat the leaf lost to the outside
+     */
+    public void forced(long sectionKey, int block, CellId leaf, double joules) {
+        Written w = written.get(sectionKey);
+        LeafStart start = w == null ? null : w.leafStart.get(leafKey(block, leaf));
+        if (start != null) {
+            start.forced += joules;
+        }
+    }
+
+    /** Returns a key that orders leaves block by block in cell order and compares quickly. */
+    private static long leafKey(int block, CellId leaf) {
+        return ((long) block << 34) | ((long) leaf.mortonCode() << 4) | leaf.level();
     }
 
     /**
@@ -231,7 +283,7 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
                     continue;
                 }
                 double capacity = mass * materials.get(material).minSpecificHeat();
-                largest = Math.max(largest, Math.abs(section.enthalpy(b) - w.start[b]) / capacity);
+                largest = Math.max(largest, Math.abs(section.enthalpy(b) - w.start[b] - w.forced[b]) / capacity);
             }
         }
         // Leaves come block by block, in cell order.
@@ -239,19 +291,19 @@ public final class ThermalActivity implements PhysicalWorld.WriteListener {
         RefinedBlock refined = null;
         double moved = 0;
         for (LeafStart start : w.leafStart.values()) {
-            int b = start.leaf().block().indexInSection();
+            int b = start.leaf.block().indexInSection();
             if (b != block) {
                 largest = Math.max(largest, blockChange(section, block, moved));
                 block = b;
                 refined = section.refinedBlock(b);
                 moved = 0;
             }
-            double now = refined == null ? Double.NaN : refined.leafEnthalpy(start.leaf());
+            double now = refined == null ? Double.NaN : refined.leafEnthalpy(start.leaf);
             if (Double.isNaN(now)) {
                 // Merged or replaced since the write.
                 return Double.POSITIVE_INFINITY;
             }
-            moved += Math.abs(now - start.enthalpy());
+            moved += Math.abs(now - start.enthalpy - start.forced);
         }
         return Math.max(largest, blockChange(section, block, moved));
     }

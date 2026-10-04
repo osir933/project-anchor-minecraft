@@ -205,6 +205,28 @@ public final class Material {
     }
 
     /**
+     * Returns the phase region that holds most of the matter at a specific enthalpy, as
+     * {@link #dominantPhase} would find it from the full state.
+     *
+     * @param specificEnthalpy the specific enthalpy in J/kg
+     * @return the index of the region in {@link EnthalpyCurve#regions()}
+     */
+    public int dominantRegion(double specificEnthalpy) {
+        return thermal.dominantRegion(specificEnthalpy);
+    }
+
+    /**
+     * Returns how matter at a specific enthalpy meets sunlight and the open air: the surface of the phase that
+     * holds most of it, so a block of ice more than half melted reflects and passes light as water does.
+     *
+     * @param specificEnthalpy the specific enthalpy in J/kg
+     * @return the surface, or {@code null} if the matter is mostly gas and lets sunlight through
+     */
+    public Surface surface(double specificEnthalpy) {
+        return thermal.regions().get(thermal.dominantRegion(specificEnthalpy)).surfaceOrDefault();
+    }
+
+    /**
      * Returns the lowest specific heat of any phase within the described temperatures, for quick estimates
      * that should err towards larger temperature changes.
      *
@@ -361,6 +383,9 @@ public final class Material {
             }
             if (r.viscosity() != null) {
                 sources.putIfAbsent(r.viscosity().source().key(), r.viscosity().source());
+            }
+            if (r.surface() != null) {
+                sources.putIfAbsent(r.surface().source().key(), r.surface().source());
             }
         }
         for (PhaseTransition t : thermal.transitions()) {

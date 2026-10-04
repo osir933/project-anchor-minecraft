@@ -10,6 +10,9 @@ import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
 import io.github.osir933.anchor.core.physics.thermal.ConductionModel;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.physics.thermal.RadiationModel;
+import io.github.osir933.anchor.core.physics.thermal.Sky;
+import io.github.osir933.anchor.core.physics.thermal.SkyModel;
+import io.github.osir933.anchor.core.physics.thermal.SkyPhysics;
 import io.github.osir933.anchor.core.physics.thermal.ThermalActivity;
 import io.github.osir933.anchor.core.physics.thermal.ThermalRefinement;
 import io.github.osir933.anchor.core.space.CellId;
@@ -60,6 +63,10 @@ import java.util.function.IntUnaryOperator;
  * <p>Where temperatures change too steeply across a block for it to follow them as a whole, as under a face
  * that lava glows on, {@link ThermalRefinement} splits it into smaller cells, and merges them back once they
  * have evened out. The host never sees the cells: it reads, and saves, each block's totals.
+ *
+ * <p>A host whose world has a sky {@linkplain #setSky sets it} every step, and says where the open sky begins in
+ * each column ({@link #setSkyHeight}); the {@link SkyModel} then warms the ground by day and cools it by night,
+ * in sleeping sections too.
  */
 public final class HostedWorld {
 
@@ -68,6 +75,9 @@ public final class HostedWorld {
 
     /** Temperature differences below this do not wake a newly imported section, in kelvin. */
     private static final double BALANCE_TOLERANCE_K = 1e-6;
+
+    /** Points this far up a block or higher, as a fraction of its height, read the temperature of its top. */
+    private static final double SURFACE_DEPTH = 15.0 / 16.0;
 
     /** Host ids from zero up to this are looked up in an array, larger or negative ones in a map. */
     private static final int ARRAY_IDS = 1 << 20;
@@ -194,11 +204,15 @@ public final class HostedWorld {
      * @param environmentK the climate of the block's section, in kelvin
      * @param source the block's heat source, or {@code null}
      * @param appearance how the host describes the block
+     * @param surfaceK the temperature of the block's top where it lies open to the sky, which the sun and the sky
+     *     warm and cool faster than the block as a whole, in kelvin; {@link Double#NaN} for a block that is not
+     *     such a surface
+     * @param sunlightW the sunlight the block takes in now, in watts per square metre of its top
      */
     public record Inspection(GridPos pos, String material, String materialName, double massKg, double enthalpyJ,
             ThermalState state, Phase phase, Provenance provenance, boolean refined, double coolestK,
             double hottestK, boolean awake, boolean simulated, double environmentK, HeatSourceModel.Source source,
-            BlockAppearance appearance) {
+            BlockAppearance appearance, double surfaceK, double sunlightW) {
 
         /**
          * Returns the temperature.
@@ -225,10 +239,13 @@ public final class HostedWorld {
      * @param phaseChanges phase changes handed to the host so far
      * @param reconciled block changes from the host that changed something
      * @param conserved whether the last conservation audit balanced
+     * @param skySurfaces surfaces open to the sky whose exchange with it the sky balances
+     * @param sunlightW the sunlight on level ground under the open sky now, in W/m², or {@link Double#NaN} if the
+     *     world has no sky
      */
     public record Status(int sections, int awakeSections, int simulatedSections, int sources, int radiatingFaces,
             int refinedBlocks, int refinedCells, long tick, double simulatedSeconds, long phaseChanges,
-            long reconciled, boolean conserved) {
+            long reconciled, boolean conserved, int skySurfaces, double sunlightW) {
     }
 
     /** The host's ids for the blocks of one imported section. */
@@ -274,6 +291,7 @@ public final class HostedWorld {
     private final Scheduler scheduler;
     private final HeatSourceModel sources = new HeatSourceModel();
     private final AtmosphereModel atmosphere;
+    private final SkyModel sky;
     private final RadiationModel radiation;
     private final ThermalRefinement refinement;
     private final ThermalActivity activity;
@@ -299,12 +317,15 @@ public final class HostedWorld {
         this.settings = Objects.requireNonNull(settings, "settings");
         this.atmosphere = new AtmosphereModel(settings.relaxationSeconds(), settings.defaultEnvironmentK());
         this.refinement = new ThermalRefinement(settings.refinement());
-        this.radiation = new RadiationModel(atmosphere::environment, refinement);
         this.activity = new ThermalActivity(world.materials(), settings.calmRate(), settings.calmSteps());
         world.addWriteListener(activity);
+        this.sky = new SkyModel(atmosphere::environment, atmosphere::humidity, sources.sources()::containsKey,
+                activity, this::albedo);
+        this.radiation = new RadiationModel(atmosphere::environment, refinement, sky);
         this.scheduler = new Scheduler(settings.tickSeconds(), settings.budgetPerTick(), 4, settings.auditInterval());
         scheduler.register(sources);
-        scheduler.register(new ConductionModel(refinement));
+        scheduler.register(sky);
+        scheduler.register(new ConductionModel(refinement, sky));
         scheduler.register(radiation);
         scheduler.register(atmosphere);
     }
@@ -365,6 +386,30 @@ public final class HostedWorld {
      */
     public void importSection(long sectionKey, IntUnaryOperator hostIdAt, double environmentK) {
         importSection(sectionKey, hostIdAt, environmentK, null);
+    }
+
+    /**
+     * Brings a section of the host's world in, like
+     * {@link #importSection(long, IntUnaryOperator, double, SectionSnapshot)}, with the humidity of the air around
+     * it.
+     *
+     * @param sectionKey the packed section position
+     * @param hostIdAt the host's id for the block at each local index, as numbered by
+     *     {@link SectionPos#localIndex}
+     * @param environmentK the temperature of the section's surroundings, which its air returns to
+     * @param relativeHumidity the relative humidity of the air around the section, from 0 to 1, which decides how
+     *     fast water evaporates there and how much heat the sky sends back down
+     * @param saved the section's saved state, from {@link #snapshot}, or {@code null} for none
+     * @return how many blocks were restored
+     */
+    public int importSection(long sectionKey, IntUnaryOperator hostIdAt, double environmentK,
+            double relativeHumidity, SectionSnapshot saved) {
+        if (!(relativeHumidity >= 0 && relativeHumidity <= 1)) {
+            throw new IllegalArgumentException("relative humidity must lie between 0 and 1: " + relativeHumidity);
+        }
+        int restored = importSection(sectionKey, hostIdAt, environmentK, saved);
+        atmosphere.setHumidity(sectionKey, relativeHumidity);
+        return restored;
     }
 
     /**
@@ -726,7 +771,7 @@ public final class HostedWorld {
         return Optional.of(new Inspection(pos, registry.id(c.material()), name, c.mass(), c.enthalpy(), state, phase,
                 c.provenance(), block != null, range[0], range[1], activity.isAwake(key), lastScope.contains(key),
                 atmosphere.environment(key), sources.sources().get(pos), resolve(ids.get(pos.indexInSection()))
-                        .appearance()));
+                        .appearance(), sky.surfaceTemperature(pos), sky.absorbedSunlight(pos)));
     }
 
     /**
@@ -741,7 +786,9 @@ public final class HostedWorld {
 
     /**
      * Returns the temperature at a point: that of the block holding it or, if the block is refined, of its
-     * cell there, so a refined block's face shows where it is hotter or colder.
+     * cell there, so a refined block's face shows where it is hotter or colder. A point in the top sixteenth of a
+     * block open to the sky reads the temperature of its top, which the sun and the sky warm and cool faster than
+     * the block as a whole.
      *
      * @param x the point's x coordinate, in blocks
      * @param y the point's y coordinate, in blocks
@@ -750,7 +797,16 @@ public final class HostedWorld {
      */
     public double temperatureAt(double x, double y, double z) {
         GridPos pos = new GridPos((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
-        RefinedBlock block = hosted.containsKey(pos.sectionKey()) ? world.refinedBlock(pos) : null;
+        if (!hosted.containsKey(pos.sectionKey())) {
+            return Double.NaN;
+        }
+        if (y - pos.y() >= SURFACE_DEPTH) {
+            double surface = sky.surfaceTemperature(pos);
+            if (!Double.isNaN(surface)) {
+                return surface;
+            }
+        }
+        RefinedBlock block = world.refinedBlock(pos);
         if (block == null) {
             return temperature(pos);
         }
@@ -779,9 +835,52 @@ public final class HostedWorld {
                 refinedBlocks += s.refinedBlocks().size();
             }
         }
+        Sky now = sky.sky();
         return new Status(hosted.size(), activity.awakeSections().size(), lastScope.size(), sources.sources().size(),
                 radiation.lastRadiatingFaces(), refinedBlocks, world.leafCount(), world.tick(),
-                world.tick() * settings.tickSeconds(), phaseChanges, reconciled, conserved);
+                world.tick() * settings.tickSeconds(), phaseChanges, reconciled, conserved,
+                sky.lastStep().surfaces(), now == null ? Double.NaN : SkyPhysics.sunlightOnLevelGround(now));
+    }
+
+    /**
+     * Sets the sky over the world for the steps that follow; a host with a sky sets it every step, from its own
+     * clock and weather.
+     *
+     * @param newSky the sky, or {@code null} for a world without one, such as a cave world, which is the default
+     */
+    public void setSky(Sky newSky) {
+        sky.setSky(newSky);
+    }
+
+    /**
+     * Returns the sky over the world.
+     *
+     * @return the sky, or {@code null} if the world has none
+     */
+    public Sky sky() {
+        return sky.sky();
+    }
+
+    /**
+     * Says where the open sky begins in a column of the host's world: everything from that height up is open to
+     * the sky. Give the heights of a column after importing its sections; without one, the sky begins above the
+     * column's highest imported section.
+     *
+     * @param x the column's x coordinate, in blocks
+     * @param z the column's z coordinate, in blocks
+     * @param firstOpenY the lowest y at which the column is open to the sky
+     */
+    public void setSkyHeight(int x, int z, int firstOpenY) {
+        sky.setSkyHeight(x, z, firstOpenY);
+    }
+
+    /**
+     * Returns what the sky did in the last step.
+     *
+     * @return the summary
+     */
+    public SkyModel.StepSummary lastSky() {
+        return sky.lastStep();
     }
 
     /**
@@ -794,6 +893,31 @@ public final class HostedWorld {
     }
 
     // ---- internals ----
+
+    /**
+     * Returns the albedo the host gives a block's top, while the block holds the matter it is shown with, in the
+     * phase it is shown in; otherwise NaN, for the material's own.
+     */
+    private double albedo(long sectionKey, int block) {
+        Hosted ids = hosted.get(sectionKey);
+        Section s = world.section(sectionKey);
+        if (ids == null || s == null) {
+            return Double.NaN;
+        }
+        Resolved r = resolve(ids.get(block));
+        BlockAppearance a = r.appearance();
+        double mass = s.mass(block);
+        if (Double.isNaN(a.albedo()) || s.material(block) != r.material() || mass == 0) {
+            return Double.NaN;
+        }
+        if (a.phase() != null) {
+            Material m = world.materials().get(r.material());
+            if (m.dominantPhase(m.stateFor(s.enthalpy(block) / mass)) != a.phase()) {
+                return Double.NaN;
+            }
+        }
+        return a.albedo();
+    }
 
     private Resolved resolve(int id) {
         if (id >= 0 && id < ARRAY_IDS) {

@@ -20,6 +20,13 @@ Java 25, on both the client and the server.
   expansion: warmed from below or cooled from above they turn over, and beside something hotter or colder they
   flow along it. Water is densest at 4 °C, so cooled from above it keeps its coldest water on top and freezes
   from the surface down.
+- **The sun and the night sky.** The sun warms what it shines on, and the ground cools under a clear night sky
+  that is colder than the air. Dark blocks take in more sunlight than pale ones, dyed wool, concrete and
+  terracotta by their colour, and water, ice and glass let light through. Rain and storms dim the sun and keep
+  the nights mild, and so does humid air, which each biome has as its rainfall says. Water evaporates from
+  ponds, wet soil and leaves, the faster in dry air, and dew and frost settle on cold ground. In air at 5 °C a
+  layer of snow melts in about ten hours of clear sunshine. The thermometer and `/anchor heat inspect` read the
+  sunlit top of a block, and the `sunAndSky` setting turns the sun and sky off.
 - **Matter melts, freezes and boils.** Ice melts into water, water freezes or boils away and snow melts when
   its matter reaches the melting or boiling point and has taken in or given up the latent heat.
 - **Heat sources.** Torches, lanterns, candles, campfires, fire, lit furnaces, magma and lava give off heat.
@@ -42,6 +49,11 @@ Known limits of this alpha:
 - Big changes take time: Anchor's clock follows the day (a day is 24 simulated hours) and a block is a full
   cubic metre. Two layers of snow beside a fire melt in about four minutes of play, a block of ice beside lava
   in about six.
-- Burning is not simulated yet, liquids stir in place but do not spread from block to block by Anchor's
-  physics, and the sun does not warm anything. Flames and torches heat the air around them but do not radiate.
+- Burning is not simulated yet, and liquids stir in place but do not spread from block to block by Anchor's
+  physics. Flames and torches heat the air around them but do not radiate.
+- The sun shines straight down onto the tops of blocks, so their sides stay in shade, and every surface sees
+  the whole sky, even at the bottom of a pit. The air keeps its biome's temperature by day and by night, clear
+  weather is a cloudless sky, stained glass lets light through as clear glass does, and water that evaporates
+  stays in its block. In land where nothing else is happening, light that sinks into water or through glass
+  warms the top block instead.
 - Land nobody is near is paused, not cooled: it carries on from where it was when a player returns.

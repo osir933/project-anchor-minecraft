@@ -2,9 +2,11 @@ package io.github.osir933.anchor.neoforge;
 
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.SectionSnapshot;
+import io.github.osir933.anchor.core.physics.thermal.Sky;
 import io.github.osir933.anchor.core.world.Provenance;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.TreeMap;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -23,8 +25,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.event.RegisterGameTestsEvent;
@@ -33,12 +37,24 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 /**
  * Checks that run on a real server with the mod loaded: {@code ./gradlew :anchor-neoforge:runGameTestServer},
  * which CI runs too. Each test builds a small scene on a stone floor, keeps it simulated, and waits for the
- * simulation to do what physics says it should.
+ * simulation to do what physics says it should. The game puts a roof of barriers over each test, which keeps the
+ * sun off; tests of the sun run in an environment of their own without one, so the game runs them apart from the
+ * rest, and hold the sky still.
  */
 final class AnchorGameTests {
 
-    /** A test: its name, how many game ticks it may take, and what it does. */
-    private record Case(String name, int maxTicks, Consumer<GameTestHelper> body) {
+    /** The environment most tests run in. */
+    private static final String HEAT = "heat";
+
+    /** The environment of tests open to the sky, which hold the sky still. */
+    private static final String SUNLIT = "sunlit";
+
+    /** A test: its name, how many game ticks it may take, what it does and the environment it runs in. */
+    private record Case(String name, int maxTicks, Consumer<GameTestHelper> body, String environment) {
+
+        Case(String name, int maxTicks, Consumer<GameTestHelper> body) {
+            this(name, maxTicks, body, HEAT);
+        }
     }
 
     private static final DeferredRegister<Consumer<GameTestHelper>> FUNCTIONS =
@@ -58,7 +74,8 @@ final class AnchorGameTests {
             new Case("thermal_camera_sees_warm_air", 600, AnchorGameTests::thermalCameraSeesWarmAir),
             new Case("thermal_camera_explains_itself", 20, AnchorGameTests::thermalCameraExplainsItself),
             new Case("hot_iron_warms_stone_across_air", 600, AnchorGameTests::hotIronWarmsStoneAcrossAir),
-            new Case("stone_beside_lava_is_refined", 200, AnchorGameTests::stoneBesideLavaIsRefined));
+            new Case("stone_beside_lava_is_refined", 200, AnchorGameTests::stoneBesideLavaIsRefined),
+            new Case("black_wool_warms_more_in_the_sun", 400, AnchorGameTests::blackWoolWarmsMoreInTheSun, SUNLIT));
 
     private AnchorGameTests() {
     }
@@ -78,12 +95,17 @@ final class AnchorGameTests {
     }
 
     private static void registerTests(RegisterGameTestsEvent event) {
-        Holder<TestEnvironmentDefinition<?>> environment = event.registerEnvironment(AnchorMod.id("heat"));
+        TreeMap<String, Holder<TestEnvironmentDefinition<?>>> environments = new TreeMap<>();
         for (Case c : CASES) {
+            Holder<TestEnvironmentDefinition<?>> environment = environments.computeIfAbsent(c.environment(),
+                    name -> event.registerEnvironment(AnchorMod.id(name)));
             ResourceKey<Consumer<GameTestHelper>> function = ResourceKey.create(Registries.TEST_FUNCTION,
                     AnchorMod.id(c.name()));
-            event.registerTest(AnchorMod.id(c.name()), new FunctionGameTestInstance(function,
-                    new TestData<>(environment, AnchorMod.id("empty"), c.maxTicks(), 0, true)));
+            TestData<Holder<TestEnvironmentDefinition<?>>> data = c.environment().equals(SUNLIT)
+                    ? new TestData<>(environment, Level.OVERWORLD, AnchorMod.id("empty"), c.maxTicks(), 0, true,
+                            Rotation.NONE, false, 1, 1, true, 0)
+                    : new TestData<>(environment, AnchorMod.id("empty"), c.maxTicks(), 0, true);
+            event.registerTest(AnchorMod.id(c.name()), new FunctionGameTestInstance(function, data));
         }
     }
 
@@ -387,6 +409,53 @@ final class AnchorGameTests {
             helper.assertTrue(reading.getString().contains(HeatText.celsius(faceK)),
                     "the thermometer touching the face says: " + reading.getString());
             heat.release(lava);
+        });
+    }
+
+    /**
+     * In the noon sun, black wool takes in several times the sunlight of white wool beside it, its top grows far
+     * hotter, and a thermometer touching its top reads that. The test holds the sky at a cloudless noon, whatever
+     * the time and weather in the test world.
+     */
+    private static void blackWoolWarmsMoreInTheSun(GameTestHelper helper) {
+        BlockPos blackAt = new BlockPos(1, 1, 2);
+        BlockPos whiteAt = new BlockPos(3, 1, 2);
+        helper.setBlock(blackAt, Blocks.WOOL.black());
+        helper.setBlock(whiteAt, Blocks.WOOL.white());
+        BlockPos black = helper.absolutePos(blackAt);
+        BlockPos white = helper.absolutePos(whiteAt);
+        boolean[] started = {false};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (!started[0]) {
+                heat.keepSimulated(black);
+                heat.keepSimulated(white);
+                heat.holdSky(Sky.clear(90.0));
+                started[0] = true;
+            }
+            HostedWorld.Inspection dark = heat.inspect(black).orElseThrow(
+                    () -> helper.assertionException(Component.literal("waiting for the black wool to be simulated")));
+            HostedWorld.Inspection pale = heat.inspect(white).orElseThrow(
+                    () -> helper.assertionException(Component.literal("waiting for the white wool to be simulated")));
+            if (!(dark.sunlightW() > 0 && pale.sunlightW() > 0)) {
+                throw helper.assertionException(Component.literal("waiting for the sun to reach the wool; "
+                        + heat.report().world().skySurfaces() + " surfaces are open to the sky"));
+            }
+            helper.assertTrue(dark.sunlightW() > 3 * pale.sunlightW(), "black wool takes in "
+                    + HeatText.power(dark.sunlightW()) + " of sunlight and white wool "
+                    + HeatText.power(pale.sunlightW()));
+            if (!(dark.surfaceK() > pale.surfaceK() + 10.0)) {
+                throw helper.assertionException(Component.literal("the top of the black wool is at "
+                        + HeatText.temperature(dark.surfaceK()) + " and of the white wool at "
+                        + HeatText.temperature(pale.surfaceK())));
+            }
+            Vec3 top = new Vec3(black.getX() + 0.5, black.getY() + 1.0, black.getZ() + 0.5);
+            Component reading = ThermometerItem.reading(helper.getLevel(), black, top);
+            helper.assertTrue(reading.getString().contains(HeatText.celsius(dark.surfaceK())),
+                    "a thermometer on the black wool's top says: " + reading.getString());
+            heat.holdSky(null);
+            heat.release(black);
+            heat.release(white);
         });
     }
 

@@ -27,8 +27,16 @@ rises through the air and drains away into the weather, and blocks change when t
 - Hot surfaces radiate by the Stefan–Boltzmann law, and cold ones take in the radiation of what they face.
   Glass and water stop it, as they do for heat radiation in reality, so a thermal camera cannot see through
   them either.
-- The weather sets the temperature heat escapes to: the biome's temperature, cooler higher up. Snowy biomes
-  sit below freezing and deserts around 40 °C.
+- The sun warms what it shines on, and the ground cools under the night sky. Sunlight falls straight down, as
+  Minecraft's daylight does, onto the first block in its way. Dark blocks take in more of it than pale ones,
+  dyed wool, concrete and terracotta by their colour, and water, ice and glass let much of it through. At night
+  the ground radiates its heat to a sky colder than the air, the more so in dry air, so clear nights bring
+  frost. Rain and storms dim the sun and keep the nights mild. Water evaporates from ponds, wet soil and leaves
+  and cools them, the faster in dry air, and dew and frost settle on cold ground. In air at 5 °C a layer of
+  snow melts in about ten hours of clear sunshine; at 0 °C it lasts.
+- The weather sets the temperature heat escapes to: the biome's temperature, cooler higher up, with air as
+  moist as the biome is rainy. Snowy biomes sit below freezing, deserts around 40 °C with dry air, and jungles
+  are humid.
 
 Heat is simulated in the land around each player: the player's 16-block section and two more in every
 direction. Anchor's clock follows the day: a 20-minute Minecraft day is 24 simulated hours, so each game tick
@@ -47,24 +55,26 @@ Temperatures are saved with the world. Anchor stores, with each chunk, the block
 as the simulation has them; blocks heat never touched need nothing, because they come back from the block
 itself. A block that changed while its land was not simulated starts again from the new block.
 
-Two things to know in this alpha. Vanilla's own rules still run alongside Anchor's: ice still melts near
-bright light and water still freezes in cold biomes, and Anchor follows the blocks they change. And time
-stands still in land nobody is near: a warm room you walk away from is just as warm when you come back.
+Three things to know in this alpha. Vanilla's own rules still run alongside Anchor's: ice still melts near
+bright light and water still freezes in cold biomes, and Anchor follows the blocks they change. Time stands
+still in land nobody is near: a warm room you walk away from is just as warm when you come back. And the sky
+reaches only the tops of blocks, while the air keeps its biome's temperature by day and by night.
 
 ### Commands
 
 | Command | What it does |
 | --- | --- |
-| `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy, where the value came from and, for a refined block, how warm its coolest and hottest cells are. Operators can name any block with `/anchor heat inspect <pos>`. |
-| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks are refined into how many cells, how many blocks came back as they were saved, and whether energy and mass balanced at the last audit. |
+| `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy, where the value came from, for a block open to the sky how warm its top is and how much sunlight it takes in, and, for a refined block, how warm its coolest and hottest cells are. Operators can name any block with `/anchor heat inspect <pos>`. |
+| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks are refined into how many cells, the sunlight on level ground and how many surfaces are open to the sky, how many blocks came back as they were saved, and whether energy and mass balanced at the last audit. |
 | `/anchor heat set <pos> <celsius>` | For operators: sets a block's temperature, keeping its matter, to start an experiment. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
 ### Thermometer
 
 Craft a thermometer from a glass pane, redstone and a copper ingot stacked in a column, glass on top. Use it
-on a block to read the block's temperature where you touch it, which on a refined block is the cell there, or
-in the air to read the air around your head.
+on a block to read the block's temperature where you touch it, or in the air to read the air around your head.
+On a refined block it reads the cell you touch, and on the top of a block open to the sky it reads the top
+itself, which the sun warms and a clear night chills far faster than the block as a whole.
 
 ### Thermal camera
 
@@ -83,7 +93,8 @@ cannot see through glass or water. Only you see your camera's images.
 Anchor's settings are kept with each world, under `[heat]` in its config file, and each is described there:
 `enabled`, `secondsPerGameTick` (3.6), `gameTicksPerStep` (4), `radius` and `verticalRadius` (2 sections),
 `sectionsLoadedPerStep` (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns
-refinement off), `maxRefinedCells` (16384 in each dimension) and `showPhaseChanges` (true).
+refinement off), `maxRefinedCells` (16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky`
+(true).
 
 ### Describing blocks in a data pack
 

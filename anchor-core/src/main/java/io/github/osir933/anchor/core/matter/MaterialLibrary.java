@@ -78,6 +78,39 @@ public final class MaterialLibrary {
                     + "the material's notes, are assumed",
             DataQuality.ESTIMATED);
 
+    /** Typical albedos of dry natural and building surfaces. */
+    public static final Source ALBEDO = new Source("albedo-typical",
+            "Typical albedos: T. R. Oke, Boundary Layer Climates, 2nd ed., Routledge (1987), Table 1.1, and the "
+                    + "solar absorptivities in Incropera (7th ed.) Table A.12; real surfaces vary with roughness, "
+                    + "moisture, colour and the height of the sun",
+            DataQuality.ESTIMATED);
+    /** How water reflects sunlight and takes it in with depth. */
+    public static final Source SUNLIGHT_IN_WATER = new Source("paulson-simpson-1977",
+            "C. A. Paulson and J. J. Simpson, J. Phys. Oceanogr. 7 (1977) 952-956: in clear water (Jerlov type I) "
+                    + "58 % of sunlight is absorbed with an e-folding depth of 0.35 m and 42 % with 23 m. Water "
+                    + "reflects about 6 % of a high sun's light (Oke 1987) and holds back none of its evaporation",
+            DataQuality.HANDBOOK_TYPICAL);
+    /** How ice and snow reflect sunlight and let it in. */
+    public static final Source SUNLIGHT_IN_ICE = new Source("light-in-ice",
+            "Estimates after T. C. Grenfell and G. A. Maykut, J. Glaciol. 18 (1977) 445-463: clear ice dims "
+                    + "blue-green light by about 1/m and red light as water does, while snow takes in sunlight within "
+                    + "its top few centimetres. Fresh snow reflects 75 to 95 % and old snow 40 to 70 % of sunlight "
+                    + "(Oke 1987); ice and snow give off vapour freely",
+            DataQuality.ESTIMATED);
+    /** Window glass. */
+    public static final Source WINDOW_GLASS = new Source("ashrae-fenestration",
+            "ASHRAE Handbook - Fundamentals (2017), ch. 15, Table 4, 6 mm clear glass: solar transmittance 0.77, "
+                    + "visible transmittance 0.88, solar reflectance 0.07. Minecraft shows glass blocks as windows, so "
+                    + "a block of glass passes sunlight as such a pane does",
+            DataQuality.HANDBOOK_TYPICAL);
+    /** Surfaces that give off water. */
+    public static final Source WET_SURFACES = new Source("wet-surfaces",
+            "Albedos after Oke (1987) Table 1.1; surface resistances to evaporation of about 100 s/m for moist bare "
+                    + "soil, from typical published values, and 40 s/m for a closed canopy of leaves in daylight: a "
+                    + "sunlit leaf's 100 s/m spread over the half of a leaf area index of 5 that is active, as R. G. "
+                    + "Allen et al. (FAO Irrigation and Drainage Paper 56, 1998) derive 70 s/m for grass",
+            DataQuality.ESTIMATED);
+
     /** The specific heat of ice Ih, shared by every solid form of water. */
     private static final PropertyCurve ICE_SPECIFIC_HEAT =
             table(INCROPERA, 200.0, 1600.0, 253.15, 1945.0, 273.15, 2040.0);
@@ -96,7 +129,7 @@ public final class MaterialLibrary {
             constant(0.96, EMISSIVITY),
             table(INCROPERA, 273.15, 1.750e-3, 280.0, 1.422e-3, 290.0, 1.080e-3, 300.0, 0.855e-3, 310.0, 0.695e-3,
                     320.0, 0.577e-3, 330.0, 0.489e-3, 340.0, 0.420e-3, 350.0, 0.365e-3, 360.0, 0.324e-3,
-                    373.15, 0.279e-3));
+                    373.15, 0.279e-3)).withSurface(new Surface(0.06, 0.957, 0.057, 0.0, SUNLIGHT_IN_WATER));
     /** Boiling of water at one atmosphere. */
     private static final PhaseTransition WATER_BOILING = new PhaseTransition("boiling", 373.124, 2257e3, IAPWS);
     /** Steam at one atmosphere. */
@@ -119,7 +152,7 @@ public final class MaterialLibrary {
             constant(2200.0, CRC),
             constant(0.90, EMISSIVITY),
             table(MELT_VISCOSITY, 1996.0, 4.96e5, 2100.0, 1.24e5, 2200.0, 3.69e4, 2300.0, 1.22e4, 2400.0, 4.43e3,
-                    2500.0, 1.74e3));
+                    2500.0, 1.74e3)).withSurface(Surface.opaque(0.10, ALBEDO));
     /** Melting of basaltic rock, one transition standing in for a range. */
     private static final PhaseTransition BASALT_MELTING =
             new PhaseTransition("melting", 1423.0, 400e3, ROCK_ESTIMATE);
@@ -132,7 +165,8 @@ public final class MaterialLibrary {
             table(ROCK_ESTIMATE, 1423.0, 2700.0, 2500.0, 2554.6),
             constant(0.95, EMISSIVITY),
             table(MELT_VISCOSITY, 1423.0, 147.5, 1450.0, 93.7, 1475.0, 63.0, 1500.0, 43.2, 1550.0, 21.5,
-                    1600.0, 11.4, 1700.0, 3.79, 1800.0, 1.49, 2000.0, 0.34, 2250.0, 0.087, 2500.0, 0.031));
+                    1600.0, 11.4, 1700.0, 3.79, 1800.0, 1.49, 2000.0, 0.34, 2250.0, 0.087, 2500.0, 0.031))
+                    .withSurface(Surface.opaque(0.10, ALBEDO));
 
     /** Water substance: ice Ih, liquid water and steam. */
     public static final Material WATER = Material.builder("anchor:water", "Water")
@@ -141,7 +175,7 @@ public final class MaterialLibrary {
                     ICE_SPECIFIC_HEAT,
                     table(INCROPERA, 253.15, 2.03, 273.15, 1.88),
                     constant(920.0, INCROPERA),
-                    constant(0.97, EMISSIVITY)))
+                    constant(0.97, EMISSIVITY)).withSurface(new Surface(0.30, 0.37, 0.057, 0.0, SUNLIGHT_IN_ICE)))
             .transition(ICE_MELTING)
             .region(LIQUID_WATER)
             .transition(WATER_BOILING)
@@ -159,19 +193,19 @@ public final class MaterialLibrary {
                     table(INCROPERA, 200.0, 94.0, 300.0, 80.2, 400.0, 69.5, 600.0, 54.7, 800.0, 43.3, 1000.0, 32.8,
                             1185.15, 28.0),
                     constant(7870.0, INCROPERA),
-                    constant(0.70, EMISSIVITY)))
+                    constant(0.70, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(new PhaseTransition("alpha to gamma", 1185.15, 16.1e3, JANAF))
             .region(new PhaseRegion(Phase.SOLID, "gamma iron (fcc)", 1185.15, 1667.15,
                     table(INCROPERA, 1185.15, 606.0, 1200.0, 609.0, 1500.0, 654.0, 1667.15, 680.0),
                     table(INCROPERA, 1185.15, 28.2, 1200.0, 28.3, 1500.0, 32.1, 1667.15, 33.4),
                     constant(7870.0, INCROPERA),
-                    constant(0.70, EMISSIVITY)))
+                    constant(0.70, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(new PhaseTransition("gamma to delta", 1667.15, 15.0e3, JANAF))
             .region(new PhaseRegion(Phase.SOLID, "delta iron (bcc)", 1667.15, 1811.0,
                     table(JANAF, 1667.15, 730.0, 1811.0, 760.0),
                     constant(34.0, INCROPERA),
                     constant(7870.0, INCROPERA),
-                    constant(0.70, EMISSIVITY)))
+                    constant(0.70, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(new PhaseTransition("melting", 1811.0, 247.3e3, CRC))
             .region(new PhaseRegion(Phase.LIQUID, "liquid iron", 1811.0, 3134.0,
                     constant(824.0, JANAF),
@@ -179,7 +213,8 @@ public final class MaterialLibrary {
                     table(LIQUID_METALS, 1811.0, 7034.96, 3134.0, 5809.86),
                     constant(0.40, EMISSIVITY),
                     table(LIQUID_METALS, 1811.0, 5.851e-3, 1900.0, 4.983e-3, 2000.0, 4.232e-3, 2200.0, 3.192e-3,
-                            2500.0, 2.276e-3, 2800.0, 1.744e-3, 3134.0, 1.377e-3)))
+                            2500.0, 2.276e-3, 2800.0, 1.744e-3, 3134.0, 1.377e-3))
+                            .withSurface(Surface.opaque(0.35, ALBEDO)))
             .notes("The Curie point near 1043 K appears as a peak in specific heat, approximated by a few "
                     + "points. Emissivity assumes an oxidised surface. Boiling at 3134 K is outside the range.")
             .build();
@@ -193,7 +228,7 @@ public final class MaterialLibrary {
                     table(INCROPERA, 100.0, 482.0, 200.0, 413.0, 300.0, 401.0, 400.0, 393.0, 600.0, 379.0,
                             800.0, 366.0, 1000.0, 352.0, 1200.0, 339.0),
                     constant(8933.0, INCROPERA),
-                    constant(0.60, EMISSIVITY)))
+                    constant(0.60, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(new PhaseTransition("melting", 1357.77, 208.7e3, CRC))
             .region(new PhaseRegion(Phase.LIQUID, "liquid copper", 1357.77, 2835.0,
                     constant(495.0, JANAF),
@@ -201,7 +236,8 @@ public final class MaterialLibrary {
                     table(LIQUID_METALS, 1357.77, 8020.0, 2835.0, 6838.2),
                     constant(0.15, EMISSIVITY),
                     table(LIQUID_METALS, 1357.77, 4.020e-3, 1400.0, 3.744e-3, 1500.0, 3.213e-3, 1600.0, 2.811e-3,
-                            1800.0, 2.250e-3, 2100.0, 1.744e-3, 2500.0, 1.366e-3, 2835.0, 1.174e-3)))
+                            1800.0, 2.250e-3, 2100.0, 1.744e-3, 2500.0, 1.366e-3, 2835.0, 1.174e-3))
+                            .withSurface(Surface.opaque(0.35, ALBEDO)))
             .notes("Emissivity assumes an oxidised surface; polished copper is near 0.03.")
             .build();
 
@@ -214,7 +250,7 @@ public final class MaterialLibrary {
                     table(INCROPERA, 100.0, 302.0, 200.0, 237.0, 300.0, 237.0, 400.0, 240.0, 600.0, 231.0,
                             800.0, 218.0),
                     constant(2702.0, INCROPERA),
-                    constant(0.10, EMISSIVITY)))
+                    constant(0.10, EMISSIVITY)).withSurface(Surface.opaque(0.80, ALBEDO)))
             .transition(new PhaseTransition("melting", 933.47, 396.9e3, CRC))
             .region(new PhaseRegion(Phase.LIQUID, "liquid aluminium", 933.47, 2792.0,
                     constant(1177.0, JANAF),
@@ -223,7 +259,7 @@ public final class MaterialLibrary {
                     constant(0.10, EMISSIVITY),
                     table(LIQUID_METALS, 933.47, 1.344e-3, 1000.0, 1.178e-3, 1100.0, 0.9955e-3, 1200.0, 0.8653e-3,
                             1400.0, 0.6943e-3, 1700.0, 0.5498e-3, 2000.0, 0.4670e-3, 2400.0, 0.4003e-3,
-                            2792.0, 0.3592e-3)))
+                            2792.0, 0.3592e-3)).withSurface(Surface.opaque(0.80, ALBEDO)))
             .build();
 
     /** Pure gold. */
@@ -235,7 +271,7 @@ public final class MaterialLibrary {
                     table(INCROPERA, 100.0, 327.0, 200.0, 323.0, 300.0, 317.0, 400.0, 311.0, 600.0, 298.0,
                             800.0, 284.0, 1000.0, 270.0, 1200.0, 255.0),
                     constant(19300.0, INCROPERA),
-                    constant(0.03, EMISSIVITY)))
+                    constant(0.03, EMISSIVITY)).withSurface(Surface.opaque(0.75, ALBEDO)))
             .transition(new PhaseTransition("melting", 1337.33, 63.7e3, CRC))
             .region(new PhaseRegion(Phase.LIQUID, "liquid gold", 1337.33, 3129.0,
                     constant(149.0, JANAF),
@@ -243,7 +279,8 @@ public final class MaterialLibrary {
                     table(LIQUID_METALS, 1337.33, 17310.0, 3129.0, 14801.7),
                     constant(0.05, EMISSIVITY),
                     table(LIQUID_METALS, 1337.33, 4.730e-3, 1400.0, 4.437e-3, 1500.0, 4.051e-3, 1700.0, 3.486e-3,
-                            2000.0, 2.945e-3, 2500.0, 2.432e-3, 3129.0, 2.086e-3)))
+                            2000.0, 2.945e-3, 2500.0, 2.432e-3, 3129.0, 2.086e-3))
+                            .withSurface(Surface.opaque(0.75, ALBEDO)))
             .build();
 
     /** Granite, the default rock behind vanilla stone. */
@@ -258,7 +295,7 @@ public final class MaterialLibrary {
                     constant(775.0, INCROPERA),
                     constant(2.79, INCROPERA),
                     constant(2630.0, INCROPERA),
-                    constant(0.85, EMISSIVITY)))
+                    constant(0.85, EMISSIVITY)).withSurface(Surface.opaque(0.30, ALBEDO)))
             .transition(new PhaseTransition("melting", 1510.0, 300e3, ROCK_ESTIMATE))
             .region(new PhaseRegion(Phase.LIQUID, "granitic melt", 1510.0, 2500.0,
                     constant(1400.0, ROCK_ESTIMATE),
@@ -266,7 +303,7 @@ public final class MaterialLibrary {
                     table(ROCK_ESTIMATE, 1510.0, 2350.0, 2500.0, 2280.2),
                     constant(0.85, EMISSIVITY),
                     table(MELT_VISCOSITY, 1510.0, 2.39e5, 1600.0, 5.23e4, 1700.0, 1.18e4, 1800.0, 3.2e3, 2000.0, 355.0,
-                            2250.0, 40.7, 2500.0, 7.34)))
+                            2250.0, 40.7, 2500.0, 7.34)).withSurface(Surface.opaque(0.10, ALBEDO)))
             .notes("Composition is a typical granite (" + COMPOSITION_ESTIMATE.key() + "). Specific heat and "
                     + "conductivity are 300 K values held constant; both change with temperature in reality.")
             .build();
@@ -284,7 +321,7 @@ public final class MaterialLibrary {
                     constant(840.0, ROCK_ESTIMATE),
                     constant(1.7, ROCK_ESTIMATE),
                     constant(2900.0, ROCK_ESTIMATE),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.10, ALBEDO)))
             .transition(BASALT_MELTING)
             .region(BASALTIC_MELT)
             .notes("Basalt melts between about 1373 K and 1473 K; one transition at 1423 K stands in for "
@@ -298,7 +335,7 @@ public final class MaterialLibrary {
                     constant(800.0, INCROPERA),
                     constant(0.27, INCROPERA),
                     constant(1515.0, INCROPERA),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(SILICA_MELTING)
             .region(SILICA_MELT)
             .notes("Bulk density includes about 40 percent air-filled pores; melting closes them, which changes "
@@ -317,7 +354,7 @@ public final class MaterialLibrary {
                     constant(750.0, INCROPERA),
                     constant(1.4, INCROPERA),
                     constant(2500.0, INCROPERA),
-                    constant(0.92, EMISSIVITY)))
+                    constant(0.92, EMISSIVITY)).withSurface(new Surface(0.07, 0.95, 0.74, Surface.DRY, WINDOW_GLASS)))
             .notes("Glass softens gradually above about 840 K instead of melting at one temperature; states "
                     + "above 1000 K are outside the description until a viscous model exists.")
             .build();
@@ -333,7 +370,7 @@ public final class MaterialLibrary {
                     constant(1255.0, INCROPERA),
                     constant(0.16, INCROPERA),
                     constant(720.0, INCROPERA),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .notes("Wood starts to decompose (pyrolysis) above about 473 K; burning and charring need the "
                     + "chemistry model, so hotter states are outside this description.")
             .build();
@@ -369,7 +406,7 @@ public final class MaterialLibrary {
                     constant(1380.0, INCROPERA),
                     constant(0.12, INCROPERA),
                     constant(510.0, INCROPERA),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.40, ALBEDO)))
             .notes("Like hardwood, softwood starts to decompose above about 473 K; burning needs the chemistry "
                     + "model.")
             .build();
@@ -387,7 +424,7 @@ public final class MaterialLibrary {
                     constant(1840.0, INCROPERA),
                     constant(0.52, INCROPERA),
                     constant(2050.0, INCROPERA),
-                    constant(0.94, EMISSIVITY)))
+                    constant(0.94, EMISSIVITY)).withSurface(Surface.opaque(0.15, WET_SURFACES).evaporating(100.0)))
             .notes("Composition is a typical moist mineral soil (" + COMPOSITION_ESTIMATE.key() + "). Freezing and "
                     + "boiling of the pore water are not modelled yet, so the soil keeps its moist properties at "
                     + "every temperature.")
@@ -404,7 +441,7 @@ public final class MaterialLibrary {
                     constant(880.0, INCROPERA),
                     constant(1.3, INCROPERA),
                     constant(1460.0, INCROPERA),
-                    constant(0.91, EMISSIVITY)))
+                    constant(0.91, EMISSIVITY)).withSurface(Surface.opaque(0.20, WET_SURFACES).evaporating(150.0)))
             .notes("Firing clay into brick, which starts with dehydration near 800 K, needs the chemistry model.")
             .build();
 
@@ -415,7 +452,7 @@ public final class MaterialLibrary {
                     ICE_SPECIFIC_HEAT,
                     constant(0.190, INCROPERA),
                     constant(500.0, INCROPERA),
-                    constant(0.97, EMISSIVITY)))
+                    constant(0.97, EMISSIVITY)).withSurface(new Surface(0.60, 0.0, 0.0, 0.0, SUNLIGHT_IN_ICE)))
             .transition(ICE_MELTING)
             .region(LIQUID_WATER)
             .transition(WATER_BOILING)
@@ -431,7 +468,7 @@ public final class MaterialLibrary {
                     ICE_SPECIFIC_HEAT,
                     constant(0.049, INCROPERA),
                     constant(110.0, INCROPERA),
-                    constant(0.97, EMISSIVITY)))
+                    constant(0.97, EMISSIVITY)).withSurface(new Surface(0.85, 0.0, 0.0, 0.0, SUNLIGHT_IN_ICE)))
             .transition(ICE_MELTING)
             .region(LIQUID_WATER)
             .transition(WATER_BOILING)
@@ -451,7 +488,7 @@ public final class MaterialLibrary {
                     constant(1260.0, INCROPERA),
                     constant(0.26, INCROPERA),
                     constant(1350.0, INCROPERA),
-                    constant(0.80, EMISSIVITY)))
+                    constant(0.80, EMISSIVITY)).withSurface(Surface.opaque(0.06, ALBEDO)))
             .notes("Composition counts ash as silica (" + COMPOSITION_ESTIMATE.key() + "). Coal ignites near 700 K; "
                     + "burning needs the chemistry model.")
             .build();
@@ -466,7 +503,7 @@ public final class MaterialLibrary {
                     constant(810.0, INCROPERA),
                     constant(2.15, INCROPERA),
                     constant(2320.0, INCROPERA),
-                    constant(0.92, EMISSIVITY)))
+                    constant(0.92, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .notes("Values for Salem limestone. Above about 1100 K limestone gives off carbon dioxide and turns "
                     + "to quicklime, which needs the chemistry model.")
             .build();
@@ -478,7 +515,7 @@ public final class MaterialLibrary {
                     constant(830.0, INCROPERA),
                     constant(2.80, INCROPERA),
                     constant(2680.0, INCROPERA),
-                    constant(0.93, EMISSIVITY)))
+                    constant(0.93, EMISSIVITY)).withSurface(Surface.opaque(0.55, ALBEDO)))
             .notes("Values for Halston marble. Like limestone it calcines above about 1100 K.")
             .build();
 
@@ -489,7 +526,7 @@ public final class MaterialLibrary {
                     constant(1105.0, INCROPERA),
                     constant(5.38, INCROPERA),
                     constant(2640.0, INCROPERA),
-                    constant(0.85, EMISSIVITY)))
+                    constant(0.85, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(SILICA_MELTING)
             .region(SILICA_MELT)
             .notes("Values for Sioux quartzite. The alpha to beta quartz change near 846 K is ignored.")
@@ -506,7 +543,7 @@ public final class MaterialLibrary {
                     constant(745.0, INCROPERA),
                     constant(2.90, INCROPERA),
                     constant(2150.0, INCROPERA),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.30, ALBEDO)))
             .notes("Values for Berea sandstone; composition is typical (" + COMPOSITION_ESTIMATE.key() + ").")
             .build();
 
@@ -522,7 +559,7 @@ public final class MaterialLibrary {
                     constant(835.0, INCROPERA),
                     constant(0.72, INCROPERA),
                     constant(1920.0, INCROPERA),
-                    constant(0.93, EMISSIVITY)))
+                    constant(0.93, EMISSIVITY)).withSurface(Surface.opaque(0.37, ALBEDO)))
             .notes("Composition is typical (" + COMPOSITION_ESTIMATE.key() + "); firing has already driven the "
                     + "water out of the clay minerals, which are kept here as kaolinite for their elements.")
             .build();
@@ -540,7 +577,7 @@ public final class MaterialLibrary {
                     constant(880.0, INCROPERA),
                     constant(1.4, INCROPERA),
                     constant(2300.0, INCROPERA),
-                    constant(0.94, EMISSIVITY)))
+                    constant(0.94, EMISSIVITY)).withSurface(Surface.opaque(0.40, ALBEDO)))
             .notes("Composition is typical (" + COMPOSITION_ESTIMATE.key() + "). Above about 600 K concrete loses "
                     + "its bound water and much of its strength; not modelled yet.")
             .build();
@@ -557,7 +594,7 @@ public final class MaterialLibrary {
                     constant(800.0, PROPERTY_ESTIMATE),
                     constant(1.3, PROPERTY_ESTIMATE),
                     constant(2450.0, PROPERTY_ESTIMATE),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.05, ALBEDO)))
             .notes("Like other glasses, obsidian softens gradually above about 1000 K instead of melting at one "
                     + "temperature; hotter states are outside this description.")
             .build();
@@ -574,7 +611,7 @@ public final class MaterialLibrary {
                     constant(760.0, PROPERTY_ESTIMATE),
                     constant(2.0, PROPERTY_ESTIMATE),
                     constant(2750.0, PROPERTY_ESTIMATE),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.12, ALBEDO)))
             .notes("Slate conducts heat better along its layers than across them; one average value is used.")
             .build();
 
@@ -590,7 +627,7 @@ public final class MaterialLibrary {
                     constant(900.0, PROPERTY_ESTIMATE),
                     constant(0.8, PROPERTY_ESTIMATE),
                     constant(1800.0, PROPERTY_ESTIMATE),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.20, ALBEDO)))
             .notes("Tuff is porous and its properties vary widely; these are mid-range values.")
             .build();
 
@@ -607,7 +644,7 @@ public final class MaterialLibrary {
                     constant(850.0, GAME_MATERIAL),
                     constant(0.6, GAME_MATERIAL),
                     constant(1500.0, GAME_MATERIAL),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.20, ALBEDO)))
             .transition(BASALT_MELTING)
             .region(BASALTIC_MELT)
             .notes("Netherrack has no real counterpart; Anchor treats it as basaltic scoria, a frothy volcanic "
@@ -626,7 +663,7 @@ public final class MaterialLibrary {
                     constant(800.0, PROPERTY_ESTIMATE),
                     constant(0.7, PROPERTY_ESTIMATE),
                     constant(1800.0, PROPERTY_ESTIMATE),
-                    constant(0.90, EMISSIVITY)))
+                    constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.25, ALBEDO)))
             .notes("Bulk values include the air between the stones, which are taken to be granite.")
             .build();
 
@@ -637,7 +674,7 @@ public final class MaterialLibrary {
                     constant(1360.0, PROPERTY_ESTIMATE),
                     constant(0.05, PROPERTY_ESTIMATE),
                     constant(200.0, PROPERTY_ESTIMATE),
-                    constant(0.95, EMISSIVITY)))
+                    constant(0.95, EMISSIVITY)).withSurface(Surface.opaque(0.60, ALBEDO)))
             .notes("Wool chars above about 473 K and burns; that needs the chemistry model.")
             .build();
 
@@ -648,9 +685,11 @@ public final class MaterialLibrary {
                     constant(509.0, INCROPERA),
                     constant(2300.0, INCROPERA),
                     constant(3500.0, INCROPERA),
-                    constant(0.10, EMISSIVITY)))
+                    constant(0.10, EMISSIVITY)).withSurface(Surface.opaque(0.17, ALBEDO)))
             .notes("Specific heat and conductivity are 300 K values; diamond's conductivity falls steeply as it "
-                    + "warms. Diamond burns in air above about 1000 K, which needs the chemistry model.")
+                    + "warms. Diamond burns in air above about 1000 K, which needs the chemistry model. Real diamond "
+                    + "is clear and reflects about 17 % of the light on it; a block of it stops sunlight, as the game "
+                    + "shows it.")
             .build();
 
     /** Leaves, as the bulk of a canopy. */
@@ -665,7 +704,7 @@ public final class MaterialLibrary {
                     constant(2500.0, PROPERTY_ESTIMATE),
                     constant(0.10, PROPERTY_ESTIMATE),
                     constant(100.0, PROPERTY_ESTIMATE),
-                    constant(0.95, EMISSIVITY)))
+                    constant(0.95, EMISSIVITY)).withSurface(Surface.opaque(0.18, WET_SURFACES).evaporating(40.0)))
             .notes("A block of leaves is mostly air, so these are bulk estimates. Drying, freezing and burning "
                     + "need the chemistry model.")
             .build();
