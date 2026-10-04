@@ -32,7 +32,9 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
  *   <li>{@code /anchor time ...} pauses heat, steps it by hand, runs it faster or slower or sends it ahead; see
  *   {@link TimeCommands};</li>
  *   <li>{@code /anchor snapshot ...} saves a box of blocks with its heat and restores it later; see
- *   {@link SnapshotCommands}.</li>
+ *   {@link SnapshotCommands};</li>
+ *   <li>{@code /anchor experiment ...} lists ready-made experiments and builds them; see
+ *   {@link ExperimentCommands}.</li>
  * </ul>
  */
 final class AnchorCommands {
@@ -60,7 +62,8 @@ final class AnchorCommands {
                         .then(setCommand()))
                 .then(ProbeCommands.build())
                 .then(TimeCommands.build())
-                .then(SnapshotCommands.build()));
+                .then(SnapshotCommands.build())
+                .then(ExperimentCommands.build()));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> setCommand() {

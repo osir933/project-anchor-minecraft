@@ -67,7 +67,8 @@ import net.neoforged.neoforge.registries.DeferredRegister;
  * simulation to do what physics says it should. The game puts a roof of barriers over each test, which keeps the
  * sun off; tests of the sun run in an environment of their own without one, so the game runs them apart from the
  * rest, and hold the sky still. Tests that pause heat or change its speed do so for the whole dimension, so they too
- * run in an environment of their own.
+ * run in an environment of their own, and so does each test of a ready-made experiment, which asks heat for the steps
+ * it needs to show its result.
  */
 final class AnchorGameTests {
 
@@ -80,11 +81,33 @@ final class AnchorGameTests {
     /** The environment of tests that pace heat in the whole dimension, which the game runs apart from the rest. */
     private static final String CLOCK = "clock";
 
-    /** A test: its name, how many game ticks it may take, what it does and the environment it runs in. */
-    private record Case(String name, int maxTicks, Consumer<GameTestHelper> body, String environment) {
+    /** The structure most tests are built in: a floor of stone, five blocks square. */
+    private static final String EMPTY = "empty";
+
+    /**
+     * The structure the tests of ready-made experiments are built in: two layers of stone, fifteen blocks wide and five
+     * deep, with room for the widest experiment and its bench on top.
+     */
+    private static final String BENCH = "bench";
+
+    /**
+     * A test: its name, how many game ticks it may take, what it does, the environment it runs in and the structure it
+     * is built in.
+     */
+    private record Case(String name, int maxTicks, Consumer<GameTestHelper> body, String environment,
+            String structure) {
 
         Case(String name, int maxTicks, Consumer<GameTestHelper> body) {
             this(name, maxTicks, body, HEAT);
+        }
+
+        Case(String name, int maxTicks, Consumer<GameTestHelper> body, String environment) {
+            this(name, maxTicks, body, environment, EMPTY);
+        }
+
+        /** A test of a ready-made experiment, in an environment of its own on the bench. */
+        static Case experiment(String name, int maxTicks, Consumer<GameTestHelper> body) {
+            return new Case(name, maxTicks, body, name, BENCH);
         }
     }
 
@@ -116,7 +139,11 @@ final class AnchorGameTests {
                     CLOCK),
             new Case("snapshot_rewinds_melted_ice", 600, AnchorGameTests::snapshotRewindsMeltedIce),
             new Case("snapshot_file_keeps_every_number", 20, AnchorGameTests::snapshotFileKeepsEveryNumber),
-            new Case("laboratory_air_is_steady", 20, AnchorGameTests::laboratoryAirIsSteady));
+            new Case("laboratory_air_is_steady", 20, AnchorGameTests::laboratoryAirIsSteady),
+            Case.experiment("experiment_cooling", 1000, AnchorGameTests::experimentCooling),
+            Case.experiment("experiment_conduction", 3500, AnchorGameTests::experimentConduction),
+            Case.experiment("experiment_melting", 5000, AnchorGameTests::experimentMelting),
+            Case.experiment("experiment_insulation", 2000, AnchorGameTests::experimentInsulation));
 
     private AnchorGameTests() {
     }
@@ -143,9 +170,9 @@ final class AnchorGameTests {
             ResourceKey<Consumer<GameTestHelper>> function = ResourceKey.create(Registries.TEST_FUNCTION,
                     AnchorMod.id(c.name()));
             TestData<Holder<TestEnvironmentDefinition<?>>> data = c.environment().equals(SUNLIT)
-                    ? new TestData<>(environment, Level.OVERWORLD, AnchorMod.id("empty"), c.maxTicks(), 0, true,
+                    ? new TestData<>(environment, Level.OVERWORLD, AnchorMod.id(c.structure()), c.maxTicks(), 0, true,
                             Rotation.NONE, false, 1, 1, true, 0)
-                    : new TestData<>(environment, AnchorMod.id("empty"), c.maxTicks(), 0, true);
+                    : new TestData<>(environment, AnchorMod.id(c.structure()), c.maxTicks(), 0, true);
             event.registerTest(AnchorMod.id(c.name()), new FunctionGameTestInstance(function, data));
         }
     }
@@ -999,6 +1026,172 @@ final class AnchorGameTests {
         helper.assertTrue(!Laboratory.is(level), "the game test world counts as a laboratory");
         helper.assertTrue(heat(helper).hasSky(), "heat in the game test world follows no sun");
         helper.succeed();
+    }
+
+    /**
+     * The cooling experiment: its iron glows once built, and a minute later at normal speed, 300 steps, its top has
+     * cooled below 900 °C while its middle is still far hotter. Restoring its snapshot then brings the iron back at
+     * 1500 K, to run it again.
+     */
+    private static void experimentCooling(GameTestHelper helper) {
+        // Restoring is done once: what it left is kept, empty if all went well, as the readings change after it.
+        String[] restored = {null};
+        runExperiment(helper, Experiments.COOLING, 300, (heat, frame) -> glowingBlock(heat, frame.at(0, 0, 1))
+                .isPresent() ? null : "the iron did not glow at 1500 K", (heat, frame, built, readings) -> {
+                    if (restored[0] == null) {
+                        double top = readings[0];
+                        double middle = readings[1];
+                        helper.assertTrue(top < 1173.15 && middle > top + 100.0, "after 300 steps the iron's top is "
+                                + "at " + HeatText.temperature(top) + " and its middle at "
+                                + HeatText.temperature(middle));
+                        ServerLevel level = helper.getLevel();
+                        Snapshots.Saved saved = readSnapshot(helper, Snapshots.file(level, built.snapshot()));
+                        BlockPos iron = frame.at(0, 0, 1);
+                        restored[0] = Snapshots.restore(level, heat, saved, saved.origin()).isEmpty()
+                                ? "the experiment's snapshot was not restored"
+                                : Math.abs(heat.temperature(iron) - Experiments.COOLING_START_K) < 1e-6 ? ""
+                                : "restoring the snapshot left the iron at "
+                                        + HeatText.temperature(heat.temperature(iron));
+                    }
+                    if (!restored[0].isEmpty()) {
+                        throw helper.assertionException(Component.literal(restored[0]));
+                    }
+                });
+    }
+
+    /**
+     * The conduction race: after eight minutes at normal speed, 2400 steps, the top of the copper rod is far warmer
+     * than that of the iron rod, the iron's than the stone's, and the stone's than the brick's.
+     */
+    private static void experimentConduction(GameTestHelper helper) {
+        runExperiment(helper, Experiments.CONDUCTION, 2400, (heat, frame) -> null, (heat, frame, built, readings) -> {
+            double copper = readings[0];
+            double iron = readings[1];
+            double stone = readings[2];
+            double brick = readings[3];
+            helper.assertTrue(copper > iron + 30.0 && iron > stone + 5.0 && stone > brick + 1.5, "after 2400 steps "
+                    + "the tops of the rods are at " + HeatText.temperature(copper) + " (copper), "
+                    + HeatText.temperature(iron) + " (iron), " + HeatText.temperature(stone) + " (stone) and "
+                    + HeatText.temperature(brick) + " (brick)");
+        });
+    }
+
+    /**
+     * Melting takes heat: after nearly twelve minutes at normal speed, 3500 steps, the ice has warmed from -10 °C to
+     * 0 °C and stays there, still ice, while the stone beside it has warmed on past 4 °C.
+     */
+    private static void experimentMelting(GameTestHelper helper) {
+        runExperiment(helper, Experiments.MELTING, 3500, (heat, frame) -> null, (heat, frame, built, readings) -> {
+            double ice = readings[0];
+            double stone = readings[1];
+            helper.assertTrue(Math.abs(ice - 273.15) < 0.05 && stone > 277.15, "after 3500 steps the ice is at "
+                    + HeatText.temperature(ice) + " and the stone at " + HeatText.temperature(stone));
+            helper.assertTrue(helper.getLevel().getBlockState(frame.at(-2, 1, 1)).is(Blocks.PACKED_ICE),
+                    "the ice has already melted");
+        });
+    }
+
+    /**
+     * Insulation: after four minutes at normal speed, 1200 steps, the iron in wool has hardly cooled, the iron in glass
+     * has cooled less than the bare one, and the bare one most.
+     */
+    private static void experimentInsulation(GameTestHelper helper) {
+        runExperiment(helper, Experiments.INSULATION, 1200, (heat, frame) -> null, (heat, frame, built, readings) -> {
+            double bare = readings[0];
+            double glass = readings[1];
+            double wool = readings[2];
+            helper.assertTrue(wool > Experiments.INSULATION_START_K - 5.0 && wool > glass + 15.0
+                    && glass > bare + 5.0, "after 1200 steps the irons are at " + HeatText.temperature(bare)
+                    + " (bare), " + HeatText.temperature(glass) + " (in glass) and " + HeatText.temperature(wool)
+                    + " (in wool)");
+        });
+    }
+
+    /** What a test of a ready-made experiment checks once it is built: why it failed, or {@code null}. */
+    private interface ExperimentStart {
+        String check(LevelHeat heat, Experiments.Frame frame);
+    }
+
+    /** What a test of a ready-made experiment checks after its steps, given its probes' latest readings in kelvin. */
+    private interface ExperimentResult {
+        void check(LevelHeat heat, Experiments.Frame frame, Experiments.Built built, double[] readings);
+    }
+
+    /**
+     * Builds a ready-made experiment on the bench, facing south from the middle of its near edge, checks it as built,
+     * asks heat for some steps and checks its probes' readings after them, in its order. It then removes the probes
+     * and the snapshot it left. What it checks once built is only judged at the end, so that a failure there is not
+     * forgotten while the test waits.
+     */
+    private static void runExperiment(GameTestHelper helper, Experiments.Experiment experiment, long steps,
+            ExperimentStart start, ExperimentResult result) {
+        ServerLevel level = helper.getLevel();
+        Experiments.Frame frame = new Experiments.Frame(helper.absolutePos(new BlockPos(7, 2, 1)),
+                net.minecraft.core.Direction.SOUTH);
+        BlockPos min = frame.min(experiment);
+        BlockPos max = frame.max(experiment);
+        List<BlockPos> sections = new ArrayList<>();
+        for (int x = min.getX() >> 4; x <= max.getX() >> 4; x++) {
+            for (int y = min.getY() >> 4; y <= max.getY() >> 4; y++) {
+                for (int z = min.getZ() >> 4; z <= max.getZ() >> 4; z++) {
+                    sections.add(new BlockPos(x << 4, y << 4, z << 4));
+                }
+            }
+        }
+        Experiments.Built[] built = {null};
+        String[] failure = {null};
+        long[] end = {0L};
+        int[] stage = {0};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (stage[0] == 0) {
+                sections.forEach(heat::keepSimulated);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (!heat.simulates(min, max)) {
+                    throw helper.assertionException(Component.literal("waiting for the bench to be simulated"));
+                }
+                Experiments.Outcome outcome = Experiments.build(level, heat, experiment, frame);
+                if (outcome.built() == null) {
+                    throw helper.assertionException(Component.literal("the experiment was not built: "
+                            + outcome.refusal().getString()));
+                }
+                built[0] = outcome.built();
+                failure[0] = start.check(heat, frame);
+                end[0] = heat.pace().steps() + steps;
+                heat.request(steps);
+                stage[0] = 2;
+            }
+            if (heat.pace().steps() < end[0]) {
+                throw helper.assertionException(Component.literal("running the experiment: "
+                        + (end[0] - heat.pace().steps()) + " steps to go"));
+            }
+            Experiments.Built b = built[0];
+            if (failure[0] != null) {
+                throw helper.assertionException(Component.literal(failure[0]));
+            }
+            helper.assertTrue(b.problems().isEmpty(), "building the experiment went wrong: "
+                    + b.problems().stream().map(Component::getString).toList());
+            helper.assertTrue(b.probes().size() == experiment.plan().probeNames().size(), "the experiment has "
+                    + b.probes().size() + " probes, not " + experiment.plan().probeNames().size());
+            helper.assertValueEqual(experiment.snapshot(), b.snapshot(), "the experiment's snapshot");
+            double[] readings = new double[b.probes().size()];
+            for (int i = 0; i < readings.length; i++) {
+                readings[i] = b.probes().get(i).series().last();
+            }
+            result.check(heat, frame, b, readings);
+            ProbeSet set = ProbeCommands.probes(level).set();
+            for (ProbeSet.Probe p : b.probes()) {
+                set.remove(p.name());
+            }
+            try {
+                Files.delete(Snapshots.file(level, b.snapshot()));
+            } catch (IOException e) {
+                throw helper.assertionException(Component.literal("the snapshot could not be removed: " + e));
+            }
+            sections.forEach(heat::release);
+        });
     }
 
     private static LevelHeat heat(GameTestHelper helper) {

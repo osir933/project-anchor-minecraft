@@ -8,15 +8,11 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.HoverEvent;
-import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.clock.ClockTimeMarkers;
 import net.minecraft.world.clock.ServerClockManager;
@@ -162,19 +158,10 @@ final class Laboratory {
             return;
         }
         player.setData(AnchorAttachments.LABORATORY_KIT, KIT_VERSION);
-        give(player, new ItemStack(AnchorItems.THERMOMETER.get()));
-        give(player, new ItemStack(AnchorItems.THERMAL_CAMERA.get()));
+        AnchorItems.give(player, new ItemStack(AnchorItems.THERMOMETER.get()));
+        AnchorItems.give(player, new ItemStack(AnchorItems.THERMAL_CAMERA.get()));
         for (Component line : welcome(player.level(), player.blockPosition())) {
             player.sendSystemMessage(line);
-        }
-    }
-
-    /** Puts an item in a player's inventory, or at their feet if it is full. */
-    private static void give(ServerPlayer player, ItemStack stack) {
-        if (!player.getInventory().add(stack)) {
-            ItemEntity dropped = new ItemEntity(player.level(), player.getX(), player.getY(), player.getZ(), stack);
-            dropped.setNoPickUpDelay();
-            player.level().addFreshEntity(dropped);
         }
     }
 
@@ -199,18 +186,10 @@ final class Laboratory {
                     + "what you build.", air, humidity),
             Component.translatableWithFallback("message.anchor.laboratory.instruments", "Use the thermometer on a "
                     + "block to read it, or sneak and use it to record it; hold the thermal camera to see heat."),
-            Component.translatableWithFallback("message.anchor.laboratory.commands", "%s pauses, steps and speeds up "
-                    + "heat, and %s saves an experiment so that you can run it again.", command("/anchor time"),
-                    command("/anchor snapshot"))
+            Component.translatableWithFallback("message.anchor.laboratory.commands", "%s lists ready-made "
+                    + "experiments to build, %s pauses, steps and speeds up heat, and %s saves your own experiments so "
+                    + "that you can run them again.", ChatLinks.run("/anchor experiment list"),
+                    ChatLinks.type("/anchor time"), ChatLinks.type("/anchor snapshot"))
         };
-    }
-
-    /** A command players can click to start typing. */
-    private static MutableComponent command(String command) {
-        return Component.literal(command).withStyle(style -> style
-                .withClickEvent(new ClickEvent.SuggestCommand(command + " "))
-                .withHoverEvent(new HoverEvent.ShowText(Component.translatableWithFallback(
-                        "message.anchor.laboratory.click", "Click to type it")))
-                .withUnderlined(true));
     }
 }

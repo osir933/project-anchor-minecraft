@@ -32,7 +32,6 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -375,11 +374,7 @@ final class ProbeCommands {
         }
         ItemStack chart = ProbeCharts.create(level, probes, shown);
         Component name = chart.getHoverName();
-        if (!player.getInventory().add(chart)) {
-            ItemEntity dropped = new ItemEntity(level, player.getX(), player.getY(), player.getZ(), chart);
-            dropped.setNoPickUpDelay();
-            level.addFreshEntity(dropped);
-        }
+        AnchorItems.give(player, chart);
         source.sendSuccess(() -> Component.literal("Drew a ").append(name).append(Component.literal(
                 "; it keeps up while the probes record, and it can hang in an item frame")), false);
         return 1;

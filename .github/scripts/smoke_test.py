@@ -29,8 +29,8 @@ from release import ROOT, USER_AGENT, properties
 INSTALLER = "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar"
 
 # What the test asks the server, what it must answer and what counts as a wrong answer. The core's self-test
-# shows that the core is inside the jar and works; the heat status shows that the mod's side runs, and the time
-# commands that heat can be paced.
+# shows that the core is inside the jar and works; the heat status shows that the mod's side runs, the time
+# commands that heat can be paced, and the snapshot and experiment commands that they run through.
 NOT_RUNNING = r"not simulated|stopped after an error|Unknown or incomplete command"
 STEPS = [
     ("anchor selftest", r"Anchor self-test passed: \d+ checks\.", r"Anchor self-test failed"),
@@ -42,6 +42,10 @@ STEPS = [
     ("anchor snapshot list", r"No snapshots are saved in minecraft:overworld", NOT_RUNNING),
     # No player is near, so heat runs nowhere and the snapshot cannot be taken; the command still runs through.
     ("anchor snapshot save smoke", r"Heat does not run in all of that box", NOT_RUNNING + r"|Could not write"),
+    ("anchor experiment list", r"cooling: Glowing iron cools\.", NOT_RUNNING),
+    # For the same reason the experiment is not built, which leaves the world as it was.
+    ("anchor experiment build cooling", r"Heat does not run in all of the space Glowing iron cools needs",
+     NOT_RUNNING + r"|Built Glowing iron cools"),
 ]
 
 # The same world every run, kept small. No player joins, so the server needs no connection to Mojang.

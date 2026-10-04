@@ -67,6 +67,11 @@ Java 25, on both the client and the server.
   ticks are off and the time stands at noon, and where heat follows no sun or night sky, so experiments run in
   steady surroundings. Choosing it switches the new world to Creative with commands allowed, and each player is
   given a thermometer and a thermal camera the first time they join.
+- **Ready-made experiments.** Operators can build one of four experiments in front of them with
+  `/anchor experiment build`, each sized with the simulation to show its result within minutes: glowing iron
+  cooling, a race of heat up rods of copper, iron, stone and brick, ice that stays at 0 °C while it melts beside
+  stone that warms on, and iron cooling bare, in glass and in wool. Each comes with probes, a chart of them and a
+  snapshot to run it again, and `/anchor experiment list` tells what each shows.
 
 Known limits of this alpha:
 

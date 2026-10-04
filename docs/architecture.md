@@ -302,6 +302,16 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   first join gives them a thermometer and a thermal camera, noted in an attachment on the player that survives
   death. On the client, `LaboratoryScreen` switches the Create New World screen to Creative with commands allowed
   when the world type changes to the Laboratory.
+- **Experiments.** `Experiments` holds the ready-made experiments, each a plan in its own frame: blocks right, up and
+  ahead of the middle of its near edge, turned to the way the player faces, with the blocks it places, the
+  temperatures it starts them at and the probes it leaves. Building one checks that its space fits in the world,
+  that heat runs in all of it and that it is clear (air or plants above the bench, nothing with contents where the
+  bench goes, and solid ground under any liquid poured into the bench), then clears the space from the top down,
+  lays a bench of smooth stone, places solids before liquids, sets the starting temperatures through
+  `LevelHeat.setTemperature`, adds the probes under free names and saves the box as the snapshot
+  `experiment-<name>`. `ExperimentCommands` holds `/anchor experiment list` and `build`, which gives the builder a
+  chart of the probes and offers the speed the experiment was sized for. The experiments were sized by running the
+  engine on the same blocks in 20 °C air until each showed its result within minutes.
 - **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
   simulation steps every four game ticks. Both are settings. `TimeCommands` holds the `/anchor time` commands,
   with which operators pause a dimension's heat, step it by hand, run it from 0.01 to 1000 times as fast, or
@@ -373,11 +383,18 @@ takes several a tick, and at twice normal speed it takes twice the steps. Packed
 −23 °C and then melted comes back from it as packed ice with exactly the heat it had, and the water that spread
 from it is gone; the snapshot file keeps every number, those of a refined block's cells too, and damaged files are
 refused. The laboratory's biome gives air at 20 °C and 50 % humidity with no rain, the Laboratory world type is
-there, and the game test world is no laboratory, so heat there follows the sun. The game tests load the mod from
-the build directories, so CI also installs a NeoForge server the way
-players do, starts it with the released jar and checks that the mod loads, its self-test passes, heat runs and can
-be paused and resumed, snapshots can be listed and are refused where heat does not run, the server stops cleanly
-and nothing is logged as an error (`.github/scripts/smoke_test.py`). Last, CI starts the game itself under a
+there, and the game test world is no laboratory, so heat there follows the sun. Each ready-made experiment is
+built on a bench of stone, in an environment of its own since it asks heat for the steps it needs, and after them
+its probes show what it promises: after 300 steps the cooling iron's top is below 900 °C and more than 100 K
+cooler than its middle, and its snapshot brings the iron back at 1500 K; after 2400 steps the top of the copper rod
+is more than 30 K warmer than the iron's, the iron's 5 K warmer than the stone's and the stone's 1.5 K warmer than
+the brick's; after 3500 steps the ice is at 0 °C and still ice while the stone beside it is past 4 °C; and after
+1200 steps the iron in wool is within 5 K of its start and more than 15 K warmer than the one in glass, which is
+more than 5 K warmer than the bare one. The game tests load the mod from the build directories, so CI also
+installs a NeoForge server the way players do, starts it with the released jar and checks that the mod loads, its
+self-test passes, heat runs and can be paused and resumed, snapshots can be listed and are refused where heat does
+not run, experiments can be listed and are not built where heat does not run, the server stops cleanly and nothing
+is logged as an error (`.github/scripts/smoke_test.py`). Last, CI starts the game itself under a
 virtual display with software drawing. Started with `-Danchor.renderTest=true`, the mod's `RenderTest` creates a
 laboratory world and checks that its floor's top is light grey concrete at y = −1, that its game rules hold time
 and weather and stop spawning and random ticks, that its clock stands at noon with clear weather, that heat there
@@ -417,6 +434,7 @@ temperatures are saved with the world, blocks refine where temperatures change s
 moving, the sun and the night sky warm and cool the land, probes record temperatures and chart them on maps, and
 operators can pause heat, step it, run it faster or slower, send it ahead, and save an experiment as a snapshot to
 rewind it to, hot blocks glow in the colours of a black body, and the Laboratory world type gives experiments steady
-surroundings. Next for phase 1: ready-made experiments in the laboratory. After that come structure and fracture;
+surroundings, with ready-made experiments to build there. Next is the first alpha release. After that come
+structure and fracture;
 rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

@@ -8,7 +8,7 @@ experiments, inspect what the simulation knows and how sure it is, and watch soc
 the [roadmap](docs/architecture.md#roadmap) and the [changelog](CHANGELOG.md)). Anchor needs Minecraft 26.3
 with NeoForge 26.3 and Java 25, installed on both the game and the server. To get started, create a world of the
 Anchor Laboratory type: a flat floor in steady 20 °C air, with a thermometer and a thermal camera in hand (see
-[the Laboratory](#the-laboratory)).
+[the Laboratory](#the-laboratory)), and build a [ready-made experiment](#ready-made-experiments) there.
 
 ## Heat in the game
 
@@ -89,6 +89,8 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 | `/anchor snapshot save <name> [<from> <to>]` | For operators: saves the blocks from one corner to the other, up to 64 blocks a side, or those within 16 blocks of you, with the heat of every cell in them. |
 | `/anchor snapshot restore <name> [<corner>]` | For operators: puts a snapshot's blocks back as they were saved, heat and all, where they were saved or with the box's lowest corner somewhere else. |
 | `/anchor snapshot remove <name>` | For operators: deletes a snapshot. |
+| `/anchor experiment list` | The ready-made experiments and what each shows. `/anchor experiment` alone does the same. |
+| `/anchor experiment build <name>` | For operators: builds a ready-made experiment in front of you and starts it, with probes where its result shows, a chart of them in your inventory and a snapshot to run it again. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
 ### Thermometer
@@ -184,6 +186,27 @@ begin.
 
 The Nether and the End of a laboratory world are as they always are. A world of the Single Biome type made of the
 Laboratory biome counts as a laboratory too, hills and all.
+
+### Ready-made experiments
+
+`/anchor experiment build <name>` builds one of four experiments in front of you, on a bench of smooth stone that
+takes the place of the floor there. It sets the temperatures the experiment starts from, leaves probes where its
+result shows, gives you a chart of them and saves it all as the snapshot `experiment-<name>`, so
+`/anchor snapshot restore experiment-<name>` runs it again from the start. `/anchor experiment list` tells what each
+shows. Each was sized with the simulation itself to show its result within minutes in a laboratory's 20 °C air, and
+those that take longer say how much to speed heat up.
+
+| Experiment | What it shows | How long it takes |
+| --- | --- | --- |
+| `cooling` | A block of iron at 1227 °C cools in still air. Its top cools faster than its middle, which must conduct its heat out first, and its glow fades from orange through dull red to nothing. | About five minutes. |
+| `conduction` | Rods of copper, iron, stone and brick, three blocks tall, stand on lava. The heat reaches the top of the copper first and then the iron, while the tops of the stone and brick barely warm. | A minute or two at 5× speed. |
+| `melting` | Ice and stone at −10 °C warm side by side in glass cups on copper hot plates over lava. Their temperatures rise together until the ice reaches 0 °C; then the ice stays there while it takes in the heat it needs to melt, and the stone warms on. | About a minute at 10× speed. |
+| `insulation` | Three blocks of iron at 150 °C: one bare, one wrapped in glass and one in wool. The bare one cools fastest, the one in glass a little slower, and the wool keeps its iron near 150 °C for hours. | A few minutes. |
+
+An experiment needs a clear space in front of you, up to 13 blocks wide, 3 deep and 4 tall. It is not built if
+anything but air and plants is in the way, if a chest or anything else with contents is where the bench goes, or if
+there is no solid ground under the lava it pours into its bench. It works in any world where heat runs, though the
+sun, the weather and the air of other places change its numbers.
 
 ### Settings
 
