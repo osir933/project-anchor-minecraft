@@ -52,6 +52,9 @@ import org.slf4j.Logger;
  * and lets go of those they have left, compares one section with the level to catch changes nobody reported,
  * and steps the simulation. An error stops heat in this level and is logged; the game carries on.
  *
+ * <p>After each step the level's probes record the temperatures they measure, and their charts are drawn again
+ * every few steps; see {@link LevelProbes}.
+ *
  * <p>The state of simulated sections is saved with their chunks as {@link ChunkHeat}: when a section is let
  * go or its chunk unloads, when the level is saved, and every minute in between. A section brought in again
  * takes its saved state back.
@@ -169,6 +172,7 @@ final class LevelHeat {
             verifyNext();
             followSky();
             HostedWorld.TickResult result = hosted.tick();
+            record();
             toShow.addAll(result.phaseChanges());
             show();
             lastStepMillis = (System.nanoTime() - start) / 1e6;
@@ -409,6 +413,18 @@ final class LevelHeat {
                 hosted.reconcile(grid(pos), Block.getId(level.getBlockState(pos)), Double.NaN);
                 followSkyHeight(pos);
             }
+        }
+    }
+
+    /**
+     * Gives each of the level's probes a reading of the step just simulated, and draws its charts again when they are
+     * due. A probe whose block is not simulated records a missing reading.
+     */
+    private void record() {
+        LevelProbes probes = level.getData(AnchorAttachments.PROBES);
+        probes.set().record(hosted.settings().tickSeconds(), p -> hosted.temperatureAt(p.x(), p.y(), p.z()));
+        if (probes.chartsDue(ProbeCharts.DRAW_EVERY_STEPS) && !probes.charts().isEmpty()) {
+            ProbeCharts.drawAll(level, probes);
         }
     }
 

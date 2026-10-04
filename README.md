@@ -67,6 +67,11 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 | `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy, where the value came from, for a block open to the sky how warm its top is and how much sunlight it takes in, and, for a refined block, how warm its coolest and hottest cells are. Operators can name any block with `/anchor heat inspect <pos>`. |
 | `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks are refined into how many cells, the sunlight on level ground and how many surfaces are open to the sky, how many blocks came back as they were saved, and whether energy and mass balanced at the last audit. |
 | `/anchor heat set <pos> <celsius>` | For operators: sets a block's temperature, keeping its matter, to start an experiment. |
+| `/anchor probe add` | Leaves a probe where you are looking, which records the temperature there every step. Operators can put one in the middle of any block, and name it, with `/anchor probe add <pos> [<name>]`. |
+| `/anchor probe list` | Every probe in your dimension with its latest reading, how fast it is changing and a line of bars of what it recorded. `/anchor probe show <name>` tells more about one. |
+| `/anchor probe chart [<names>]` | Turns an empty map from your inventory into a live chart of as many as four probes. |
+| `/anchor probe export [<name>]` | Writes recordings into the world's folder as CSV files, for spreadsheets and plotting tools. |
+| `/anchor probe rename`, `reset`, `remove` | Renames a probe, makes it start recording afresh, or removes it. Operators can remove them all with `/anchor probe clear`. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
 ### Thermometer
@@ -74,7 +79,8 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 Craft a thermometer from a glass pane, redstone and a copper ingot stacked in a column, glass on top. Use it
 on a block to read the block's temperature where you touch it, or in the air to read the air around your head.
 On a refined block it reads the cell you touch, and on the top of a block open to the sky it reads the top
-itself, which the sun warms and a clear night chills far faster than the block as a whole.
+itself, which the sun warms and a clear night chills far faster than the block as a whole. Sneak and use it on a
+block to leave a probe where you touch it, and again to take the probe away.
 
 ### Thermal camera
 
@@ -87,6 +93,25 @@ so the face of stone beside lava shows hotter than the stone behind it. Use it t
 view, which shows the air that is warmer or colder than the rest, such as the plume above a torch. Sneak and use
 it to lock the scale, so that what you see later compares with what you see now. Like a real thermal camera, it
 cannot see through glass or water. Only you see your camera's images.
+
+### Probes and charts
+
+A probe records the temperature at one spot every simulation step, so you can see how fast a block warms, how a
+pond follows the day or how long snow lasts in the sun. Leave one by sneaking and using a thermometer on a block,
+or with `/anchor probe add`; it measures where you touched, so a probe on a block's top reads the sunlit top. A
+thermometer used on a probed block also says how fast the probe finds it warming or cooling. A probe whose block
+is not simulated, because nobody is near, records nothing until someone comes back, and the gap shows.
+
+`/anchor probe chart` turns an empty map into a chart of up to four probes, which Anchor keeps drawing as they
+record, about once a second. Time runs left to right up to now, and each probe is a coloured line through its
+readings over a paler band from the lowest to the highest, so a brief peak still shows on a long chart. Hold the
+map to read it, copy it on a cartography table, or hang it in an item frame as a display on the wall of your lab.
+Players in creative mode and operators need no map.
+
+A probe keeps all it recorded however long it runs: it holds 512 stretches of time, and when they are full, each
+two neighbouring stretches merge into one, keeping the lowest, mean and highest temperature in it. Probes and
+their recordings are saved with the world. `/anchor probe export` writes them as CSV files, one row per stretch,
+to `anchor/probes/<dimension>` in the world's folder. A dimension holds up to 32 probes.
 
 ### Settings
 

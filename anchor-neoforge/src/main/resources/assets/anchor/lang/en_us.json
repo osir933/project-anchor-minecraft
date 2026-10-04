@@ -1,9 +1,13 @@
 {
   "item.anchor.thermometer": "Thermometer",
+  "item.anchor.thermometer.use": "Use it on a block or in the air to read the temperature",
+  "item.anchor.thermometer.sneak": "Sneak and use it on a block to record it over time",
   "message.anchor.thermometer.off": "Temperatures are not simulated here",
   "message.anchor.thermometer.waiting": "No reading yet: this area is still being loaded into the simulation",
   "message.anchor.thermometer.empty": "Nothing here to measure",
   "message.anchor.thermometer.reading": "%s: %s",
+  "message.anchor.thermometer.recording": ", recorded as %s",
+  "message.anchor.thermometer.trend": ", recorded as %s: %s",
   "item.anchor.thermal_camera": "Thermal Camera",
   "item.anchor.thermal_camera.hold": "Hold it to see temperatures",
   "item.anchor.thermal_camera.use": "Use it to switch between surfaces and air",
@@ -12,5 +16,11 @@
   "message.anchor.thermal_camera.air": "Air",
   "message.anchor.thermal_camera.nothing": "Nothing in view is simulated yet",
   "message.anchor.thermal_camera.spot": "Spot %s",
-  "message.anchor.thermal_camera.locked": "locked"
+  "message.anchor.thermal_camera.locked": "locked",
+  "message.anchor.probe.added": "Recording %s as %s",
+  "message.anchor.probe.removed": "Stopped recording %s (%s)",
+  "message.anchor.probe.full": "A dimension holds at most %s probes; remove one with /anchor probe remove",
+  "message.anchor.probe.bad_name": "Probe names are letters, digits, _ and -, at most %s of them",
+  "message.anchor.probe.taken": "A probe is already called %s",
+  "item.anchor.chart": "Chart of %s"
 }

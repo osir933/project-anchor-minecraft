@@ -27,7 +27,8 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
  *   <li>{@code /anchor heat inspect} shows what the simulation knows about the block being looked at, and
  *   operators can name any block with {@code /anchor heat inspect <pos>};</li>
  *   <li>{@code /anchor heat set <pos> <celsius>} lets operators set a block's temperature, keeping its matter,
- *   to start an experiment.</li>
+ *   to start an experiment;</li>
+ *   <li>{@code /anchor probe ...} records temperatures over time and charts them; see {@link ProbeCommands}.</li>
  * </ul>
  */
 final class AnchorCommands {
@@ -52,7 +53,8 @@ final class AnchorCommands {
                                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                                         .executes(context -> inspect(context,
                                                 BlockPosArgument.getLoadedBlockPos(context, "pos")))))
-                        .then(setCommand())));
+                        .then(setCommand()))
+                .then(ProbeCommands.build()));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> setCommand() {

@@ -42,6 +42,12 @@ Java 25, on both the client and the server.
 - **Thermal camera.** Held in either hand, it shows the temperatures of what you look at as coloured dots
   with a scale, of surfaces or of the air that stands out, such as the plume above a torch. Its scale can be
   locked to compare what you see over time.
+- **Probes and charts.** Sneak and use a thermometer on a block, or run `/anchor probe add`, to leave a probe
+  that records the temperature there every step. `/anchor probe list` shows each probe's latest reading, how fast
+  it is changing and a line of what it recorded. `/anchor probe chart` turns an empty map into a live chart of up
+  to four probes that can hang in an item frame, and `/anchor probe export` writes recordings as CSV files. A
+  probe keeps its whole recording in fixed memory, keeping the lowest and highest temperature of every stretch so
+  brief peaks survive, and probes are saved with the world.
 
 Known limits of this alpha:
 
