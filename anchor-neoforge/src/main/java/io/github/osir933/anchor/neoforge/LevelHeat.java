@@ -6,6 +6,7 @@ import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.ImportPlanner;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.host.PhaseChange;
+import io.github.osir933.anchor.core.host.RegionSnapshot;
 import io.github.osir933.anchor.core.host.SectionSnapshot;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
@@ -67,6 +68,9 @@ import org.slf4j.Logger;
  * <p>The state of simulated sections is saved with their chunks as {@link ChunkHeat}: when a section is let
  * go or its chunk unloads, when the level is saved, and every minute in between. A section brought in again
  * takes its saved state back.
+ *
+ * <p>The heat of a box of blocks can be captured, cell for cell, and given back later, once the box's blocks have
+ * been put back as they were; {@link Snapshots} keeps both in the world's folder.
  *
  * <p>In a level with a sun, such as the Overworld, each step takes the sun's place and the weather from the level (see
  * {@link Climate#sky}), and the simulation learns where the open sky begins in each column from the level's
@@ -356,6 +360,66 @@ final class LevelHeat {
     }
 
     /**
+     * Tells whether heat runs in every section a box of blocks touches.
+     *
+     * @param min the box's lowest corner
+     * @param max the box's highest corner
+     * @return {@code true} if every section it touches is simulated and heat has not stopped
+     */
+    boolean simulates(BlockPos min, BlockPos max) {
+        return failure == null && hosted.importsAll(grid(min), grid(max));
+    }
+
+    /**
+     * Captures the heat of a box of blocks, cell for cell, after taking in the blocks there as they are now.
+     *
+     * @param min the box's lowest corner
+     * @param max the box's highest corner
+     * @return the heat, or empty if heat does not run in every section the box touches or has stopped
+     */
+    Optional<RegionSnapshot> capture(BlockPos min, BlockPos max) {
+        if (!simulates(min, max)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(hosted.capture(grid(min), grid(max), this::hostId));
+        } catch (RuntimeException e) {
+            stop(e);
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Gives a box of blocks the heat captured from a box of the same size, once its blocks have been put back as
+     * they were then. A block that no longer holds what was captured there starts afresh, as a block just placed.
+     *
+     * @param snapshot the heat
+     * @param corner the box's lowest corner, where it was captured or elsewhere
+     * @return what was restored, or empty if heat does not run in every section the box touches or has stopped
+     */
+    Optional<HostedWorld.Restored> restore(RegionSnapshot snapshot, BlockPos corner) {
+        BlockPos max = corner.offset(snapshot.sizeX() - 1, snapshot.sizeY() - 1, snapshot.sizeZ() - 1);
+        if (!simulates(corner, max)) {
+            return Optional.empty();
+        }
+        try {
+            HostedWorld.Restored restored = hosted.restore(snapshot, grid(corner), this::hostId);
+            for (int chunkX = corner.getX() >> 4; chunkX <= max.getX() >> 4; chunkX++) {
+                for (int chunkZ = corner.getZ() >> 4; chunkZ <= max.getZ() >> 4; chunkZ++) {
+                    LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+                    if (chunk != null) {
+                        followSkyHeights(chunk);
+                    }
+                }
+            }
+            return Optional.of(restored);
+        } catch (RuntimeException e) {
+            stop(e);
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Holds the sky over the simulation still, in place of the level's own sun and weather, as for an experiment
      * that needs the noon sun, or lets it follow the level again. A level without a sun, or with the sun and sky
      * switched off, stays without one.
@@ -539,6 +603,11 @@ final class LevelHeat {
             hosted.reconcile(grid(pos), Block.getId(level.getBlockState(pos)), Double.NaN);
             followSkyHeight(pos);
         }
+    }
+
+    /** Returns the id of the block state at a place in the level. */
+    private int hostId(GridPos pos) {
+        return Block.getId(level.getBlockState(new BlockPos(pos.x(), pos.y(), pos.z())));
     }
 
     /** Takes in the blocks that changed since the last tick. */

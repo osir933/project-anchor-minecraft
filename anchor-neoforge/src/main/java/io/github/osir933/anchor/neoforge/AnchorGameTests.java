@@ -2,21 +2,30 @@ package io.github.osir933.anchor.neoforge;
 
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
+import io.github.osir933.anchor.core.host.RegionSnapshot;
 import io.github.osir933.anchor.core.host.SectionSnapshot;
 import io.github.osir933.anchor.core.instrument.ChartImage;
 import io.github.osir933.anchor.core.instrument.ProbeSet;
 import io.github.osir933.anchor.core.instrument.TimeSeries;
 import io.github.osir933.anchor.core.instrument.TimeSeriesCsv;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
+import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.GridPos;
+import io.github.osir933.anchor.core.world.BlockCopy;
 import io.github.osir933.anchor.core.world.Provenance;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.Vec3i;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.gametest.framework.FunctionGameTestInstance;
@@ -25,7 +34,10 @@ import net.minecraft.gametest.framework.TestData;
 import net.minecraft.gametest.framework.TestEnvironmentDefinition;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.NbtAccounter;
+import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -38,6 +50,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.saveddata.maps.MapId;
 import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
 import net.minecraft.world.phys.Vec3;
@@ -96,7 +109,9 @@ final class AnchorGameTests {
             new Case("saved_probes_keep_their_numbers", 20, AnchorGameTests::savedProbesKeepTheirNumbers),
             new Case("thermometer_explains_itself", 20, AnchorGameTests::thermometerExplainsItself),
             new Case("paused_heat_holds_and_steps_by_hand", 600, AnchorGameTests::pausedHeatHoldsAndStepsByHand,
-                    CLOCK));
+                    CLOCK),
+            new Case("snapshot_rewinds_melted_ice", 600, AnchorGameTests::snapshotRewindsMeltedIce),
+            new Case("snapshot_file_keeps_every_number", 20, AnchorGameTests::snapshotFileKeepsEveryNumber));
 
     private AnchorGameTests() {
     }
@@ -715,6 +730,155 @@ final class AnchorGameTests {
             helper.assertTrue(mark[0] >= least[0] && mark[0] <= 42, "at twice normal speed heat took " + mark[0]
                     + " steps in 80 ticks, not 40" + (least[0] < 38 ? ", and could not keep up" : ""));
         });
+    }
+
+    /**
+     * A snapshot rewinds an experiment. Packed ice saved cold and then melted comes back as packed ice with exactly the
+     * heat it had, the water that spread from it is gone, and the snapshot's file reads back as it was saved.
+     */
+    private static void snapshotRewindsMeltedIce(GameTestHelper helper) {
+        BlockPos iceAt = new BlockPos(2, 1, 2);
+        BlockPos besideAt = new BlockPos(1, 1, 2);
+        helper.setBlock(iceAt, Blocks.PACKED_ICE);
+        BlockPos ice = helper.absolutePos(iceAt);
+        BlockPos from = helper.absolutePos(new BlockPos(1, 1, 1));
+        BlockPos to = helper.absolutePos(new BlockPos(3, 2, 3));
+        BlockPos min = BlockPos.min(from, to);
+        BlockPos max = BlockPos.max(from, to);
+        ServerLevel level = helper.getLevel();
+        String name = "gametest_ice";
+        Snapshots.Saved[] saved = {null};
+        HostedWorld.Inspection[] cold = {null};
+        int[] stage = {0};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (stage[0] == 0) {
+                heat.keepSimulated(ice);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (!heat.simulates(min, max) || !heat.setTemperature(ice, 250.0)) {
+                    throw helper.assertionException(Component.literal("waiting for the box to be simulated"));
+                }
+                saved[0] = saveSnapshot(helper, heat, name, min, max);
+                cold[0] = heat.inspect(ice).orElseThrow(
+                        () -> helper.assertionException(Component.literal("the ice is no longer simulated")));
+                helper.assertTrue(heat.setTemperature(ice, 290.0), "the ice could not be warmed");
+                stage[0] = 2;
+            }
+            if (stage[0] == 2) {
+                helper.assertBlockPresent(Blocks.WATER, iceAt);
+                helper.assertBlockPresent(Blocks.WATER, besideAt);
+                Snapshots.Saved read = readSnapshot(helper, Snapshots.file(level, name));
+                helper.assertValueEqual(saved[0], read, "the snapshot read back");
+                Optional<HostedWorld.Restored> restored = Snapshots.restore(level, heat, read, read.origin());
+                helper.assertTrue(restored.isPresent(), "the snapshot was not restored");
+                HostedWorld.Restored r = restored.get();
+                helper.assertTrue(r.blocks() == 18 && r.changed() >= 2 && r.afresh() == 0, "restoring did " + r);
+                stage[0] = 3;
+            }
+            helper.assertBlockPresent(Blocks.PACKED_ICE, iceAt);
+            helper.assertBlockPresent(Blocks.AIR, besideAt);
+            HostedWorld.Inspection back = heat.inspect(ice).orElseThrow(
+                    () -> helper.assertionException(Component.literal("the ice is no longer simulated")));
+            HostedWorld.Inspection was = cold[0];
+            helper.assertTrue(back.material().equals(was.material()) && back.massKg() == was.massKg()
+                    && back.enthalpyJ() == was.enthalpyJ(), "the ice came back as " + back.material() + " at "
+                    + HeatText.temperature(back.temperatureK()) + " instead of " + was.material() + " at "
+                    + HeatText.temperature(was.temperatureK()));
+            try {
+                Files.delete(Snapshots.file(level, name));
+            } catch (IOException e) {
+                throw helper.assertionException(Component.literal("the snapshot could not be removed: " + e));
+            }
+            heat.release(ice);
+        });
+    }
+
+    /**
+     * The file a snapshot is kept in keeps every number exactly, those of a block refined into cells included, and a
+     * file that cannot be made sense of is refused instead of guessed at.
+     */
+    private static void snapshotFileKeepsEveryNumber(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        List<SectionSnapshot.Entry> palette = List.of(
+                new SectionSnapshot.Entry("anchor:air", 0L, Provenance.SIMULATED),
+                new SectionSnapshot.Entry("anchor:iron", 42L, Provenance.INITIAL));
+        // A whole block of air, then a block of iron in eight cells, each holding a little more heat than the last.
+        CellId block = CellId.of(new GridPos(0, 0, 0));
+        long[] cells = new long[9];
+        int[] entries = new int[9];
+        double[] mass = new double[9];
+        double[] enthalpy = new double[9];
+        cells[0] = BlockCopy.WHOLE;
+        mass[0] = 1.2041;
+        enthalpy[0] = Math.nextUp(-3000.0);
+        for (int i = 0; i < 8; i++) {
+            cells[1 + i] = BlockCopy.pack(block.child(i));
+            entries[1 + i] = 1;
+            mass[1 + i] = 7874.0 / 8;
+            enthalpy[1 + i] = 1.0e9 / 3 + i * 0.1;
+        }
+        RegionSnapshot heat = new RegionSnapshot(2, 3, 4, palette, new int[] {0, 13}, cells, entries, mass, enthalpy);
+        StructureTemplate template = new StructureTemplate();
+        template.fillFromWorld(level, helper.absolutePos(BlockPos.ZERO), new Vec3i(2, 3, 4), false, List.of());
+        CompoundTag blocks = NbtUtils.addCurrentDataVersion(template.save(new CompoundTag()));
+        Snapshots.Saved saved = new Snapshots.Saved(level.dimension().identifier().toString(),
+                new BlockPos(-5, 70, 12), blocks, heat, 1_700_000_000_123L, 86_400L);
+        Path file = Snapshots.file(level, "gametest_numbers");
+        try {
+            Snapshots.write(file, saved);
+            helper.assertValueEqual(saved, Snapshots.read(file), "the snapshot read back");
+            helper.assertTrue(Snapshots.names(level).contains("gametest_numbers"), "the snapshot is not listed: "
+                    + Snapshots.names(level));
+            CompoundTag root = NbtIo.readCompressed(file, NbtAccounter.unlimitedHeap());
+            CompoundTag stored = root.getCompoundOrEmpty("heat");
+            helper.assertTrue(stored.getLongArray("cells").isPresent() && stored.getLongArray("enthalpy").isPresent(),
+                    "cells and enthalpies are not saved as arrays: " + stored);
+            stored.putLongArray("cells", Arrays.copyOf(cells, 8));
+            NbtIo.writeCompressed(root, file);
+            refused(helper, file, "a snapshot with a cell missing");
+            stored.putLongArray("cells", cells);
+            root.putInt("format", Snapshots.FORMAT + 1);
+            NbtIo.writeCompressed(root, file);
+            refused(helper, file, "a snapshot in a later layout");
+            Files.write(file, new byte[] {1, 2, 3});
+            refused(helper, file, "a file of three bytes");
+            Files.delete(file);
+        } catch (IOException e) {
+            throw helper.assertionException(Component.literal("the snapshot could not be written or read: " + e));
+        }
+        helper.succeed();
+    }
+
+    /** Saves a snapshot, failing the test if it is not taken. */
+    private static Snapshots.Saved saveSnapshot(GameTestHelper helper, LevelHeat heat, String name, BlockPos min,
+            BlockPos max) {
+        try {
+            return Snapshots.save(helper.getLevel(), heat, name, min, max).orElseThrow(
+                    () -> helper.assertionException(Component.literal("the snapshot was not taken")));
+        } catch (IOException e) {
+            throw helper.assertionException(Component.literal("the snapshot could not be written: " + e));
+        }
+    }
+
+    /** Reads a snapshot, failing the test if it cannot be read. */
+    private static Snapshots.Saved readSnapshot(GameTestHelper helper, Path file) {
+        try {
+            return Snapshots.read(file);
+        } catch (IOException e) {
+            throw helper.assertionException(Component.literal("the snapshot could not be read: " + e));
+        }
+    }
+
+    /** Checks that a damaged snapshot file is refused. */
+    private static void refused(GameTestHelper helper, Path file, String what) {
+        try {
+            Snapshots.read(file);
+        } catch (IOException e) {
+            return;
+        }
+        throw helper.assertionException(Component.literal(what + " was read"));
     }
 
     /** Returns the translation key of a message, or an empty string if it has none. */

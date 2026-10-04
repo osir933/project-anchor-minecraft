@@ -232,6 +232,22 @@ public final class PhysicalWorld {
     }
 
     /**
+     * Returns an exact copy of a block's state, leaf for leaf if it is refined, to {@linkplain #restoreBlocks put
+     * back} later.
+     *
+     * @param pos the block
+     * @return the copy; the ambient state where there is no section
+     */
+    public BlockCopy copyBlock(GridPos pos) {
+        Section s = section(pos.sectionKey());
+        if (s == null) {
+            return BlockCopy.whole(ambient);
+        }
+        RefinedBlock block = s.refinedBlock(pos.indexInSection());
+        return block == null ? BlockCopy.whole(s.blockState(pos.indexInSection())) : BlockCopy.of(block);
+    }
+
+    /**
      * Visits every leaf of every section in the engine's order.
      *
      * @param visitor receives each leaf and a view of its state that is only valid during the call
@@ -363,6 +379,82 @@ public final class PhysicalWorld {
         events.add(new WorldEvent(tick, WorldEvent.Kind.EDIT,
                 describe(new GridPos(x0, y0, z0)) + " to " + describe(new GridPos(x1, y1, z1)),
                 "filled " + blocks + " blocks with " + describe(state)));
+    }
+
+    /**
+     * Puts copies of blocks back, cell for cell, as a deliberate rewind of part of the world rather than a physical
+     * process. Each block that changes is declared in the ledger like any edit from outside, and the event log
+     * records one restore for all of them. A block that already holds its copy is left as it is. A refined copy that
+     * would take the world past its leaf budget comes back whole, as its totals.
+     *
+     * @param positions the blocks, each once
+     * @param copies the copy to put back in each block, in the same order
+     * @param what what is being restored, for the event log
+     * @return how many blocks changed
+     */
+    public int restoreBlocks(List<GridPos> positions, List<BlockCopy> copies, String what) {
+        if (positions.size() != copies.size()) {
+            throw new IllegalArgumentException(positions.size() + " blocks need as many copies, not "
+                    + copies.size());
+        }
+        for (BlockCopy copy : copies) {
+            for (int i = 0; i < copy.cellCount(); i++) {
+                checkMaterial(copy.state(i).material());
+            }
+        }
+        TotalsBuilder change = new TotalsBuilder(this);
+        int changed = 0;
+        int whole = 0;
+        for (int k = 0; k < positions.size(); k++) {
+            GridPos pos = positions.get(k);
+            BlockCopy copy = copies.get(k);
+            int index = pos.indexInSection();
+            Section s = sectionForEdit(pos.sectionKey());
+            if (holds(s, index, copy)) {
+                continue;
+            }
+            int before = s.leafCount();
+            RefinedBlock old = s.refinedBlock(index);
+            int oldLeaves = old == null ? 0 : old.leafCount();
+            subtractBlock(change, s, index);
+            if (copy.isRefined() && (long) leafCount - oldLeaves + copy.cellCount() <= settings.maxLeaves()) {
+                s.setBlock(index, copy.state(0));
+                RefinedBlock block = s.refinedBlockForUpdate(index);
+                s.afterTreeChange(index, copy.applyTo(block));
+                block.visitLive((cell, state) -> change.add(state, 1));
+            } else {
+                CellState total = copy.total();
+                s.setBlock(index, total);
+                change.add(total, 1);
+                whole += copy.isRefined() ? 1 : 0;
+            }
+            leafCount += s.leafCount() - before;
+            changed++;
+        }
+        ledger.recordExchange(change.build());
+        events.add(new WorldEvent(tick, WorldEvent.Kind.RESTORE, what, "restored " + changed + " of "
+                + positions.size() + " blocks" + (whole == 0 ? ""
+                        : ", " + whole + " of them whole because the leaf budget of " + settings.maxLeaves()
+                                + " cells would have been exceeded")));
+        return changed;
+    }
+
+    /** Tells whether a block holds exactly what a copy of it holds. */
+    private static boolean holds(Section s, int index, BlockCopy copy) {
+        RefinedBlock block = s.refinedBlock(index);
+        if (block == null) {
+            return !copy.isRefined() && s.blockState(index).equals(copy.state(0));
+        }
+        if (block.leafCount() != copy.cellCount()) {
+            return false;
+        }
+        boolean[] same = {true};
+        int[] i = {0};
+        block.visitLive((cell, state) -> {
+            int n = i[0]++;
+            same[0] &= BlockCopy.pack(cell) == copy.cell(n) && state.equals(copy.state(n));
+        });
+        return same[0];
     }
 
     /**

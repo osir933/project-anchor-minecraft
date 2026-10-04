@@ -54,6 +54,10 @@ Java 25, on both the client and the server.
   which shows a bar of how far it has come. Faster heat takes extra steps only while they fit into a budget of
   each game tick, 20 ms unless the `stepBudgetMillis` setting says otherwise, and `/anchor time` says how fast
   heat has managed. The pause and the speed are saved with the world, and a thermometer says when heat is paused.
+- **Snapshots.** Operators can save a box of up to 64 blocks a side with `/anchor snapshot save`: its blocks, what
+  they hold and the heat of every cell, refined blocks cell for cell. `/anchor snapshot restore` puts it back
+  exactly as saved, to run an experiment again, or with the box moved, to run it again beside the first.
+  Snapshots are compressed files in the world's folder, which can be copied into another world.
 
 Known limits of this alpha:
 
@@ -71,3 +75,5 @@ Known limits of this alpha:
 - Land nobody is near is paused, not cooled: it carries on from where it was when a player returns.
 - The sun and the weather keep the game's own time, so heat that runs faster or is sent ahead sees the sun move
   more slowly than it would.
+- Snapshots keep blocks and heat, not things that move such as items and animals, and restoring a box leaves the
+  blocks around it alone, so water that ran out of the box stays where it went.

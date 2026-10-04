@@ -42,7 +42,8 @@ final class ChunkHeat {
     private static final Codec<Provenance> PROVENANCE = Codec.STRING.comapFlatMap(ChunkHeat::provenanceNamed,
             p -> p.name().toLowerCase(Locale.ROOT));
 
-    private static final Codec<SectionSnapshot.Entry> ENTRY = RecordCodecBuilder.create(i -> i.group(
+    /** Reads and writes a palette entry; snapshot files use it too. */
+    static final Codec<SectionSnapshot.Entry> ENTRY = RecordCodecBuilder.create(i -> i.group(
             Codec.STRING.fieldOf("material").forGetter(SectionSnapshot.Entry::material),
             Codec.LONG.optionalFieldOf("owner", 0L).forGetter(SectionSnapshot.Entry::owner),
             PROVENANCE.fieldOf("provenance").forGetter(SectionSnapshot.Entry::provenance))

@@ -396,6 +396,34 @@ public final class SkyModel implements PhysicsModel {
     }
 
     /**
+     * Forgets the skins of the surfaces in a box of blocks, so that they start again from their blocks'
+     * temperatures, as when a world loads; for blocks set from outside the simulation, such as a restored snapshot.
+     *
+     * @param min the box's lowest corner, inclusive
+     * @param max the box's highest corner, inclusive
+     */
+    public void forgetSkins(GridPos min, GridPos max) {
+        for (int z = min.z(); z <= max.z(); z++) {
+            for (int x = min.x(); x <= max.x(); x++) {
+                Group g = groups.get(groupKey(x >> 4, z >> 4));
+                if (g == null) {
+                    continue;
+                }
+                g.dirty = true;
+                int col = (x & 15) | ((z & 15) << 4);
+                if (g.surfaceBlock[col] < 0) {
+                    continue;
+                }
+                int y = GridPos.of(g.surfaceKey[col], g.surfaceBlock[col]).y();
+                if (y >= min.y() && y <= max.y()) {
+                    g.skin[col] = Double.NaN;
+                    g.surfaceK[col] = Double.NaN;
+                }
+            }
+        }
+    }
+
+    /**
      * Returns the sunlight a block takes in now, at its surface or below it.
      *
      * @param pos the block
