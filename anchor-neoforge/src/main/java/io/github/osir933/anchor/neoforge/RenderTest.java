@@ -5,6 +5,8 @@ import com.mojang.logging.LogUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
@@ -16,22 +18,29 @@ import net.minecraft.client.tutorial.TutorialSteps;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Difficulty;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
 import net.minecraft.world.level.WorldDataConfiguration;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.levelgen.WorldOptions;
-import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import org.slf4j.Logger;
 
 /**
- * Checks in a real game client that hot blocks are drawn glowing. It runs only when the game is started with
- * {@code -Danchor.renderTest=true}, as CI does under a virtual display: it creates a flat world, builds a dark room
- * with two iron blocks in it, heats one to {@value #WARM_K} K and the other to {@value #HOT_K} K, photographs them,
- * cools them and photographs them again, then closes the game. CI compares the two pictures.
+ * Checks in a real game client that a laboratory world is set up as it should be and that hot blocks are drawn
+ * glowing. It runs only when the game is started with {@code -Danchor.renderTest=true}, as CI does under a virtual
+ * display: it creates a {@linkplain Laboratory laboratory} world and checks its floor, game rules, time, weather and
+ * the instruments the player was given; then it builds a dark room with two iron blocks in it, heats one to
+ * {@value #WARM_K} K and the other to {@value #HOT_K} K, photographs them, cools them and photographs them again,
+ * checks that the laboratory held the time of day still meanwhile, and closes the game. CI compares the two pictures.
  *
  * <p>Each step logs a line starting with {@value #TAG}; the last says whether every step happened.
  */
@@ -60,6 +69,10 @@ final class RenderTest {
     /** Game ticks the game may take to start and show its first menu. */
     private static final int START_TICKS = 6000;
 
+    /** Game ticks in a Minecraft day; the laboratory holds its clock at noon, {@value #NOON} ticks into the day. */
+    private static final long DAY_TICKS = 24000;
+    private static final long NOON = 6000;
+
     private enum Step {
         START, LOAD_WORLD, BUILD_ROOM, HEAT, SHOOT_HOT, COOL, SHOOT_COLD, DONE
     }
@@ -77,6 +90,11 @@ final class RenderTest {
     private static volatile boolean serverBusy;
     /** Set when the current picture has been saved. */
     private static volatile boolean shotSaved;
+    /** What was wrong with the laboratory, if anything, as the server found it. */
+    private static volatile String laboratoryProblems;
+    /** The Overworld's clock just after the room was built, and when the blocks were last heated or cooled. */
+    private static volatile long clockAfterRoom = -1;
+    private static volatile long clockLastAsked = -1;
 
     private RenderTest() {
     }
@@ -128,7 +146,9 @@ final class RenderTest {
                 }
             }
             case BUILD_ROOM -> {
-                if (serverDone) {
+                if (serverDone && laboratoryProblems != null) {
+                    finish(minecraft, "the laboratory is not set up: " + laboratoryProblems);
+                } else if (serverDone) {
                     next(Step.HEAT);
                 }
             }
@@ -155,7 +175,8 @@ final class RenderTest {
             }
             case SHOOT_COLD -> {
                 if (shoot(minecraft, "cold.png")) {
-                    finish(minecraft, null);
+                    finish(minecraft, clockLastAsked == clockAfterRoom ? null : "the laboratory's clock moved from "
+                            + clockAfterRoom + " to " + clockLastAsked + " ticks although its time stands still");
                 }
             }
             default -> throw new IllegalStateException("unexpected step " + step);
@@ -178,7 +199,7 @@ final class RenderTest {
         return settledTicks >= SETTLE_TICKS;
     }
 
-    /** Creates and opens a flat world in spectator mode, so that the player floats where they are put. */
+    /** Creates and opens a laboratory world in spectator mode, so that the player floats where they are put. */
     private static void createWorld(Minecraft minecraft) {
         minecraft.options.pauseOnLostFocus = false;
         minecraft.options.onboardAccessibility = false;
@@ -188,22 +209,82 @@ final class RenderTest {
                 WorldDataConfiguration.DEFAULT);
         minecraft.createWorldOpenFlows().createFreshLevel("anchor-render-test-" + System.currentTimeMillis(),
                 settings, new WorldOptions(20261004L, false, false),
-                registries -> registries.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(WorldPresets.FLAT).value()
-                        .createWorldDimensions(),
+                registries -> registries.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(Laboratory.PRESET)
+                        .value().createWorldDimensions(),
                 new TitleScreen());
     }
 
     /**
-     * Builds a closed room of black concrete high above the ground, with two iron blocks in it, and puts the player
-     * in it facing them. Runs on the server thread.
+     * Checks the laboratory, then builds a closed room of black concrete high above the ground, with two iron blocks
+     * in it, and puts the player in it facing them. Runs on the server thread.
      */
     private static void buildRoom(MinecraftServer server) {
+        List<String> problems = laboratoryProblems(server);
+        LOGGER.info("{}: the laboratory {}", TAG, problems.isEmpty() ? "is set up as it should be"
+                : "is not set up: " + String.join("; ", problems));
+        laboratoryProblems = problems.isEmpty() ? null : String.join("; ", problems);
         run(server, "time set midnight");
         run(server, "fill -6 96 -6 6 106 6 minecraft:black_concrete hollow");
         run(server, "setblock " + WARM.getX() + " " + WARM.getY() + " " + WARM.getZ() + " minecraft:iron_block");
         run(server, "setblock " + HOT.getX() + " " + HOT.getY() + " " + HOT.getZ() + " minecraft:iron_block");
         run(server, "tp @a 0.5 100 0.5 180 0");
+        clockAfterRoom = server.overworld().getDefaultClockTime();
         serverDone = true;
+    }
+
+    /** Lists what is not as a newly created laboratory world should be. */
+    private static List<String> laboratoryProblems(MinecraftServer server) {
+        List<String> problems = new ArrayList<>();
+        ServerLevel overworld = server.overworld();
+        if (!Laboratory.is(overworld)) {
+            problems.add("the Overworld is not a laboratory");
+        }
+        if (!overworld.getBlockState(new BlockPos(0, -1, 0)).is(Blocks.CONCRETE.lightGray())
+                || !overworld.getBlockState(new BlockPos(0, 0, 0)).isAir()) {
+            problems.add("the floor's top is not light grey concrete at y = -1 but "
+                    + overworld.getBlockState(new BlockPos(0, -1, 0)));
+        }
+        GameRules rules = server.getGameRules();
+        if (rules.get(GameRules.ADVANCE_TIME) || rules.get(GameRules.ADVANCE_WEATHER)) {
+            problems.add("time or weather still runs");
+        }
+        if (rules.get(GameRules.SPAWN_MOBS) || rules.get(GameRules.SPAWN_PHANTOMS)) {
+            problems.add("mobs still spawn");
+        }
+        if (rules.get(GameRules.RANDOM_TICK_SPEED) != 0) {
+            problems.add("random ticks still happen");
+        }
+        long time = overworld.getDefaultClockTime();
+        if (Math.floorMod(time, DAY_TICKS) != NOON) {
+            problems.add("the clock is at " + time + " ticks, not noon");
+        }
+        if (overworld.isRaining()) {
+            problems.add("it rains");
+        }
+        Optional<LevelHeat> heat = HeatEvents.of(overworld);
+        if (heat.isPresent() && heat.get().hasSky()) {
+            problems.add("heat follows a sun");
+        }
+        List<ServerPlayer> players = overworld.players();
+        if (players.isEmpty()) {
+            problems.add("no player is there");
+        } else {
+            Inventory inventory = players.get(0).getInventory();
+            if (!holds(inventory, AnchorItems.THERMOMETER.get())
+                    || !holds(inventory, AnchorItems.THERMAL_CAMERA.get())) {
+                problems.add("the player was not given a thermometer and a thermal camera");
+            }
+        }
+        return problems;
+    }
+
+    private static boolean holds(Inventory inventory, Item item) {
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            if (inventory.getItem(i).is(item)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void run(MinecraftServer server, String command) {
@@ -233,6 +314,7 @@ final class RenderTest {
         }
         boolean warm = heat.get().setTemperature(WARM, warmK);
         boolean hot = heat.get().setTemperature(HOT, hotK);
+        clockLastAsked = server.overworld().getDefaultClockTime();
         LOGGER.info("{}: set {} K: {}, {} K: {}; the server sees {} and {} glowing blocks there", TAG, warmK, warm,
                 hotK, hot, heat.get().glowingBlocks(WARM).size(), heat.get().glowingBlocks(HOT).size());
         serverDone = warm && hot;

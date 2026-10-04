@@ -20,6 +20,7 @@ public final class AnchorClient {
     public AnchorClient(IEventBus modEventBus, ModContainer modContainer) {
         modEventBus.addListener(AnchorClient::registerPayloadHandlers);
         GlowClient.register(NeoForge.EVENT_BUS);
+        LaboratoryScreen.register(NeoForge.EVENT_BUS);
         if (Boolean.getBoolean(RenderTest.PROPERTY)) {
             RenderTest.register(NeoForge.EVENT_BUS);
         }

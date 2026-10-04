@@ -23,5 +23,12 @@
   "message.anchor.probe.full": "A dimension holds at most %s probes; remove one with /anchor probe remove",
   "message.anchor.probe.bad_name": "Probe names are letters, digits, _ and -, at most %s of them",
   "message.anchor.probe.taken": "A probe is already called %s",
-  "item.anchor.chart": "Chart of %s"
+  "item.anchor.chart": "Chart of %s",
+  "generator.anchor.laboratory": "Anchor Laboratory",
+  "biome.anchor.laboratory": "Laboratory",
+  "message.anchor.laboratory.welcome": "Welcome to the Anchor Laboratory",
+  "message.anchor.laboratory.air": "The air here stays at %s and %s humidity, the sun gives no heat, and nothing spawns or grows, so only your experiments change what you build.",
+  "message.anchor.laboratory.instruments": "Use the thermometer on a block to read it, or sneak and use it to record it; hold the thermal camera to see heat.",
+  "message.anchor.laboratory.commands": "%s pauses, steps and speeds up heat, and %s saves an experiment so that you can run it again.",
+  "message.anchor.laboratory.click": "Click to type it"
 }

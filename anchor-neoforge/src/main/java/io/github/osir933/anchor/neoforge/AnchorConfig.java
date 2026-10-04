@@ -3,8 +3,9 @@ package io.github.osir933.anchor.neoforge;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
- * Anchor's settings. They are kept with each world and take effect when the world is next loaded, except
- * where a setting says otherwise.
+ * Anchor's settings, in {@code config/anchor-synced.toml}. Every world shares them unless it has its own copy in its
+ * {@code serverconfig} folder, and they take effect when a world is next loaded, except where a setting says
+ * otherwise.
  */
 final class AnchorConfig {
 
@@ -74,7 +75,7 @@ final class AnchorConfig {
         SUN_AND_SKY = b.comment("Whether the sun warms what it shines on and the ground cools under the night sky, in "
                         + "dimensions with a sun, such as the Overworld. Dark blocks take in more sunlight than pale "
                         + "ones, rain and storms dim the sun and keep the nights mild, and water evaporates into dry "
-                        + "air. Takes effect at once.")
+                        + "air. Laboratory worlds have neither, whatever this says. Takes effect at once.")
                 .define("sunAndSky", true);
         b.pop();
         SPEC = b.build();

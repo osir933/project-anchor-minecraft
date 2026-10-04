@@ -6,7 +6,9 @@ experiments, inspect what the simulation knows and how sure it is, and watch soc
 
 **Status: first alpha.** Heat is the first physics in the game; everything else above is still ahead (see
 the [roadmap](docs/architecture.md#roadmap) and the [changelog](CHANGELOG.md)). Anchor needs Minecraft 26.3
-with NeoForge 26.3 and Java 25, installed on both the game and the server.
+with NeoForge 26.3 and Java 25, installed on both the game and the server. To get started, create a world of the
+Anchor Laboratory type: a flat floor in steady 20 °C air, with a thermometer and a thermal camera in hand (see
+[the Laboratory](#the-laboratory)).
 
 ## Heat in the game
 
@@ -61,7 +63,8 @@ as the simulation has them; blocks heat never touched need nothing, because they
 itself. A block that changed while its land was not simulated starts again from the new block.
 
 Three things to know in this alpha. Vanilla's own rules still run alongside Anchor's: ice still melts near
-bright light and water still freezes in cold biomes, and Anchor follows the blocks they change. Time stands
+bright light and water still freezes in cold biomes, and Anchor follows the blocks they change; a laboratory world
+turns them off. Time stands
 still in land nobody is near: a warm room you walk away from is just as warm when you come back. And the sky
 reaches only the tops of blocks, while the air keeps its biome's temperature by day and by night.
 
@@ -162,9 +165,31 @@ animals and players, are not part of a snapshot, and a restore leaves the blocks
 ran out of it stays where it went until something disturbs it. Snapshots are compressed files in
 `anchor/snapshots/<dimension>` in the world's folder; copy one into another world to run the same experiment there.
 
+### The Laboratory
+
+The Laboratory is a world type for experiments. On the Create New World screen, choose Anchor Laboratory as the
+world type on the World tab. The game mode then switches to Creative with commands allowed, which time control and
+snapshots need; you can change either back before creating the world. On a server, set
+`level-type=anchor\:laboratory` in `server.properties` before the world is first created.
+
+Its Overworld is a flat floor of light grey concrete over stone, on which you stand at y = 0, all of it in the
+Laboratory biome: air at 20 °C and 50 % humidity, where it never rains and no animals or monsters spawn. Experiments
+there run in steady surroundings. The sun lights the lab but gives no heat, and no night sky cools it, so whatever
+nothing heats or cools settles at the air's temperature. When the world is first loaded, the time of day is held at
+noon and the weather at clear; mobs, phantoms, patrols and wandering traders stop spawning; and random ticks stop,
+so crops, grass and copper stay as they are and Minecraft's own melting of ice and snow is off, leaving only
+Anchor's physics to change blocks. These are ordinary game rules, which operators can change back with `/gamerule`.
+The first time each player joins, they are given a thermometer and a thermal camera and a few lines on where to
+begin.
+
+The Nether and the End of a laboratory world are as they always are. A world of the Single Biome type made of the
+Laboratory biome counts as a laboratory too, hills and all.
+
 ### Settings
 
-Anchor's settings are kept with each world, under `[heat]` in its config file, and each is described there:
+Anchor's settings are in `config/anchor-synced.toml` in the game's folder, or the server's, under `[heat]`, and each
+is described there. Every world shares them; to give one world settings of its own, copy the file into the
+`serverconfig` folder in that world's folder. The settings are:
 `enabled`, `secondsPerGameTick` (3.6), `gameTicksPerStep` (4), `stepBudgetMillis` (20), `radius` and
 `verticalRadius` (2 sections), `sectionsLoadedPerStep` (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for
 25 cm cells; 0 turns refinement off), `maxRefinedCells` (16384 in each dimension), `showPhaseChanges` (true) and

@@ -1,5 +1,6 @@
 package io.github.osir933.anchor.neoforge;
 
+import com.mojang.serialization.Codec;
 import java.util.function.Supplier;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.attachment.AttachmentType;
@@ -23,6 +24,22 @@ final class AnchorAttachments {
     /** Whether heat in a level is paused and how fast it runs, saved with the level; see {@link LevelPace}. */
     static final Supplier<AttachmentType<LevelPace>> PACE = TYPES.register("pace",
             () -> AttachmentType.builder(() -> new LevelPace()).serialize(LevelPace.SERIALIZER).build());
+
+    /**
+     * Which version of its setup a laboratory world's Overworld has been given, 0 for none, saved with the level;
+     * see {@link Laboratory}.
+     */
+    static final Supplier<AttachmentType<Integer>> LABORATORY = TYPES.register("laboratory",
+            () -> AttachmentType.builder(() -> 0).serialize(Codec.INT.fieldOf("setup"), version -> version > 0)
+                    .build());
+
+    /**
+     * Which version of the laboratory's instruments a player has been given, 0 for none, saved with the player and
+     * kept when they die; see {@link Laboratory}.
+     */
+    static final Supplier<AttachmentType<Integer>> LABORATORY_KIT = TYPES.register("laboratory_kit",
+            () -> AttachmentType.builder(() -> 0).serialize(Codec.INT.fieldOf("version"), version -> version > 0)
+                    .copyOnDeath().build());
 
     private AnchorAttachments() {
     }
