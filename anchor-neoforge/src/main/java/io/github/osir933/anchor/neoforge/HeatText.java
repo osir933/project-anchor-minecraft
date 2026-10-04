@@ -303,7 +303,10 @@ final class HeatText {
         lines.add("  " + pace(s.pace(), s.stepSeconds(), s.ticksPerStep()));
         lines.add(String.format(Locale.ROOT, "  %d blocks refined into %d smaller cells where temperatures change "
                 + "steeply", w.refinedBlocks(), w.refinedCells()));
-        if (Double.isNaN(w.sunlightW())) {
+        if (s.laboratory()) {
+            lines.add("  A laboratory: no sun or night sky, so what nothing heats or cools settles at the air's "
+                    + "temperature");
+        } else if (Double.isNaN(w.sunlightW())) {
             lines.add("  No sun or night sky here");
         } else {
             lines.add((w.sunlightW() > 0 ? "  Sunlight " + power(w.sunlightW()) + "/m² on level ground" : "  Night")

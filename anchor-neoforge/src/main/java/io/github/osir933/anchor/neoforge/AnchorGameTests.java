@@ -49,6 +49,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
@@ -114,7 +115,8 @@ final class AnchorGameTests {
             new Case("paused_heat_holds_and_steps_by_hand", 600, AnchorGameTests::pausedHeatHoldsAndStepsByHand,
                     CLOCK),
             new Case("snapshot_rewinds_melted_ice", 600, AnchorGameTests::snapshotRewindsMeltedIce),
-            new Case("snapshot_file_keeps_every_number", 20, AnchorGameTests::snapshotFileKeepsEveryNumber));
+            new Case("snapshot_file_keeps_every_number", 20, AnchorGameTests::snapshotFileKeepsEveryNumber),
+            new Case("laboratory_air_is_steady", 20, AnchorGameTests::laboratoryAirIsSteady));
 
     private AnchorGameTests() {
     }
@@ -976,6 +978,27 @@ final class AnchorGameTests {
             helper.assertBlockPresent(expected, relative);
             heat.release(pos);
         });
+    }
+
+    /**
+     * The laboratory's biome gives air at 20 °C and 50 % relative humidity, where it never rains, and the Laboratory
+     * world type is there to choose. The game test world is not made of that biome, so it is no laboratory and heat
+     * there follows the sun as usual.
+     */
+    private static void laboratoryAirIsSteady(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        Biome biome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Laboratory.BIOME).value();
+        double celsius = Climate.kelvin(biome.getBaseTemperature(), 0) - 273.15;
+        double humidity = Climate.relativeHumidity(biome.getModifiedClimateSettings().downfall());
+        helper.assertTrue(Math.abs(celsius - 20.0) < 0.01, "the laboratory's air is at " + celsius + " °C");
+        helper.assertTrue(Math.abs(humidity - 0.5) < 0.001, "the laboratory's air has a relative humidity of "
+                + humidity);
+        helper.assertTrue(!biome.hasPrecipitation(), "it rains in the laboratory");
+        helper.assertTrue(level.registryAccess().lookupOrThrow(Registries.WORLD_PRESET).get(Laboratory.PRESET)
+                .isPresent(), "there is no Laboratory world type");
+        helper.assertTrue(!Laboratory.is(level), "the game test world counts as a laboratory");
+        helper.assertTrue(heat(helper).hasSky(), "heat in the game test world follows no sun");
+        helper.succeed();
     }
 
     private static LevelHeat heat(GameTestHelper helper) {

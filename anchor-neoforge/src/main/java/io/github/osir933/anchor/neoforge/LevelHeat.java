@@ -77,7 +77,8 @@ import org.slf4j.Logger;
  * {@link Climate#sky}), and the simulation learns where the open sky begins in each column from the level's
  * heightmap of its highest blocks: when a section comes in, when a block in it changes, and again as each section
  * is compared with the level. The Nether, under its ceiling, and the End, under its black sky, have no sun or sky
- * in the simulation.
+ * in the simulation, and neither has a {@linkplain Laboratory laboratory}, so that experiments there run in steady
+ * surroundings.
  */
 final class LevelHeat {
 
@@ -117,9 +118,11 @@ final class LevelHeat {
     private final GlowSender glow;
     /** How the level is paced, as saved with it. */
     private final LevelPace pace;
+    /** Whether the level is a laboratory, where heat follows no sun and no sky. */
+    private final boolean laboratory;
     /**
      * Whether the level has a sun and a sky open above it: skylight, no ceiling and the Overworld's kind of sky with
-     * its sun and moon, unlike the Nether and the End.
+     * its sun and moon, unlike the Nether and the End, and is not a laboratory.
      */
     private final boolean hasSun;
     private final TreeSet<Long> changed = new TreeSet<>();
@@ -170,7 +173,9 @@ final class LevelHeat {
         this.planner = new ImportPlanner(AnchorConfig.get(AnchorConfig.RADIUS),
                 AnchorConfig.get(AnchorConfig.VERTICAL_RADIUS), MARGIN);
         DimensionType type = level.dimensionType();
-        this.hasSun = type.hasSkyLight() && !type.hasCeiling() && type.skybox() == DimensionType.Skybox.OVERWORLD;
+        this.laboratory = Laboratory.is(level);
+        this.hasSun = !laboratory && type.hasSkyLight() && !type.hasCeiling()
+                && type.skybox() == DimensionType.Skybox.OVERWORLD;
         this.pacer = new Pacer(ticksPerStep, AnchorConfig.get(AnchorConfig.STEP_BUDGET_MILLIS));
         this.pace = level.getData(AnchorAttachments.PACE);
         pacer.setSpeed(pace.speed());
@@ -528,7 +533,7 @@ final class LevelHeat {
      */
     HeatReport report() {
         return new HeatReport(hosted.status(), hosted.settings().tickSeconds(), lastStepMillis, averageStepMillis,
-                shown, restoredBlocks, restoredSections, failure, pacer.status(), ticksPerStep);
+                shown, restoredBlocks, restoredSections, failure, pacer.status(), ticksPerStep, laboratory);
     }
 
     /**

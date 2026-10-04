@@ -289,7 +289,19 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   section comes in, when a block changes and as each section is compared with the level; whether what lies
   under it lets light through is the engine's to judge. Dyed wool, concrete and terracotta reflect by their map
   colour, their linear luminance between black's 0.05 and white's 0.85, and grass blocks reflect 23 %
-  (`BlockMapper`). The Nether and the End have no sun or sky in the simulation.
+  (`BlockMapper`). The Nether, the End and laboratories have no sun or sky in the simulation.
+- **Laboratory.** The Laboratory world type (`data/anchor/worldgen/world_preset/laboratory.json`, listed in the
+  `minecraft:normal` world preset tag so the Create New World screen offers it) has a flat Overworld of bedrock, 62
+  layers of stone and one of light grey concrete, its top at y = −1, in the `anchor:laboratory` biome: a base
+  temperature of 1.0195652 and a downfall of 0.46153846, which `Climate` turns into 20 °C and 50 % humidity, no
+  precipitation, no mob spawns, no features and no carvers. A level is a laboratory when every biome its generator
+  can place is that biome (`Laboratory.is`), and `LevelHeat` gives it no sun or sky. The first time a laboratory
+  world's server starts, `Laboratory` holds time and weather, stops mob, phantom, patrol and trader spawning and
+  random ticks through the game rules, moves the Overworld's clock to noon and clears the weather, and notes in an
+  attachment on the level which version of this setup it has had, so a later version can add to it. A player's
+  first join gives them a thermometer and a thermal camera, noted in an attachment on the player that survives
+  death. On the client, `LaboratoryScreen` switches the Create New World screen to Creative with commands allowed
+  when the world type changes to the Laboratory.
 - **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
   simulation steps every four game ticks. Both are settings. `TimeCommands` holds the `/anchor time` commands,
   with which operators pause a dimension's heat, step it by hand, run it from 0.01 to 1000 times as fast, or
@@ -336,8 +348,8 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   sections whose glow differs from what they were sent before, one message per section (`GlowPayload`): a block's
   index, emissivity and faces, then each face's temperatures in whole kelvin, one for a face as hot all over
   (`GlowData`). A section that stops glowing, or that the player leaves behind, is sent empty. A full, opaque
-  block hides the face next to it, and blocks that give off light are left out. On the client, the mod's only
-  client code, `GlowClient` draws a sheet of light just in front of each glowing face, following the boxes of
+  block hides the face next to it, and blocks that give off light are left out. On the client, `GlowClient` draws
+  a sheet of light just in front of each glowing face, following the boxes of
   the block's shape: whole where the face glows evenly and spot by spot where it does not, in the black body's
   colour with the glow level as its alpha, added to what is drawn behind it as lightning is.
 
@@ -360,14 +372,20 @@ says heat is paused; it then takes exactly the three steps asked for and stays p
 takes several a tick, and at twice normal speed it takes twice the steps. Packed ice saved in a snapshot at
 −23 °C and then melted comes back from it as packed ice with exactly the heat it had, and the water that spread
 from it is gone; the snapshot file keeps every number, those of a refined block's cells too, and damaged files are
-refused. The game tests load the mod from the build directories, so CI also installs a NeoForge server the way
+refused. The laboratory's biome gives air at 20 °C and 50 % humidity with no rain, the Laboratory world type is
+there, and the game test world is no laboratory, so heat there follows the sun. The game tests load the mod from
+the build directories, so CI also installs a NeoForge server the way
 players do, starts it with the released jar and checks that the mod loads, its self-test passes, heat runs and can
 be paused and resumed, snapshots can be listed and are refused where heat does not run, the server stops cleanly
 and nothing is logged as an error (`.github/scripts/smoke_test.py`). Last, CI starts the game itself under a
 virtual display with software drawing. Started with `-Danchor.renderTest=true`, the mod's `RenderTest` creates a
-flat world, builds a dark room with two iron blocks in it, heats them to 1100 K and 1600 K, photographs them,
-cools them and photographs them again, and `.github/scripts/render_check.py` checks that both glowed where they
-are, red to orange, the hotter one brighter and yellower, and that the glow was gone once they cooled.
+laboratory world and checks that its floor's top is light grey concrete at y = −1, that its game rules hold time
+and weather and stop spawning and random ticks, that its clock stands at noon with clear weather, that heat there
+follows no sun and that the player was given a thermometer and a thermal camera. It then builds a dark room with
+two iron blocks in it, heats them to 1100 K and 1600 K, photographs them, cools them and photographs them again,
+and checks that the laboratory's clock did not move meanwhile; `.github/scripts/render_check.py` checks that both
+blocks glowed where they are, red to orange, the hotter one brighter and yellower, and that the glow was gone once
+they cooled.
 
 ## Requests
 
@@ -398,7 +416,7 @@ Phase 0 (the foundation) and phase 1 (heat and phase change, the first playable 
 temperatures are saved with the world, blocks refine where temperatures change steeply, liquids carry heat by
 moving, the sun and the night sky warm and cool the land, probes record temperatures and chart them on maps, and
 operators can pause heat, step it, run it faster or slower, send it ahead, and save an experiment as a snapshot to
-rewind it to, and hot blocks glow in the colours of a black body. Next for phase 1: a laboratory world. After that
-come structure and fracture;
+rewind it to, hot blocks glow in the colours of a black body, and the Laboratory world type gives experiments steady
+surroundings. Next for phase 1: ready-made experiments in the laboratory. After that come structure and fracture;
 rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

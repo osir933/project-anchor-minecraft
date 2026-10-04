@@ -62,10 +62,16 @@ Java 25, on both the client and the server.
   they hold and the heat of every cell, refined blocks cell for cell. `/anchor snapshot restore` puts it back
   exactly as saved, to run an experiment again, or with the box moved, to run it again beside the first.
   Snapshots are compressed files in the world's folder, which can be copied into another world.
+- **The Laboratory.** A world type for experiments, Anchor Laboratory on the Create New World screen: a flat floor
+  of light grey concrete in air that stays at 20 °C and 50 % humidity, where it never rains, nothing spawns, random
+  ticks are off and the time stands at noon, and where heat follows no sun or night sky, so experiments run in
+  steady surroundings. Choosing it switches the new world to Creative with commands allowed, and each player is
+  given a thermometer and a thermal camera the first time they join.
 
 Known limits of this alpha:
 
-- Vanilla's own rules still run: ice melts near bright light and water freezes in cold biomes as usual.
+- Vanilla's own rules still run: ice melts near bright light and water freezes in cold biomes as usual, except in
+  a laboratory world.
 - Big changes take time: Anchor's clock follows the day (a day is 24 simulated hours) and a block is a full
   cubic metre. Two layers of snow beside a fire melt in about four minutes of play, a block of ice beside lava
   in about six.

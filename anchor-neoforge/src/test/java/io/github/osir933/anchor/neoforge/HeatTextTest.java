@@ -96,7 +96,7 @@ class HeatTextTest {
 
         HostedWorld.Status status = hosted.status();
         List<String> summary = HeatText.status("minecraft:overworld",
-                new HeatReport(status, 14.4, 1.0, 1.0, 0L, 0L, 0, null, NORMAL, 4));
+                new HeatReport(status, 14.4, 1.0, 1.0, 0L, 0L, 0, null, NORMAL, 4, false));
         assertTrue(summary.contains("  " + status.refinedBlocks() + " blocks refined into " + status.refinedCells()
                 + " smaller cells where temperatures change steeply"), summary.toString());
     }
@@ -164,7 +164,7 @@ class HeatTextTest {
                 HostedWorld.Settings.defaults());
         hosted.tick();
         List<String> lines = HeatText.status("minecraft:overworld",
-                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, 1200L, 3, null, NORMAL, 4));
+                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, 1200L, 3, null, NORMAL, 4, false));
         assertEquals("Heat in minecraft:overworld", lines.get(0));
         assertTrue(lines.get(2).contains(" steps of 14 s"), lines.get(2));
         assertTrue(lines.get(2).contains("1.25 ms"), lines.get(2));
@@ -172,7 +172,7 @@ class HeatTextTest {
         assertEquals("  Running at normal speed, a step of 14 s every 4 game ticks", lines.get(3));
         List<String> stopped = HeatText.status("minecraft:the_nether",
                 new HeatReport(hosted.status(), 14.4, 0.0, 0.0, 0L, 0L, 0, "java.lang.IllegalStateException: boom",
-                        NORMAL, 4));
+                        NORMAL, 4, false));
         assertEquals("Heat in minecraft:the_nether: stopped after an error", stopped.get(0));
         assertEquals("  java.lang.IllegalStateException: boom", stopped.get(1));
         assertTrue(stopped.stream().noneMatch(l -> l.contains("came back")), "nothing restored, nothing said");
@@ -210,8 +210,21 @@ class HeatTextTest {
         assertTrue(status(hosted).contains("  No sun or night sky here"), status(hosted).toString());
     }
 
+    @Test
+    void aLaboratorySaysWhyItHasNoSun() {
+        PhysicalWorld world = new PhysicalWorld(WorldSettings.airAt20C(1), MaterialRegistry.withLibrary());
+        HostedWorld hosted = new HostedWorld(world, id -> BlockAppearance.of("anchor:air"),
+                HostedWorld.Settings.defaults());
+        hosted.tick();
+        List<String> lines = HeatText.status("minecraft:overworld", new HeatReport(hosted.status(), 14.4, 1.0, 1.0,
+                0L, 0L, 0, null, NORMAL, 4, true));
+        assertTrue(lines.contains("  A laboratory: no sun or night sky, so what nothing heats or cools settles at the "
+                + "air's temperature"), lines.toString());
+        assertTrue(lines.stream().noneMatch(l -> l.contains("No sun or night sky here")), lines.toString());
+    }
+
     private static List<String> status(HostedWorld hosted) {
         return HeatText.status("minecraft:overworld", new HeatReport(hosted.status(), 14.4, 1.0, 1.0, 0L, 0L, 0, null,
-                NORMAL, 4));
+                NORMAL, 4, false));
     }
 }
