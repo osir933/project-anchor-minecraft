@@ -1,5 +1,6 @@
 package io.github.osir933.anchor.core.host;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -430,12 +431,17 @@ class HostedWorldTest {
     }
 
     @Test
-    void placingAndBreakingBlocksLeavesNothingToSave() {
+    void placingAndBreakingBlocksSavesNoHeat() {
         HostedWorld h = hosted();
         h.importSection(ORIGIN, terrain(Map.of()), 290.0);
-        assertTrue(h.reconcile(new GridPos(4, 10, 4), STONE, Double.NaN));
+        GridPos placed = new GridPos(4, 10, 4);
+        assertTrue(h.reconcile(placed, STONE, Double.NaN));
         assertTrue(h.reconcile(new GridPos(4, 3, 4), AIR, Double.NaN));
-        assertTrue(h.snapshot(ORIGIN).isEmpty(), "blocks placed at the climate come back from the host's blocks");
+        SectionSnapshot saved = h.snapshot(ORIGIN).orElseThrow();
+        assertEquals(0, saved.size(), "blocks placed at the climate come back from the host's blocks");
+        assertArrayEquals(new int[] {placed.indexInSection()}, saved.structureBlocks(), "only that one was built");
+        assertTrue(h.reconcile(placed, AIR, Double.NaN));
+        assertTrue(h.snapshot(ORIGIN).isEmpty());
     }
 
     @Test

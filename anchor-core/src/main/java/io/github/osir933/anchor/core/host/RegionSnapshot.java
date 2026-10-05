@@ -20,6 +20,9 @@ import java.util.Objects;
  * it exactly once, depth first in octant order, which tells where the next block's cells begin, and a whole block
  * is the one cell {@link BlockCopy#WHOLE}. Materials are named by id, in a palette of the same entries section
  * snapshots use; masses and enthalpies are kept exactly.
+ *
+ * <p>It also keeps the {@linkplain StructureFlags structural flags} of the blocks that have any, except for cracks
+ * in joints with blocks outside the box: those joints start intact wherever the box comes back.
  */
 public final class RegionSnapshot {
 
@@ -34,6 +37,27 @@ public final class RegionSnapshot {
     private final int[] entries;
     private final double[] mass;
     private final double[] enthalpy;
+    private final int[] structureBlocks;
+    private final byte[] structureFlags;
+
+    /**
+     * Creates a snapshot of heat alone. The arrays are copied.
+     *
+     * @param sizeX the box's length along x, in blocks
+     * @param sizeY the box's height, in blocks
+     * @param sizeZ the box's length along z, in blocks
+     * @param palette the distinct palette entries
+     * @param blocks the index in the box of each saved block, as numbered by {@link #indexOf}, in ascending order
+     * @param cells the packed cells of the saved blocks, block after block
+     * @param entries each cell's palette index
+     * @param mass each cell's mass in kilograms
+     * @param enthalpy each cell's enthalpy in joules
+     * @throws IllegalArgumentException as the full constructor does
+     */
+    public RegionSnapshot(int sizeX, int sizeY, int sizeZ, List<SectionSnapshot.Entry> palette, int[] blocks,
+            long[] cells, int[] entries, double[] mass, double[] enthalpy) {
+        this(sizeX, sizeY, sizeZ, palette, blocks, cells, entries, mass, enthalpy, new int[0], new byte[0]);
+    }
 
     /**
      * Creates a snapshot. The arrays are copied.
@@ -47,16 +71,23 @@ public final class RegionSnapshot {
      * @param entries each cell's palette index
      * @param mass each cell's mass in kilograms
      * @param enthalpy each cell's enthalpy in joules
+     * @param structureBlocks the index in the box of each block with structural flags, in ascending order
+     * @param structureFlags each such block's flags, as {@link SectionSnapshot#structureFlags} describes them
      * @throws IllegalArgumentException if the box is empty or too large to number its blocks, the arrays of cells
      *     differ in length, the blocks are not ascending indices in the box, their cells do not cover them exactly
-     *     once in order, a palette index is outside the palette, or a value could not be a cell's state
+     *     once in order, a palette index is outside the palette, a value could not be a cell's state, or structural
+     *     flags are zero or unknown
      */
     public RegionSnapshot(int sizeX, int sizeY, int sizeZ, List<SectionSnapshot.Entry> palette, int[] blocks,
-            long[] cells, int[] entries, double[] mass, double[] enthalpy) {
+            long[] cells, int[] entries, double[] mass, double[] enthalpy, int[] structureBlocks,
+            byte[] structureFlags) {
         if (sizeX < 1 || sizeY < 1 || sizeZ < 1 || (long) sizeX * sizeY * sizeZ > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("a box of " + sizeX + " by " + sizeY + " by " + sizeZ
                     + " blocks cannot be saved");
         }
+        this.structureBlocks = structureBlocks.clone();
+        this.structureFlags = structureFlags.clone();
+        SectionSnapshot.checkStructure(this.structureBlocks, this.structureFlags, sizeX * sizeY * sizeZ);
         this.sizeX = sizeX;
         this.sizeY = sizeY;
         this.sizeZ = sizeZ;
@@ -298,24 +329,56 @@ public final class RegionSnapshot {
         return enthalpy.clone();
     }
 
+    /**
+     * Returns the index in the box of every block with structural flags, for storing.
+     *
+     * @return a copy, in ascending order
+     */
+    public int[] structureBlocks() {
+        return structureBlocks.clone();
+    }
+
+    /**
+     * Returns the structural flags of the blocks {@link #structureBlocks} lists, as
+     * {@link SectionSnapshot#structureFlags} describes them.
+     *
+     * @return a copy, in the order of {@link #structureBlocks()}
+     */
+    public byte[] structureFlags() {
+        return structureFlags.clone();
+    }
+
+    /**
+     * Returns the structural flags of a block of the box.
+     *
+     * @param index the block's index in the box, as numbered by {@link #indexOf}
+     * @return its flags, or 0 if it has none
+     */
+    int structureAt(int index) {
+        int k = Arrays.binarySearch(structureBlocks, index);
+        return k >= 0 ? structureFlags[k] : 0;
+    }
+
     @Override
     public boolean equals(Object o) {
         return o instanceof RegionSnapshot s && sizeX == s.sizeX && sizeY == s.sizeY && sizeZ == s.sizeZ
                 && palette.equals(s.palette) && Arrays.equals(blocks, s.blocks) && Arrays.equals(cells, s.cells)
                 && Arrays.equals(entries, s.entries) && Arrays.equals(mass, s.mass)
-                && Arrays.equals(enthalpy, s.enthalpy);
+                && Arrays.equals(enthalpy, s.enthalpy) && Arrays.equals(structureBlocks, s.structureBlocks)
+                && Arrays.equals(structureFlags, s.structureFlags);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(sizeX, sizeY, sizeZ, palette, Arrays.hashCode(blocks), Arrays.hashCode(cells),
-                Arrays.hashCode(entries), Arrays.hashCode(mass), Arrays.hashCode(enthalpy));
+                Arrays.hashCode(entries), Arrays.hashCode(mass), Arrays.hashCode(enthalpy),
+                Arrays.hashCode(structureBlocks), Arrays.hashCode(structureFlags));
     }
 
     @Override
     public String toString() {
         return "RegionSnapshot[" + sizeX + "x" + sizeY + "x" + sizeZ + ", " + blocks.length + " blocks saved in "
-                + cells.length + " cells]";
+                + cells.length + " cells, " + structureBlocks.length + " with structure]";
     }
 
     /** Gathers the saved blocks of a snapshot, in the order of their indices in the box. */
@@ -332,6 +395,9 @@ public final class RegionSnapshot {
         private double[] enthalpy = new double[16];
         private int cellCount;
         private int lastEntry = -1;
+        private int[] structureBlocks = new int[16];
+        private byte[] structureFlags = new byte[16];
+        private int structureCount;
 
         Builder(int sizeX, int sizeY, int sizeZ) {
             this.sizeX = sizeX;
@@ -370,10 +436,22 @@ public final class RegionSnapshot {
             cellCount++;
         }
 
+        /** Records a block's structural flags; blocks come in ascending order of index. */
+        void structure(int index, int flags) {
+            if (structureCount == structureBlocks.length) {
+                structureBlocks = Arrays.copyOf(structureBlocks, 2 * structureCount);
+                structureFlags = Arrays.copyOf(structureFlags, 2 * structureCount);
+            }
+            structureBlocks[structureCount] = index;
+            structureFlags[structureCount] = (byte) flags;
+            structureCount++;
+        }
+
         RegionSnapshot build() {
             return new RegionSnapshot(sizeX, sizeY, sizeZ, palette, Arrays.copyOf(blocks, blockCount),
                     Arrays.copyOf(cells, cellCount), Arrays.copyOf(entries, cellCount),
-                    Arrays.copyOf(mass, cellCount), Arrays.copyOf(enthalpy, cellCount));
+                    Arrays.copyOf(mass, cellCount), Arrays.copyOf(enthalpy, cellCount),
+                    Arrays.copyOf(structureBlocks, structureCount), Arrays.copyOf(structureFlags, structureCount));
         }
     }
 }
