@@ -25,6 +25,7 @@ public final class Material {
     private final Composition composition;
     private final EnthalpyCurve thermal;
     private final String notes;
+    private final Mechanics mechanics;
     private final double minSpecificHeat;
     private final Phase onlyPhase;
 
@@ -34,6 +35,10 @@ public final class Material {
         this.composition = Objects.requireNonNull(builder.composition, "composition");
         this.thermal = new EnthalpyCurve(builder.regions, builder.transitions);
         this.notes = builder.notes;
+        this.mechanics = builder.mechanics;
+        if (mechanics != null && thermal.regions().stream().noneMatch(r -> r.phase() == Phase.SOLID)) {
+            throw new IllegalArgumentException(id + " carries loads but has no solid phase");
+        }
         double min = Double.POSITIVE_INFINITY;
         for (PhaseRegion r : thermal.regions()) {
             PropertyCurve c = r.specificHeat();
@@ -107,6 +112,15 @@ public final class Material {
      */
     public String notes() {
         return notes;
+    }
+
+    /**
+     * Returns how the material carries loads while solid.
+     *
+     * @return the mechanical description, or {@code null} if the material never carries loads, as a gas
+     */
+    public Mechanics mechanics() {
+        return mechanics;
     }
 
     /**
@@ -391,6 +405,11 @@ public final class Material {
         for (PhaseTransition t : thermal.transitions()) {
             sources.putIfAbsent(t.source().key(), t.source());
         }
+        if (mechanics != null) {
+            for (Map.Entry<String, Source> e : mechanics.sources().entrySet()) {
+                sources.putIfAbsent(e.getKey(), e.getValue());
+            }
+        }
         return sources;
     }
 
@@ -419,6 +438,7 @@ public final class Material {
         private final List<PhaseRegion> regions = new ArrayList<>();
         private final List<PhaseTransition> transitions = new ArrayList<>();
         private String notes = "";
+        private Mechanics mechanics;
 
         private Builder(String id, String name) {
             this.id = Objects.requireNonNull(id, "id");
@@ -475,6 +495,17 @@ public final class Material {
          */
         public Builder notes(String notes) {
             this.notes = Objects.requireNonNull(notes, "notes");
+            return this;
+        }
+
+        /**
+         * Says how the material carries loads while solid.
+         *
+         * @param newMechanics the mechanical description
+         * @return this builder
+         */
+        public Builder mechanics(Mechanics newMechanics) {
+            this.mechanics = Objects.requireNonNull(newMechanics, "mechanics");
             return this;
         }
 

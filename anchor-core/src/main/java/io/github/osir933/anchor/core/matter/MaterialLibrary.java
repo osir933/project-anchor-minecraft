@@ -111,6 +111,173 @@ public final class MaterialLibrary {
                     + "Allen et al. (FAO Irrigation and Drainage Paper 56, 1998) derive 70 s/m for grass",
             DataQuality.ESTIMATED);
 
+    /** Typical room-temperature mechanical properties of annealed, commercially pure metals. */
+    public static final Source METALS = new Source("asm-desk-edition",
+            "J. R. Davis (ed.), Metals Handbook Desk Edition, 2nd ed., ASM International (1998): annealed, "
+                    + "commercially pure metals at 20 °C",
+            DataQuality.HANDBOOK_TYPICAL);
+    /** Iron's stiffness and yield strength and how heat takes them away. */
+    public static final Source IRON_STRENGTH = new Source("iron-strength",
+            "Annealed commercially pure iron at 20 °C (Davis, Metals Handbook Desk Edition, 1998), reduced with "
+                    + "temperature by the carbon steel factors of EN 1993-1-2:2005 (Eurocode 3, structural fire "
+                    + "design) Table 3.1, which iron follows closely",
+            DataQuality.ESTIMATED);
+    /** How heat softens annealed copper, gold and aluminium. */
+    public static final Source METAL_HEAT = new Source("metal-heat",
+            "Annealed pure metal at 20 °C (Davis, Metals Handbook Desk Edition, 1998), weakened with temperature "
+                    + "after typical elevated-temperature data for annealed face-centred cubic metals, which keep "
+                    + "about half their stiffness and none of their strength at their melting point",
+            DataQuality.ESTIMATED);
+    /** Eurocode values for normal concrete, cold and in fire. */
+    public static final Source CONCRETE_CODE = new Source("en-1992",
+            "EN 1992-1-1:2004 Table 3.1 (mean values of strength class C30/37) and EN 1992-1-2:2004 Table 3.1 "
+                    + "and 3.2.2.2 (siliceous aggregate at elevated temperature; stiffness from the strain at peak "
+                    + "stress)",
+            DataQuality.HANDBOOK_TYPICAL);
+    /** Intact rock, cold and heated. */
+    public static final Source ROCK_STRENGTH = new Source("rock-strength",
+            "Typical intact rock at 20 °C after R. E. Goodman, Introduction to Rock Mechanics, 2nd ed., Wiley "
+                    + "(1989), chapters 3 and 6; weakened above about 400 °C as heated crystalline rock is in "
+                    + "published tests, where quartz expanding through its 573 °C transition cracks the grains",
+            DataQuality.ESTIMATED);
+    /** Fired clay brick. */
+    public static final Source BRICK_STRENGTH = new Source("brick-strength",
+            "Typical fired clay brick of moderate strength (units to EN 771-1); kept near its cold strength to "
+                    + "about 600 °C, as fired ceramics are, then weakened",
+            DataQuality.ESTIMATED);
+    /** Soda-lime glass, cold and softening. */
+    public static final Source GLASS_STRENGTH = new Source("glass-strength",
+            "EN 572-1:2012 (soda-lime silicate glass: E = 70 GPa, Poisson's ratio 0.2, expansion 9e-6 per kelvin, "
+                    + "characteristic bending strength of annealed glass 45 MPa); softening above the strain point "
+                    + "near 790 K estimated from the glass's viscosity reference points",
+            DataQuality.ESTIMATED);
+    /** Structural timber, cold and in fire. */
+    public static final Source TIMBER_STRENGTH = new Source("timber-strength",
+            "Strength classes of EN 338:2016 (C24 softwood, D40 hardwood), characteristic values raised to "
+                    + "estimated means; reduced with temperature after EN 1995-1-2:2004 Annex B",
+            DataQuality.ESTIMATED);
+    /** Polycrystalline ice. */
+    public static final Source ICE_MECHANICS = new Source("schulson-duval-2009",
+            "E. M. Schulson and P. Duval, Creep and Fracture of Ice, Cambridge University Press (2009): "
+                    + "polycrystalline ice near -10 °C at moderate loading rates",
+            DataQuality.HANDBOOK_TYPICAL);
+    /** Soils and loose granular materials. */
+    public static final Source SOIL_MECHANICS = new Source("craig-soil-mechanics",
+            "J. A. Knappett and R. F. Craig, Craig's Soil Mechanics, 9th ed., CRC Press (2019): typical stiffness, "
+                    + "cohesion and angles of friction",
+            DataQuality.ESTIMATED);
+    /** Snow. */
+    public static final Source SNOW_MECHANICS = new Source("mellor-1975",
+            "M. Mellor, A review of basic snow mechanics, IAHS Publication 114 (1975) 251-291; strength rises "
+                    + "steeply with density",
+            DataQuality.ESTIMATED);
+    /** Engineering ceramics and minerals. */
+    public static final Source ASHBY = new Source("ashby-2017",
+            "M. F. Ashby, Materials Selection in Mechanical Design, 5th ed., Butterworth-Heinemann (2017), "
+                    + "Appendix C",
+            DataQuality.HANDBOOK_TYPICAL);
+    /** Friction of a material on itself. */
+    public static final Source FRICTION = new Source("friction-typical",
+            "Typical static friction coefficients of rough, dry surfaces of a material on itself; real values "
+                    + "depend strongly on the surface",
+            DataQuality.ESTIMATED);
+    /** Thermal expansion. */
+    public static final Source EXPANSION = new Source("expansion-typical",
+            "Typical linear thermal expansion coefficients, after the CRC Handbook (97th ed.) for metals and "
+                    + "typical published values for rocks, ceramics and other solids",
+            DataQuality.ESTIMATED);
+
+    /** Eurocode 3's reduction of carbon steel's yield strength with temperature, as (kelvin, factor) pairs. */
+    private static final double[] STEEL_YIELD = {
+        293.15, 1.0, 673.15, 1.0, 773.15, 0.78, 873.15, 0.47, 973.15, 0.23, 1073.15, 0.11, 1173.15, 0.06,
+        1273.15, 0.04, 1373.15, 0.02, 1473.15, 0.0};
+    /** Eurocode 3's reduction of carbon steel's Young's modulus with temperature. */
+    private static final double[] STEEL_STIFFNESS = {
+        293.15, 1.0, 373.15, 1.0, 473.15, 0.9, 573.15, 0.8, 673.15, 0.7, 773.15, 0.6, 873.15, 0.31, 973.15, 0.13,
+        1073.15, 0.09, 1173.15, 0.0675, 1273.15, 0.045, 1373.15, 0.0225, 1473.15, 0.0};
+    /** How annealed copper's yield strength falls with temperature. */
+    private static final double[] COPPER_YIELD = {
+        293.15, 1.0, 473.15, 0.9, 673.15, 0.7, 873.15, 0.4, 1073.15, 0.15, 1273.15, 0.04, 1357.77, 0.0};
+    /** How copper's Young's modulus falls with temperature. */
+    private static final double[] COPPER_STIFFNESS = {293.15, 1.0, 673.15, 0.85, 1073.15, 0.7, 1357.77, 0.6};
+    /** How annealed gold's yield strength falls with temperature. */
+    private static final double[] GOLD_YIELD = {
+        293.15, 1.0, 473.15, 0.9, 673.15, 0.7, 873.15, 0.4, 1073.15, 0.15, 1273.15, 0.04, 1337.33, 0.0};
+    /** How gold's Young's modulus falls with temperature. */
+    private static final double[] GOLD_STIFFNESS = {293.15, 1.0, 673.15, 0.88, 1073.15, 0.72, 1337.33, 0.6};
+    /** How annealed aluminium's yield strength falls with temperature. */
+    private static final double[] ALUMINIUM_YIELD = {
+        293.15, 1.0, 373.15, 0.95, 473.15, 0.8, 573.15, 0.6, 673.15, 0.35, 773.15, 0.15, 873.15, 0.04,
+        933.47, 0.0};
+    /** How aluminium's Young's modulus falls with temperature. */
+    private static final double[] ALUMINIUM_STIFFNESS = {
+        293.15, 1.0, 373.15, 0.97, 473.15, 0.86, 573.15, 0.68, 673.15, 0.4, 873.15, 0.1, 933.47, 0.05};
+    /** Eurocode 2's reduction of concrete's compressive strength with temperature (siliceous aggregate). */
+    private static final double[] CONCRETE_COMPRESSION = {
+        293.15, 1.0, 373.15, 1.0, 473.15, 0.95, 573.15, 0.85, 673.15, 0.75, 773.15, 0.6, 873.15, 0.45,
+        973.15, 0.3, 1073.15, 0.15, 1173.15, 0.08, 1273.15, 0.04, 1373.15, 0.01, 1473.15, 0.0};
+    /** Eurocode 2's reduction of concrete's tensile strength with temperature. */
+    private static final double[] CONCRETE_TENSION = {293.15, 1.0, 373.15, 1.0, 873.15, 0.0};
+    /** Concrete's secant modulus to peak stress, from Eurocode 2's strength and strain at peak stress. */
+    private static final double[] CONCRETE_STIFFNESS = {
+        293.15, 1.0, 373.15, 0.625, 473.15, 0.432, 573.15, 0.304, 673.15, 0.1875, 773.15, 0.1, 873.15, 0.045,
+        973.15, 0.03, 1073.15, 0.015, 1173.15, 0.008, 1273.15, 0.004, 1373.15, 0.001};
+    /** How heat weakens crystalline rock. */
+    private static final double[] ROCK_STRENGTH_HEAT = {
+        293.15, 1.0, 473.15, 1.0, 673.15, 0.9, 873.15, 0.65, 1073.15, 0.35, 1273.15, 0.15};
+    /** How heat lowers the stiffness of crystalline rock. */
+    private static final double[] ROCK_STIFFNESS_HEAT = {
+        293.15, 1.0, 473.15, 0.9, 673.15, 0.75, 873.15, 0.45, 1073.15, 0.25, 1273.15, 0.1};
+    /** How heat weakens fired brick. */
+    private static final double[] BRICK_STRENGTH_HEAT = {
+        293.15, 1.0, 873.15, 1.0, 1073.15, 0.8, 1273.15, 0.5, 1473.15, 0.2};
+    /** How heat lowers the stiffness of fired brick. */
+    private static final double[] BRICK_STIFFNESS_HEAT = {
+        293.15, 1.0, 673.15, 1.0, 873.15, 0.8, 1073.15, 0.5, 1273.15, 0.3, 1473.15, 0.1};
+    /** How soda-lime glass weakens as it softens. */
+    private static final double[] GLASS_STRENGTH_HEAT = {
+        293.15, 1.0, 723.15, 1.0, 813.15, 0.6, 873.15, 0.2, 923.15, 0.03, 1000.0, 0.005};
+    /** How soda-lime glass loses stiffness as it softens. */
+    private static final double[] GLASS_STIFFNESS_HEAT = {
+        293.15, 1.0, 773.15, 0.95, 813.15, 0.8, 873.15, 0.3, 923.15, 0.05, 1000.0, 0.01};
+    /** How obsidian, a glass that softens about 150 K higher, weakens. */
+    private static final double[] OBSIDIAN_HEAT = {293.15, 1.0, 873.15, 0.95, 973.15, 0.5, 1073.15, 0.05, 1273.15, 0.01};
+    /** Eurocode 5's reduction of timber's tensile strength along the grain with temperature. */
+    private static final double[] TIMBER_TENSION = {293.15, 1.0, 373.15, 0.65, 573.15, 0.0};
+    /** Eurocode 5's reduction of timber's compressive strength along the grain with temperature. */
+    private static final double[] TIMBER_COMPRESSION = {293.15, 1.0, 373.15, 0.25, 573.15, 0.0};
+    /** Eurocode 5's reduction of timber's Young's modulus along the grain with temperature. */
+    private static final double[] TIMBER_STIFFNESS = {293.15, 1.0, 373.15, 0.5, 573.15, 0.0};
+
+    private static final Mechanics ICE_STRENGTH = new Mechanics(Mechanics.Failure.BRITTLE,
+            constant(9.0e9, ICE_MECHANICS), 0.33, constant(1.0e6, ICE_MECHANICS), constant(5.0e6, ICE_MECHANICS),
+            0.1, constant(5.0e-5, EXPANSION), 0.1e6, ICE_MECHANICS);
+    private static final Mechanics IRON_MECHANICS = new Mechanics(Mechanics.Failure.DUCTILE,
+            scaled(IRON_STRENGTH, 211e9, STEEL_STIFFNESS), 0.29, scaled(IRON_STRENGTH, 150e6, STEEL_YIELD),
+            scaled(IRON_STRENGTH, 150e6, STEEL_YIELD), 0.6,
+            table(EXPANSION, 293.15, 11.8e-6, 400.0, 13.4e-6, 500.0, 14.4e-6, 600.0, 15.1e-6, 800.0, 16.2e-6),
+            Double.NaN, METALS);
+    private static final Mechanics COPPER_MECHANICS = new Mechanics(Mechanics.Failure.DUCTILE,
+            scaled(METAL_HEAT, 117e9, COPPER_STIFFNESS), 0.34, scaled(METAL_HEAT, 69e6, COPPER_YIELD),
+            scaled(METAL_HEAT, 69e6, COPPER_YIELD), 0.6,
+            table(EXPANSION, 293.15, 16.5e-6, 500.0, 18.3e-6, 800.0, 19.8e-6, 1200.0, 22.0e-6), Double.NaN, METALS);
+    private static final Mechanics ALUMINIUM_MECHANICS = new Mechanics(Mechanics.Failure.DUCTILE,
+            scaled(METAL_HEAT, 69e9, ALUMINIUM_STIFFNESS), 0.33, scaled(METAL_HEAT, 34e6, ALUMINIUM_YIELD),
+            scaled(METAL_HEAT, 34e6, ALUMINIUM_YIELD), 0.6,
+            table(EXPANSION, 293.15, 23.1e-6, 500.0, 26.4e-6, 800.0, 33.0e-6), Double.NaN, METALS);
+    private static final Mechanics GOLD_MECHANICS = new Mechanics(Mechanics.Failure.DUCTILE,
+            scaled(METAL_HEAT, 79e9, GOLD_STIFFNESS), 0.42, scaled(METAL_HEAT, 30e6, GOLD_YIELD),
+            scaled(METAL_HEAT, 30e6, GOLD_YIELD), 0.5, table(EXPANSION, 293.15, 14.2e-6, 1200.0, 18.0e-6),
+            Double.NaN, METALS);
+    private static final Mechanics SAND_MECHANICS = granular(50e6, 0.65, 10e-6);
+    private static final Mechanics GRAVEL_MECHANICS = granular(100e6, 0.84, 8e-6);
+    private static final Mechanics GLASS_MECHANICS = new Mechanics(Mechanics.Failure.BRITTLE,
+            scaled(GLASS_STRENGTH, 70e9, GLASS_STIFFNESS_HEAT), 0.2, scaled(GLASS_STRENGTH, 45e6, GLASS_STRENGTH_HEAT),
+            scaled(GLASS_STRENGTH, 800e6, GLASS_STRENGTH_HEAT), 0.9, constant(9e-6, GLASS_STRENGTH), 0.75e6,
+            GLASS_STRENGTH);
+    private static final Mechanics HARDWOOD_MECHANICS = timber(13e9, 30e6, 38e6, 0.5e6);
+    private static final Mechanics SOFTWOOD_MECHANICS = timber(11e9, 20e6, 30e6, 0.4e6);
+
     /** The specific heat of ice Ih, shared by every solid form of water. */
     private static final PropertyCurve ICE_SPECIFIC_HEAT =
             table(INCROPERA, 200.0, 1600.0, 253.15, 1945.0, 273.15, 2040.0);
@@ -180,6 +347,7 @@ public final class MaterialLibrary {
             .region(LIQUID_WATER)
             .transition(WATER_BOILING)
             .region(STEAM)
+            .mechanics(ICE_STRENGTH)
             .notes("Steam properties are at 1 atm. A gas has no surface emissivity; radiation inside gases "
                     + "needs a participating-media model, not yet included.")
             .build();
@@ -215,6 +383,7 @@ public final class MaterialLibrary {
                     table(LIQUID_METALS, 1811.0, 5.851e-3, 1900.0, 4.983e-3, 2000.0, 4.232e-3, 2200.0, 3.192e-3,
                             2500.0, 2.276e-3, 2800.0, 1.744e-3, 3134.0, 1.377e-3))
                             .withSurface(Surface.opaque(0.35, ALBEDO)))
+            .mechanics(IRON_MECHANICS)
             .notes("The Curie point near 1043 K appears as a peak in specific heat, approximated by a few "
                     + "points. Emissivity assumes an oxidised surface. Boiling at 3134 K is outside the range.")
             .build();
@@ -238,6 +407,7 @@ public final class MaterialLibrary {
                     table(LIQUID_METALS, 1357.77, 4.020e-3, 1400.0, 3.744e-3, 1500.0, 3.213e-3, 1600.0, 2.811e-3,
                             1800.0, 2.250e-3, 2100.0, 1.744e-3, 2500.0, 1.366e-3, 2835.0, 1.174e-3))
                             .withSurface(Surface.opaque(0.35, ALBEDO)))
+            .mechanics(COPPER_MECHANICS)
             .notes("Emissivity assumes an oxidised surface; polished copper is near 0.03.")
             .build();
 
@@ -260,6 +430,7 @@ public final class MaterialLibrary {
                     table(LIQUID_METALS, 933.47, 1.344e-3, 1000.0, 1.178e-3, 1100.0, 0.9955e-3, 1200.0, 0.8653e-3,
                             1400.0, 0.6943e-3, 1700.0, 0.5498e-3, 2000.0, 0.4670e-3, 2400.0, 0.4003e-3,
                             2792.0, 0.3592e-3)).withSurface(Surface.opaque(0.80, ALBEDO)))
+            .mechanics(ALUMINIUM_MECHANICS)
             .build();
 
     /** Pure gold. */
@@ -281,6 +452,7 @@ public final class MaterialLibrary {
                     table(LIQUID_METALS, 1337.33, 4.730e-3, 1400.0, 4.437e-3, 1500.0, 4.051e-3, 1700.0, 3.486e-3,
                             2000.0, 2.945e-3, 2500.0, 2.432e-3, 3129.0, 2.086e-3))
                             .withSurface(Surface.opaque(0.75, ALBEDO)))
+            .mechanics(GOLD_MECHANICS)
             .build();
 
     /** Granite, the default rock behind vanilla stone. */
@@ -304,6 +476,7 @@ public final class MaterialLibrary {
                     constant(0.85, EMISSIVITY),
                     table(MELT_VISCOSITY, 1510.0, 2.39e5, 1600.0, 5.23e4, 1700.0, 1.18e4, 1800.0, 3.2e3, 2000.0, 355.0,
                             2250.0, 40.7, 2500.0, 7.34)).withSurface(Surface.opaque(0.10, ALBEDO)))
+            .mechanics(rock(ROCK_STRENGTH, 50e9, 0.25, 10e6, 150e6, 0.6, 8e-6, 1.5e6))
             .notes("Composition is a typical granite (" + COMPOSITION_ESTIMATE.key() + "). Specific heat and "
                     + "conductivity are 300 K values held constant; both change with temperature in reality.")
             .build();
@@ -324,6 +497,7 @@ public final class MaterialLibrary {
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.10, ALBEDO)))
             .transition(BASALT_MELTING)
             .region(BASALTIC_MELT)
+            .mechanics(rock(ROCK_STRENGTH, 70e9, 0.25, 14e6, 200e6, 0.6, 7e-6, 2.0e6))
             .notes("Basalt melts between about 1373 K and 1473 K; one transition at 1423 K stands in for "
                     + "that range.")
             .build();
@@ -338,6 +512,7 @@ public final class MaterialLibrary {
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(SILICA_MELTING)
             .region(SILICA_MELT)
+            .mechanics(SAND_MECHANICS)
             .notes("Bulk density includes about 40 percent air-filled pores; melting closes them, which changes "
                     + "volume and is not yet modelled.")
             .build();
@@ -355,6 +530,7 @@ public final class MaterialLibrary {
                     constant(1.4, INCROPERA),
                     constant(2500.0, INCROPERA),
                     constant(0.92, EMISSIVITY)).withSurface(new Surface(0.07, 0.95, 0.74, Surface.DRY, WINDOW_GLASS)))
+            .mechanics(GLASS_MECHANICS)
             .notes("Glass softens gradually above about 840 K instead of melting at one temperature; states "
                     + "above 1000 K are outside the description until a viscous model exists.")
             .build();
@@ -371,8 +547,11 @@ public final class MaterialLibrary {
                     constant(0.16, INCROPERA),
                     constant(720.0, INCROPERA),
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
+            .mechanics(HARDWOOD_MECHANICS)
             .notes("Wood starts to decompose (pyrolysis) above about 473 K; burning and charring need the "
-                    + "chemistry model, so hotter states are outside this description.")
+                    + "chemistry model, so hotter states are outside this description. A block of wood carries "
+                    + "loads equally in every direction, as strongly as structural timber along its grain; across "
+                    + "the grain real wood is several times weaker.")
             .build();
 
     /** Dry air at one atmosphere. */
@@ -407,8 +586,9 @@ public final class MaterialLibrary {
                     constant(0.12, INCROPERA),
                     constant(510.0, INCROPERA),
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.40, ALBEDO)))
+            .mechanics(SOFTWOOD_MECHANICS)
             .notes("Like hardwood, softwood starts to decompose above about 473 K; burning needs the chemistry "
-                    + "model.")
+                    + "model. It too carries loads equally in every direction, as strongly as along its grain.")
             .build();
 
     /** Moist mineral soil, as under grass. */
@@ -425,6 +605,7 @@ public final class MaterialLibrary {
                     constant(0.52, INCROPERA),
                     constant(2050.0, INCROPERA),
                     constant(0.94, EMISSIVITY)).withSurface(Surface.opaque(0.15, WET_SURFACES).evaporating(100.0)))
+            .mechanics(weak(SOIL_MECHANICS, 10e6, 0.3, 5e3, 50e3, 0.58, 10e-6))
             .notes("Composition is a typical moist mineral soil (" + COMPOSITION_ESTIMATE.key() + "). Freezing and "
                     + "boiling of the pore water are not modelled yet, so the soil keeps its moist properties at "
                     + "every temperature.")
@@ -442,6 +623,7 @@ public final class MaterialLibrary {
                     constant(1.3, INCROPERA),
                     constant(1460.0, INCROPERA),
                     constant(0.91, EMISSIVITY)).withSurface(Surface.opaque(0.20, WET_SURFACES).evaporating(150.0)))
+            .mechanics(weak(SOIL_MECHANICS, 20e6, 0.35, 20e3, 100e3, 0.47, 10e-6))
             .notes("Firing clay into brick, which starts with dehydration near 800 K, needs the chemistry model.")
             .build();
 
@@ -457,6 +639,7 @@ public final class MaterialLibrary {
             .region(LIQUID_WATER)
             .transition(WATER_BOILING)
             .region(STEAM)
+            .mechanics(weak(SNOW_MECHANICS, 50e6, 0.2, 50e3, 200e3, 0.3, 5.0e-5))
             .notes("The air between the grains makes snow conduct heat ten times worse than solid ice. Once "
                     + "melted it behaves as water.")
             .build();
@@ -473,6 +656,7 @@ public final class MaterialLibrary {
             .region(LIQUID_WATER)
             .transition(WATER_BOILING)
             .region(STEAM)
+            .mechanics(weak(SNOW_MECHANICS, 1e6, 0.1, 1e3, 2e3, 0.5, 5.0e-5))
             .notes("Fresh snow is about nine parts air and insulates almost as well as wool. Once melted it "
                     + "behaves as water.")
             .build();
@@ -489,6 +673,7 @@ public final class MaterialLibrary {
                     constant(0.26, INCROPERA),
                     constant(1350.0, INCROPERA),
                     constant(0.80, EMISSIVITY)).withSurface(Surface.opaque(0.06, ALBEDO)))
+            .mechanics(weak(PROPERTY_ESTIMATE, 4e9, 0.3, 2e6, 20e6, 0.5, 4e-6))
             .notes("Composition counts ash as silica (" + COMPOSITION_ESTIMATE.key() + "). Coal ignites near 700 K; "
                     + "burning needs the chemistry model.")
             .build();
@@ -504,6 +689,7 @@ public final class MaterialLibrary {
                     constant(2.15, INCROPERA),
                     constant(2320.0, INCROPERA),
                     constant(0.92, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
+            .mechanics(rock(ROCK_STRENGTH, 40e9, 0.25, 5e6, 60e6, 0.6, 6e-6, 1.0e6))
             .notes("Values for Salem limestone. Above about 1100 K limestone gives off carbon dioxide and turns "
                     + "to quicklime, which needs the chemistry model.")
             .build();
@@ -516,6 +702,7 @@ public final class MaterialLibrary {
                     constant(2.80, INCROPERA),
                     constant(2680.0, INCROPERA),
                     constant(0.93, EMISSIVITY)).withSurface(Surface.opaque(0.55, ALBEDO)))
+            .mechanics(rock(ROCK_STRENGTH, 50e9, 0.25, 8e6, 100e6, 0.6, 9e-6, 1.2e6))
             .notes("Values for Halston marble. Like limestone it calcines above about 1100 K.")
             .build();
 
@@ -529,6 +716,7 @@ public final class MaterialLibrary {
                     constant(0.85, EMISSIVITY)).withSurface(Surface.opaque(0.35, ALBEDO)))
             .transition(SILICA_MELTING)
             .region(SILICA_MELT)
+            .mechanics(rock(ROCK_STRENGTH, 80e9, 0.15, 15e6, 300e6, 0.6, 11e-6, 2.0e6))
             .notes("Values for Sioux quartzite. The alpha to beta quartz change near 846 K is ignored.")
             .build();
 
@@ -544,6 +732,7 @@ public final class MaterialLibrary {
                     constant(2.90, INCROPERA),
                     constant(2150.0, INCROPERA),
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.30, ALBEDO)))
+            .mechanics(rock(ROCK_STRENGTH, 15e9, 0.2, 3e6, 60e6, 0.6, 10e-6, 0.5e6))
             .notes("Values for Berea sandstone; composition is typical (" + COMPOSITION_ESTIMATE.key() + ").")
             .build();
 
@@ -560,6 +749,10 @@ public final class MaterialLibrary {
                     constant(0.72, INCROPERA),
                     constant(1920.0, INCROPERA),
                     constant(0.93, EMISSIVITY)).withSurface(Surface.opaque(0.37, ALBEDO)))
+            .mechanics(new Mechanics(Mechanics.Failure.BRITTLE,
+                    scaled(BRICK_STRENGTH, 15e9, BRICK_STIFFNESS_HEAT), 0.2,
+                    scaled(BRICK_STRENGTH, 3e6, BRICK_STRENGTH_HEAT), scaled(BRICK_STRENGTH, 40e6, BRICK_STRENGTH_HEAT),
+                    0.6, constant(6e-6, EXPANSION), 1.0e6, BRICK_STRENGTH))
             .notes("Composition is typical (" + COMPOSITION_ESTIMATE.key() + "); firing has already driven the "
                     + "water out of the clay minerals, which are kept here as kaolinite for their elements.")
             .build();
@@ -578,6 +771,10 @@ public final class MaterialLibrary {
                     constant(1.4, INCROPERA),
                     constant(2300.0, INCROPERA),
                     constant(0.94, EMISSIVITY)).withSurface(Surface.opaque(0.40, ALBEDO)))
+            .mechanics(new Mechanics(Mechanics.Failure.BRITTLE,
+                    scaled(CONCRETE_CODE, 33e9, CONCRETE_STIFFNESS), 0.2,
+                    scaled(CONCRETE_CODE, 2.9e6, CONCRETE_TENSION), scaled(CONCRETE_CODE, 38e6, CONCRETE_COMPRESSION),
+                    0.6, constant(10e-6, CONCRETE_CODE), 1.0e6, CONCRETE_CODE))
             .notes("Composition is typical (" + COMPOSITION_ESTIMATE.key() + "). Above about 600 K concrete loses "
                     + "its bound water and much of its strength; not modelled yet.")
             .build();
@@ -595,6 +792,10 @@ public final class MaterialLibrary {
                     constant(1.3, PROPERTY_ESTIMATE),
                     constant(2450.0, PROPERTY_ESTIMATE),
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.05, ALBEDO)))
+            .mechanics(new Mechanics(Mechanics.Failure.BRITTLE,
+                    scaled(PROPERTY_ESTIMATE, 70e9, OBSIDIAN_HEAT), 0.2, scaled(PROPERTY_ESTIMATE, 40e6, OBSIDIAN_HEAT),
+                    scaled(PROPERTY_ESTIMATE, 500e6, OBSIDIAN_HEAT), 0.7, constant(8e-6, EXPANSION), 0.9e6,
+                    PROPERTY_ESTIMATE))
             .notes("Like other glasses, obsidian softens gradually above about 1000 K instead of melting at one "
                     + "temperature; hotter states are outside this description.")
             .build();
@@ -612,7 +813,9 @@ public final class MaterialLibrary {
                     constant(2.0, PROPERTY_ESTIMATE),
                     constant(2750.0, PROPERTY_ESTIMATE),
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.12, ALBEDO)))
-            .notes("Slate conducts heat better along its layers than across them; one average value is used.")
+            .mechanics(rock(ROCK_STRENGTH, 60e9, 0.25, 10e6, 150e6, 0.5, 9e-6, 1.5e6))
+            .notes("Slate conducts heat better along its layers than across them, and splits along them far more "
+                    + "easily than across; one average value is used for each.")
             .build();
 
     /** Tuff, consolidated volcanic ash. */
@@ -628,6 +831,7 @@ public final class MaterialLibrary {
                     constant(0.8, PROPERTY_ESTIMATE),
                     constant(1800.0, PROPERTY_ESTIMATE),
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.20, ALBEDO)))
+            .mechanics(rock(ROCK_STRENGTH, 5e9, 0.2, 1e6, 15e6, 0.6, 8e-6, 0.3e6))
             .notes("Tuff is porous and its properties vary widely; these are mid-range values.")
             .build();
 
@@ -647,6 +851,7 @@ public final class MaterialLibrary {
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.20, ALBEDO)))
             .transition(BASALT_MELTING)
             .region(BASALTIC_MELT)
+            .mechanics(rock(GAME_MATERIAL, 3e9, 0.2, 0.7e6, 7e6, 0.7, 8e-6, 0.2e6))
             .notes("Netherrack has no real counterpart; Anchor treats it as basaltic scoria, a frothy volcanic "
                     + "rock, with the composition of basalt.")
             .build();
@@ -664,6 +869,7 @@ public final class MaterialLibrary {
                     constant(0.7, PROPERTY_ESTIMATE),
                     constant(1800.0, PROPERTY_ESTIMATE),
                     constant(0.90, EMISSIVITY)).withSurface(Surface.opaque(0.25, ALBEDO)))
+            .mechanics(GRAVEL_MECHANICS)
             .notes("Bulk values include the air between the stones, which are taken to be granite.")
             .build();
 
@@ -675,7 +881,9 @@ public final class MaterialLibrary {
                     constant(0.05, PROPERTY_ESTIMATE),
                     constant(200.0, PROPERTY_ESTIMATE),
                     constant(0.95, EMISSIVITY)).withSurface(Surface.opaque(0.60, ALBEDO)))
-            .notes("Wool chars above about 473 K and burns; that needs the chemistry model.")
+            .mechanics(weak(PROPERTY_ESTIMATE, 20e6, 0.2, 0.5e6, 1e6, 0.6, 2e-5))
+            .notes("Wool chars above about 473 K and burns; that needs the chemistry model. Mechanically a block "
+                    + "of wool is taken to be pressed felt: soft and light, but it holds together.")
             .build();
 
     /** Diamond. */
@@ -686,6 +894,9 @@ public final class MaterialLibrary {
                     constant(2300.0, INCROPERA),
                     constant(3500.0, INCROPERA),
                     constant(0.10, EMISSIVITY)).withSurface(Surface.opaque(0.17, ALBEDO)))
+            .mechanics(new Mechanics(Mechanics.Failure.BRITTLE, constant(1050e9, ASHBY), 0.1,
+                    constant(1e9, PROPERTY_ESTIMATE), constant(8e9, PROPERTY_ESTIMATE), 0.1, constant(1.0e-6, EXPANSION),
+                    4e6, ASHBY))
             .notes("Specific heat and conductivity are 300 K values; diamond's conductivity falls steeply as it "
                     + "warms. Diamond burns in air above about 1000 K, which needs the chemistry model. Real diamond "
                     + "is clear and reflects about 17 % of the light on it; a block of it stops sunlight, as the game "
@@ -705,6 +916,7 @@ public final class MaterialLibrary {
                     constant(0.10, PROPERTY_ESTIMATE),
                     constant(100.0, PROPERTY_ESTIMATE),
                     constant(0.95, EMISSIVITY)).withSurface(Surface.opaque(0.18, WET_SURFACES).evaporating(40.0)))
+            .mechanics(weak(PROPERTY_ESTIMATE, 2e6, 0.2, 50e3, 50e3, 0.6, 1e-5))
             .notes("A block of leaves is mostly air, so these are bulk estimates. Drying, freezing and burning "
                     + "need the chemistry model.")
             .build();
@@ -715,6 +927,45 @@ public final class MaterialLibrary {
             CONCRETE, OBSIDIAN, SLATE, TUFF, NETHERRACK, GRAVEL, WOOL, DIAMOND, FOLIAGE);
 
     private MaterialLibrary() {
+    }
+
+    /** Returns a value scaled by factors that depend on temperature, given as (kelvin, factor) pairs. */
+    private static PropertyCurve scaled(Source source, double value, double[] factors) {
+        double[] pairs = factors.clone();
+        for (int i = 1; i < pairs.length; i += 2) {
+            pairs[i] *= value;
+        }
+        return table(source, pairs);
+    }
+
+    /** Returns intact rock that heat weakens as it does granite. */
+    private static Mechanics rock(Source source, double stiffness, double poissonRatio, double tension,
+            double compression, double friction, double expansion, double toughness) {
+        return new Mechanics(Mechanics.Failure.BRITTLE, scaled(source, stiffness, ROCK_STIFFNESS_HEAT), poissonRatio,
+                scaled(source, tension, ROCK_STRENGTH_HEAT), scaled(source, compression, ROCK_STRENGTH_HEAT), friction,
+                constant(expansion, EXPANSION), toughness, source);
+    }
+
+    /** Returns a weak, cohesive material whose values do not depend on temperature, such as soil. */
+    private static Mechanics weak(Source source, double stiffness, double poissonRatio, double tension,
+            double compression, double friction, double expansion) {
+        return new Mechanics(Mechanics.Failure.BRITTLE, constant(stiffness, source), poissonRatio,
+                constant(tension, source), constant(compression, source), friction, constant(expansion, EXPANSION),
+                Double.NaN, source);
+    }
+
+    /** Returns a loose granular material: no tension, friction under pressure, grains that crush at 10 MPa. */
+    private static Mechanics granular(double stiffness, double friction, double expansion) {
+        return new Mechanics(Mechanics.Failure.GRANULAR, constant(stiffness, SOIL_MECHANICS), 0.3,
+                constant(0.0, SOIL_MECHANICS), constant(10e6, SOIL_MECHANICS), friction, constant(expansion, EXPANSION),
+                Double.NaN, SOIL_MECHANICS);
+    }
+
+    /** Returns structural timber, the same in every direction, as strong as along its grain. */
+    private static Mechanics timber(double stiffness, double tension, double compression, double toughness) {
+        return new Mechanics(Mechanics.Failure.BRITTLE, scaled(TIMBER_STRENGTH, stiffness, TIMBER_STIFFNESS), 0.3,
+                scaled(TIMBER_STRENGTH, tension, TIMBER_TENSION), scaled(TIMBER_STRENGTH, compression,
+                        TIMBER_COMPRESSION), 0.4, constant(5e-6, EXPANSION), toughness, TIMBER_STRENGTH);
     }
 
     /**

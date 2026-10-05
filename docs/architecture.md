@@ -195,6 +195,72 @@ spots just inside the face: the cell there in a refined block, and the sky's ski
 sky. Blocks whose enthalpy is too low to glow are skipped before anything else, gases have no surface to glow
 from, and the game names the blocks it already draws glowing, such as lava, which are left out.
 
+## Structure
+
+Phase 2 asks of every structure whether it stands under its own weight, and what breaks if it does not
+(`physics.structure`).
+
+Materials that carry loads have **mechanics** (`matter.Mechanics`): how they fail (brittle, ductile or
+granular), Young's modulus, Poisson's ratio, tensile and compressive strength, a friction coefficient, thermal
+expansion and fracture toughness, each with its source. Stiffness and strength are curves over temperature, so heat
+softens matter: iron follows the reduction factors of Eurocode 3 for steel in fire and keeps 47 % of its yield
+strength at 600 °C, concrete and timber follow EN 1992-1-2 and EN 1995-1-2, rock and brick published tests. A
+ductile material's tensile strength is its yield stress, and granular matter such as sand carries no tension at all.
+Matter carries loads in proportion to how much of it is solid: partly molten matter keeps that fraction of its
+strength and stiffness, liquids carry none, and air has no mechanics at all.
+
+A structure is a **frame** (`Frame`) of blocks. Each free block is a rigid node with six degrees of freedom at its
+centre, carrying its weight there. Each pair of blocks that touch is joined by a Timoshenko beam from centre to
+centre, half its length in each block's material, with the cross-section of the patch where they touch
+(`Contact`): a union of rectangles on the shared face, so two full blocks touch over a square metre and a slab
+beside a block over half of it. `BeamElement` builds a joint's 12 by 12 stiffness matrix by integrating the
+flexibility of its two pieces, which is exact for a beam that is uniform piece by piece, shear deformation
+included. **Ground** blocks hold still; a joint to the ground is the half beam inside the free block, clamped at
+the face. The ground is hemmed in by the earth around and below it, so pressing does not crush it, but a joint to it
+can still crack on its side: stone cannot hang from soil.
+
+A joint is **intact**, joining its blocks like one piece of material, or **cracked**, carrying only what contact
+can. `StructuralAnalysis` solves for the blocks' displacements under their weight, linear and elastic, takes each
+joint's forces and moments at the face where its blocks meet, and checks them on each block's side. An intact joint
+of brittle material holds while the stress at every corner of its patch stays within the tensile and compressive
+strengths (Rankine), and the principal stresses at its centre too, where shear peaks at 1.5 times its average and
+twisting adds Roark's peak for a rectangle. An intact ductile joint holds while (N/N<sub>p</sub>)² +
+|M<sub>y</sub>|/M<sub>py</sub> + |M<sub>z</sub>|/M<sub>pz</sub> stays below one, the plastic interaction of a
+rectangle, with Eurocode 3's reduction of bending strength under heavy shear. A cracked joint, and any joint of
+granular matter, holds while it is pressed together, the resultant stays within the patch so the blocks do not
+tip, shear and twist stay within friction, and the most pressed corner is not crushed. Forces within a millionth
+of a newton plus a billionth of the structure's weight count as round-off, so contacts that carry nothing hold.
+
+When joints are overloaded, the worst gives way, and with it every joint within 2 % of it, so a symmetric structure
+breaks symmetrically: an intact joint cracks, a cracked one lets go. A crack leaves the frame as stiff as before, so
+the analysis only checks the joints again; a joint letting go changes the frame, which is solved again. Blocks left
+with no path of holding joints to the ground fall. The analysis stops after 64 solutions, letting everything still
+overloaded go at once, and says so. Its result lists each block's displacement, rotation and the load of its worst
+joint, each joint's state, load and limiting mode, the cracks in the order they formed, the falling blocks, and
+notes where the answer is less certain: when deflections exceed 0.1 m or 0.1 rad, small-deflection theory is
+doubtful and the result says so.
+
+The equations are solved exactly by `BlockCholesky`, a sparse Cholesky factorization in 6 by 6 blocks. Nodes are
+ordered by nested dissection of their positions: the structure is cut by a plane of blocks through its longest
+side, each half is ordered the same way, and the plane comes last, so the order depends only on positions. The
+factorization is multifrontal: the nodes of a cutting plane are eliminated together in one dense front, 48 columns
+at a time, and fronts that differ only by a few zeros merge. A direct solver suits slender structures, where
+iterative ones converge slowly. A wall 1024 blocks long and 16 high (16,384 blocks) solves in about a second; solid
+masses cost more, as they do for any direct solver: a solid cube of 16 blocks a side in about 3 seconds.
+
+The model is checked against beam theory. A cantilever's tip deflection and slope match Timoshenko's closed forms to
+a part in a billion, whichever way it points, and a column shortens by ρgn²/2E. Granite, at 10 MPa in tension,
+holds an overhang of 11 blocks and cracks at the root at 12, where the top edge carries 3ρgn²; iron yields at 32
+blocks, when the root's moment reaches the plastic moment f<sub>y</sub>/4, and at 22 at 600 °C. A granite span
+clamped at both ends holds 27 blocks and cracks at both ends at once at 28, as wL²/12 says. Sand stands in a column
+but falls from a wall, a long arm breaks off a tower while the short arm holds, and partly molten granite holds
+less.
+
+What the model leaves out, so far: yielding steel gives way at once instead of hinging and handing its load on, so
+redundant metal frames fall somewhat early; cracked joints do not wedge into arches; slender columns do not buckle;
+deflections are small; heat softens matter but its expansion does not yet stress it; and loads are static, the
+weight of blocks alone.
+
 ## Hosting
 
 The engine runs inside a game through `host.HostedWorld`, which knows nothing about Minecraft. The game names
@@ -434,7 +500,8 @@ temperatures are saved with the world, blocks refine where temperatures change s
 moving, the sun and the night sky warm and cool the land, probes record temperatures and chart them on maps, and
 operators can pause heat, step it, run it faster or slower, send it ahead, and save an experiment as a snapshot to
 rewind it to, hot blocks glow in the colours of a black body, and the Laboratory world type gives experiments steady
-surroundings, with ready-made experiments to build there. Next is the first alpha release. After that come
-structure and fracture;
-rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
+surroundings, with ready-made experiments to build there. Phase 2, structure and fracture, has begun: materials
+have mechanical properties that heat softens, and the engine works out whether a structure of blocks stands and what
+breaks if it does not. Next, structures in the game, then thermal stress, buckling and fracture inside blocks. After
+that come rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.
