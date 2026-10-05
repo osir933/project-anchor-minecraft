@@ -382,8 +382,15 @@ public final class HostedWorld {
         }
     }
 
-    /** A host id's appearance, with its material's registry index. */
-    private record Resolved(BlockAppearance appearance, int material) {
+    /**
+     * A host id's appearance, with the registry indices of its material and of the material of its frame, or -1 if
+     * its own matter carries its loads.
+     */
+    private record Resolved(BlockAppearance appearance, int material, int frame) {
+    }
+
+    /** How a block carries loads: the mechanics of what carries them, at its temperature and solid fraction. */
+    private record Bearing(Mechanics mechanics, double temperatureK, double solidFraction, double massKg) {
     }
 
     private final PhysicalWorld world;
@@ -573,7 +580,7 @@ public final class HostedWorld {
             for (int k = 0; k < blocks.length; k++) {
                 // A block that no longer carries loads, having changed while the section was away, is not built.
                 int i = blocks[k];
-                boolean carries = carries(resolve(ids.get(i)).appearance(), cells[i]);
+                boolean carries = carries(resolve(ids.get(i)), cells[i]);
                 ids.setFlags(i, carries ? flags[k] : flags[k] & ~StructureFlags.BUILT);
             }
         }
@@ -773,20 +780,22 @@ public final class HostedWorld {
             return true;
         }
         Resolved after = resolve(hostId);
-        CellState before = world.readBlock(pos);
-        boolean carried = carries(resolve(previousId).appearance(), before);
-        if (!keeps(before, after)) {
+        CellState now = world.readBlock(pos);
+        boolean carried = carries(resolve(previousId), now);
+        boolean replaced = !keeps(now, after);
+        if (replaced) {
             double surroundings = temperatureHintK > 0 && Double.isFinite(temperatureHintK)
                     ? temperatureHintK : atmosphere.environment(key);
-            CellState cell = cellFor(after, surroundings);
-            world.setBlock(pos, cell);
-            boolean carries = carries(after.appearance(), cell);
+            now = cellFor(after, surroundings);
+            world.setBlock(pos, now);
+        }
+        boolean carries = carries(after, now);
+        if (replaced || carries != carried) {
+            // New matter, or the same matter now carrying loads or no longer, as when a fence is put up in air.
             renewStructure(pos, carries && ((ids.flags(index) & StructureFlags.BUILT) != 0 || !carried));
-            if (carried || carries) {
-                uncheckAround(pos);
-            }
-        } else if (carried || carries(after.appearance(), before)) {
-            // The same matter in a block of another shape, or shown in another phase: its joints may differ.
+        }
+        if (carried || carries) {
+            // Its joints may differ even with the same matter, in a block of another shape.
             uncheckAround(pos);
         }
         activity.wake(key);
@@ -817,16 +826,41 @@ public final class HostedWorld {
      * Tells whether a block carries loads: its matter has mechanics and is mostly solid, and its shape reaches a face
      * of its cube, where it can touch a neighbour.
      */
-    private boolean carries(BlockAppearance appearance, CellState cell) {
-        return carries(appearance, cell.material(), cell.mass(), cell.enthalpy());
+    private boolean carries(Resolved r, CellState cell) {
+        return bearing(r, cell.material(), cell.mass(), cell.enthalpy()) != null;
     }
 
-    private boolean carries(BlockAppearance appearance, int material, double mass, double enthalpy) {
-        if (material == MaterialRegistry.VACUUM || !(mass > 0) || !appearance.shape().reachesAFace()) {
-            return false;
+    /**
+     * Returns how a block carries loads, or {@code null} if it does not. A block with a frame carries them in its
+     * frame's material, at the temperature of its matter, with the mass of its shape.
+     */
+    private Bearing bearing(Resolved r, int material, double mass, double enthalpy) {
+        Shape shape = r.appearance().shape();
+        if (!shape.reachesAFace()) {
+            return null;
+        }
+        boolean empty = material == MaterialRegistry.VACUUM || !(mass > 0);
+        if (r.frame() >= 0) {
+            Material m = world.materials().get(r.frame());
+            if (m.mechanics() == null) {
+                return null;
+            }
+            double t = empty ? Mechanics.REFERENCE_K : world.materials().get(material).temperatureFor(enthalpy / mass);
+            ThermalState state = m.stateFor(m.specificEnthalpy(t));
+            double solid = m.phaseFractions(state)[Phase.SOLID.ordinal()];
+            // A block is one cubic metre.
+            return solid < MIN_SOLID ? null : new Bearing(m.mechanics(), t, solid, shape.volume() * m.density(state));
+        }
+        if (empty) {
+            return null;
         }
         Material m = world.materials().get(material);
-        return m.mechanics() != null && solidFraction(m, enthalpy / mass) >= MIN_SOLID;
+        if (m.mechanics() == null) {
+            return null;
+        }
+        double h = enthalpy / mass;
+        double solid = solidFraction(m, h);
+        return solid < MIN_SOLID ? null : new Bearing(m.mechanics(), m.temperatureFor(h), solid, mass);
     }
 
     /** Returns the fraction of matter that is solid at a specific enthalpy. */
@@ -1080,7 +1114,7 @@ public final class HostedWorld {
                     int flags = snapshot.structureAt(box++);
                     Hosted ids = hosted.get(pos.sectionKey());
                     int i = pos.indexInSection();
-                    if (!carries(resolve(ids.get(i)).appearance(), world.readBlock(pos))) {
+                    if (!carries(resolve(ids.get(i)), world.readBlock(pos))) {
                         flags &= ~StructureFlags.BUILT;
                     }
                     ids.setFlags(i, flags);
@@ -1161,7 +1195,7 @@ public final class HostedWorld {
                     Hosted ids = hosted.get(pos.sectionKey());
                     int i = pos.indexInSection();
                     int flags = ids.flags(i);
-                    boolean now = built && carries(resolve(ids.get(i)).appearance(), world.readBlock(pos));
+                    boolean now = built && carries(resolve(ids.get(i)), world.readBlock(pos));
                     int next = now ? flags | StructureFlags.BUILT : flags & ~StructureFlags.BUILT;
                     if (next != flags) {
                         ids.setFlags(i, next);
@@ -1376,7 +1410,7 @@ public final class HostedWorld {
             for (int i = 0; i < SectionPos.BLOCKS; i++) {
                 float checkedK = ids.checkedK[i];
                 if (!Float.isNaN(checkedK) && (ids.flags(i) & StructureFlags.BUILT) != 0
-                        && drifted(s, i, checkedK, ids.checkedSolid[i])) {
+                        && drifted(resolve(ids.get(i)), s, i, checkedK, ids.checkedSolid[i])) {
                     ids.forgetChecked(i);
                     uncheck(GridPos.of(key, i));
                 }
@@ -1385,17 +1419,14 @@ public final class HostedWorld {
     }
 
     /** Tells whether a block's strength or stiffness has changed by more than {@link #STRENGTH_DRIFT}. */
-    private boolean drifted(Section s, int i, double checkedK, double checkedSolid) {
-        int material = s.material(i);
-        double mass = s.mass(i);
-        Mechanics mechanics = material == MaterialRegistry.VACUUM ? null : world.materials().get(material).mechanics();
-        if (mechanics == null || !(mass > 0)) {
+    private boolean drifted(Resolved r, Section s, int i, double checkedK, double checkedSolid) {
+        Bearing b = bearing(r, s.material(i), s.mass(i), s.enthalpy(i));
+        if (b == null) {
             return true;
         }
-        Material m = world.materials().get(material);
-        double h = s.enthalpy(i) / mass;
-        double t = m.temperatureFor(h);
-        double solid = solidFraction(m, h);
+        Mechanics mechanics = b.mechanics();
+        double t = b.temperatureK();
+        double solid = b.solidFraction();
         return differs(mechanics.tensileStrength(t) * solid, mechanics.tensileStrength(checkedK) * checkedSolid)
                 || differs(mechanics.compressiveStrength(t) * solid,
                         mechanics.compressiveStrength(checkedK) * checkedSolid)
@@ -1452,19 +1483,15 @@ public final class HostedWorld {
         }
         int i = pos.indexInSection();
         int hostId = ids.get(i);
-        BlockAppearance appearance = resolve(hostId).appearance();
+        Resolved r = resolve(hostId);
         Section s = world.section(key);
-        int material = s.material(i);
-        double mass = s.mass(i);
-        double enthalpy = s.enthalpy(i);
         byte flags = (byte) ids.flags(i);
-        if (!carries(appearance, material, mass, enthalpy)) {
-            return new Examined(pos, hostId, flags, appearance.shape(), false, null, Double.NaN, 0.0, 0.0);
+        Bearing b = bearing(r, s.material(i), s.mass(i), s.enthalpy(i));
+        if (b == null) {
+            return new Examined(pos, hostId, flags, r.appearance().shape(), false, null, Double.NaN, 0.0, 0.0);
         }
-        Material m = world.materials().get(material);
-        double h = enthalpy / mass;
-        return new Examined(pos, hostId, flags, appearance.shape(), true, m.mechanics(), m.temperatureFor(h),
-                solidFraction(m, h), mass);
+        return new Examined(pos, hostId, flags, r.appearance().shape(), true, b.mechanics(), b.temperatureK(),
+                b.solidFraction(), b.massKg());
     }
 
     /**
@@ -1832,7 +1859,12 @@ public final class HostedWorld {
             throw new IllegalStateException("the host's block " + id + " is made of " + a.material()
                     + ", which is not registered");
         }
-        return new Resolved(a, material);
+        int frame = a.frame() == null ? -1 : world.materials().indexOf(a.frame());
+        if (a.frame() != null && frame < 0) {
+            throw new IllegalStateException("the host's block " + id + " is held up by " + a.frame()
+                    + ", which is not registered");
+        }
+        return new Resolved(a, material, frame);
     }
 
     /**

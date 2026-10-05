@@ -2,10 +2,12 @@ package io.github.osir933.anchor.core.host;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.osir933.anchor.core.matter.Phase;
+import io.github.osir933.anchor.core.physics.structure.Shape;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import java.util.EnumMap;
 import java.util.List;
@@ -38,6 +40,26 @@ class BlockAppearanceTest {
         assertFalse(water.withoutReplacements().presentable());
         assertFalse(water.shownAs(null).presentable(), "a block shown however it is never needs replacing");
         assertThrows(UnsupportedOperationException.class, () -> water.becomes().put(Phase.LIQUID, "x"));
+    }
+
+    @Test
+    void shapesFollowTheFillUnlessGivenAndFramesCarryThinBlocks() {
+        BlockAppearance slab = BlockAppearance.of("anchor:granite").withFill(0.5);
+        assertEquals(Shape.bottom(0.5), slab.shape());
+        assertEquals(Shape.FULL, slab.withFill(1.0).shape(), "a shape that follows the fill keeps following it");
+        Shape stairs = Shape.of(new double[] {0, 0, 0, 1, 0.5, 1, 0.5, 0.5, 0, 1, 1, 1});
+        BlockAppearance stair = BlockAppearance.of("anchor:granite").withFill(0.75).withShape(stairs);
+        assertEquals(stairs, stair.withFill(0.7).shape(), "a shape of its own stays");
+        assertEquals(stairs, stair.shownAs(Phase.SOLID).heatedBy(null).withAlbedo(0.3).shape());
+        assertEquals(Shape.bottom(0.75), stair.withShape(null).shape());
+        assertNull(stair.frame());
+        Shape post = Shape.of(new double[] {0.375, 0, 0.375, 0.625, 1, 0.625});
+        BlockAppearance fence = BlockAppearance.of("anchor:air").withShape(post).framedIn("anchor:hardwood");
+        assertEquals("anchor:hardwood", fence.frame());
+        assertEquals("anchor:hardwood", fence.heatedBy(new HeatSourceModel.Source(1000.0, 300.0)).withFill(0.5)
+                .becoming(Phase.GAS, "minecraft:air").frame(), "copies keep the frame");
+        assertNull(fence.framedIn(null).frame());
+        assertThrows(IllegalArgumentException.class, () -> fence.framedIn(" "));
     }
 
     @Test

@@ -37,6 +37,7 @@ class HostedStructuresTest {
     private static final int MOSS = 5;
     private static final int IRON = 6;
     private static final int WATER = 7;
+    private static final int FENCE = 8;
 
     private static final BlockAppearance[] LOOKS = {
         BlockAppearance.of("anchor:air"),
@@ -47,6 +48,8 @@ class HostedStructuresTest {
         BlockAppearance.of("anchor:soil"),
         BlockAppearance.of("anchor:iron"),
         BlockAppearance.of("anchor:water").shownAs(Phase.LIQUID),
+        BlockAppearance.of("anchor:air").withShape(Shape.of(new double[] {0.375, 0, 0.375, 0.625, 1, 0.625}))
+                .framedIn("anchor:hardwood"),
     };
 
     private static final long ORIGIN = SectionPos.pack(0, 0, 0);
@@ -97,6 +100,35 @@ class HostedStructuresTest {
         place(h, placed, AIR);
         assertFalse(h.isBuilt(placed));
         assertFalse(h.isBuilt(new GridPos(40, 8, 4)), "nothing is built where nothing is imported");
+    }
+
+    @Test
+    void aFenceCountsAsAirForHeatButHoldsUpWhatStandsOnIt() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, ground(Map.of()), CLIMATE);
+        GridPos fence = new GridPos(4, 8, 4);
+        place(h, fence, FENCE);
+        assertTrue(h.isBuilt(fence), "putting up a fence in the air builds it, though the air stays");
+        assertEquals("anchor:air", h.inspect(fence).orElseThrow().material());
+        GridPos stone = fence.offset(Direction.UP);
+        place(h, stone, STONE);
+        StructureSurvey survey = h.survey(stone, 100).orElseThrow();
+        assertEquals(2, survey.blocks());
+        Frame.Block post = survey.frame().blocks().get(1);
+        assertEquals(fence, post.pos());
+        assertEquals(MaterialLibrary.HARDWOOD.mechanics(), post.mechanics());
+        assertEquals(0.0625 * MaterialLibrary.HARDWOOD.referenceDensity(), post.massKg(),
+                0.01 * post.massKg(), "a post a quarter of a block wide");
+        assertEquals(CLIMATE, post.temperatureK(), 1e-6, "at the temperature of the air it stands in");
+        for (Frame.Bond b : survey.frame().bonds()) {
+            assertEquals(0.0625, b.contact().area(), 1e-12, "it touches its neighbours with its post");
+        }
+        assertTrue(StructuralAnalysis.analyse(survey.frame()).falling().isEmpty());
+        // Taking the fence down leaves the stone on nothing.
+        place(h, fence, AIR);
+        assertFalse(h.isBuilt(fence));
+        StructureSurvey alone = h.survey(stone, 100).orElseThrow();
+        assertEquals(List.of(stone), StructuralAnalysis.analyse(alone.frame()).falling());
     }
 
     @Test
