@@ -179,7 +179,8 @@ final class AnchorGameTests {
             new Case("fence_post_buckles_under_a_wide_iron_roof", 400,
                     AnchorGameTests::fencePostBucklesUnderAWideIronRoof, HEAT, WIDE),
             new Case("netherrack_span_stands_as_an_arch", 400, AnchorGameTests::netherrackSpanStandsAsAnArch, HEAT,
-                    LONG));
+                    LONG),
+            new Case("iron_and_gold_sink_into_sand", 400, AnchorGameTests::ironAndGoldSinkIntoSand));
 
     private AnchorGameTests() {
     }
@@ -1252,6 +1253,48 @@ final class AnchorGameTests {
             if (helper.getTick() - cracked[0] < 40) {
                 throw helper.assertionException(Component.literal("waiting to see the arch stay up"));
             }
+        });
+    }
+
+    /**
+     * An iron block on a bed of sand of the world as it was found presses it with under half of what sand bears under
+     * a block, and settles a millimetre or so into it, but with a gold block on top it presses half as hard again as
+     * the sand bears: the sand under it gives way, heaving up beside it, and the two sink into the hole it leaves.
+     */
+    private static void ironAndGoldSinkIntoSand(GameTestHelper helper) {
+        BlockPos iron = new BlockPos(2, 2, 2);
+        BlockPos gold = iron.above();
+        List<BlockPos> beside = List.of(iron.west(), iron.east(), iron.north(), iron.south());
+        String[] loaded = {null};
+        buildThenExpect(helper, heat -> {
+            for (int x = 1; x <= 3; x++) {
+                for (int z = 1; z <= 3; z++) {
+                    helper.setBlock(new BlockPos(x, 1, z), Blocks.SAND);
+                }
+            }
+            heat.setBuilt(helper.absolutePos(new BlockPos(1, 1, 1)), helper.absolutePos(new BlockPos(3, 1, 3)), false);
+            helper.setBlock(iron, Blocks.IRON_BLOCK);
+        }, heat -> {
+            if (loaded[0] == null) {
+                LevelStructures.Look look = lookAt(helper, heat, iron);
+                StructuralAnalysis.Footing footing = look.footing();
+                helper.assertTrue(look.built() && !look.falls() && footing != null && footing.sunk().isEmpty()
+                        && footing.load() > 0.3 && footing.load() < 0.7 && footing.settlement() > 1e-4
+                        && footing.settlement() < 1e-2, "the iron should stand on the sand, settling a little into "
+                        + "it: " + summary(look) + "; " + HeatText.ground(footing));
+                helper.setBlock(gold, Blocks.GOLD_BLOCK);
+                loaded[0] = "the gold went on at tick " + helper.getTick() + ", when " + HeatText.ground(
+                        footing).toLowerCase(Locale.ROOT);
+            }
+            helper.assertBlockPresent(Blocks.IRON_BLOCK, iron.below());
+            helper.assertBlockPresent(Blocks.GOLD_BLOCK, iron);
+            helper.assertBlockPresent(Blocks.AIR, gold);
+            List<BlockPos> heaved = beside.stream().filter(p -> helper.getBlockState(p).is(Blocks.SAND)).toList();
+            helper.assertTrue(heaved.size() == 1 && !lookAt(helper, heat, heaved.get(0)).built(),
+                    "the sand under the iron should have heaved up beside it, natural: sand at " + heaved + "; "
+                            + loaded[0]);
+            helper.assertTrue(heat.report().structures().sunk() >= 1, "the sinking was not counted: "
+                    + heat.report().structures());
         });
     }
 

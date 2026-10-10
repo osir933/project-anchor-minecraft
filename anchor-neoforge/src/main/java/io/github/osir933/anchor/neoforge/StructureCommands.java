@@ -158,6 +158,10 @@ final class StructureCommands {
                 lines.add("  " + look.hinges() + (look.hinges() == 1 ? " cracked joint of the structure pivots"
                         : " cracked joints of the structure pivot") + " on an edge, pressing on as an arch's do");
             }
+            String ground = HeatText.ground(look.footing());
+            if (ground != null) {
+                lines.add("  " + ground);
+            }
             StructuralAnalysis.BondResult worst = look.worst();
             if (worst != null) {
                 Direction toward = StructuralAnalysis.direction(worst.axis());
@@ -212,6 +216,7 @@ final class StructureCommands {
             case TIPPING -> "tipping over its edge";
             case SLIDING -> "sliding";
             case CRUSHING -> "its crack crushed";
+            case SINKING -> "sinking into the ground";
         };
     }
 

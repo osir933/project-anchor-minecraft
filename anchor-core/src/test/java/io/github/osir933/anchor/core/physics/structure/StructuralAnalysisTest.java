@@ -26,6 +26,9 @@ class StructuralAnalysisTest {
     private static final double ROOM = Mechanics.REFERENCE_K;
     private static final double G = PhysicalConstants.STANDARD_GRAVITY;
     private static final GridPos ORIGIN = new GridPos(0, 0, 0);
+    /** Ground that does not give, as the closed forms here take it. */
+    private static final StructuralAnalysis.Settings RIGID = StructuralAnalysis.Settings.defaults()
+            .withSoftGround(false);
 
     @Test
     void cantileverDeflectsAsTimoshenkoTheorySays() {
@@ -235,11 +238,11 @@ class StructuralAnalysisTest {
 
     @Test
     void theGroundIsNotCrushedByATallTower() {
-        // Twenty blocks of granite press on the soil at half a megapascal, ten times what loose soil could
-        // take on its own; hemmed in by the earth around it, the ground holds.
+        // Twelve blocks of granite press on the soil at a third of a megapascal, six times what loose soil could
+        // take on its own; hemmed in by the earth around it, the ground holds, as SoftGroundTest works out.
         Material granite = MaterialLibrary.GRANITE;
         Frame.Builder b = Frame.builder().ground(ORIGIN, MaterialLibrary.SOIL.mechanics(), ROOM, 1);
-        for (int k = 1; k <= 20; k++) {
+        for (int k = 1; k <= 12; k++) {
             GridPos pos = new GridPos(0, k, 0);
             b.block(pos, granite.mechanics(), ROOM, 1, granite.referenceDensity()).bond(pos, Direction.DOWN,
                     Contact.FULL, Frame.Joint.INTACT);
@@ -269,11 +272,12 @@ class StructuralAnalysisTest {
     @Test
     void aSymmetricBridgeBreaksAtBothEndsTogether() {
         Material granite = MaterialLibrary.GRANITE;
-        // Clamped at both ends, a uniform beam is bent hardest at its ends, by w L^2 / 12: 27 blocks hold.
-        Result holding = StructuralAnalysis.analyse(bridge(granite, 27));
+        // Clamped at both ends in ground that does not give, a uniform beam is bent hardest at its ends, by
+        // w L^2 / 12: 27 blocks hold.
+        Result holding = StructuralAnalysis.analyse(bridge(granite, 27), RIGID);
         assertTrue(holding.falling().isEmpty());
         assertTrue(holding.cracks().isEmpty());
-        Result breaking = StructuralAnalysis.analyse(bridge(granite, 28));
+        Result breaking = StructuralAnalysis.analyse(bridge(granite, 28), RIGID);
         assertEquals(2, breaking.cracks().size());
         assertEquals(List.of(ORIGIN, new GridPos(28, 0, 0)),
                 breaking.cracks().stream().map(Crack::pos).toList());
@@ -282,8 +286,7 @@ class StructuralAnalysisTest {
         // The cracked ends pivot on their edges, and the span stands on them as an arch, as ArchingTest shows.
         assertTrue(breaking.falling().isEmpty());
         // Where cracked joints cannot pivot, the whole span falls, with no need to solve again.
-        Result loose = StructuralAnalysis.analyse(bridge(granite, 28),
-                StructuralAnalysis.Settings.defaults().withArching(false));
+        Result loose = StructuralAnalysis.analyse(bridge(granite, 28), RIGID.withArching(false));
         assertEquals(breaking.cracks(), loose.cracks());
         assertEquals(28, loose.falling().size());
         assertEquals(1, loose.rounds());
@@ -344,7 +347,7 @@ class StructuralAnalysisTest {
 
     @Test
     void aShortRoundLimitLeavesTheResultUnsettled() {
-        StructuralAnalysis.Settings oneRound = new StructuralAnalysis.Settings(G, 1, 0.02, 1e-4, true, true);
+        StructuralAnalysis.Settings oneRound = new StructuralAnalysis.Settings(G, 1, 0.02, 1e-4, true, true, true);
         Result result = StructuralAnalysis.analyse(tee(12, 9), oneRound);
         assertFalse(result.settled());
         assertEquals(1, result.rounds());
@@ -385,13 +388,13 @@ class StructuralAnalysisTest {
     @Test
     void rejectsSettingsThatMakeNoSense() {
         assertThrows(IllegalArgumentException.class,
-                () -> new StructuralAnalysis.Settings(-1, 64, 0.02, 1e-4, true, true));
+                () -> new StructuralAnalysis.Settings(-1, 64, 0.02, 1e-4, true, true, true));
         assertThrows(IllegalArgumentException.class,
-                () -> new StructuralAnalysis.Settings(G, 0, 0.02, 1e-4, true, true));
+                () -> new StructuralAnalysis.Settings(G, 0, 0.02, 1e-4, true, true, true));
         assertThrows(IllegalArgumentException.class,
-                () -> new StructuralAnalysis.Settings(G, 64, 1.0, 1e-4, true, true));
+                () -> new StructuralAnalysis.Settings(G, 64, 1.0, 1e-4, true, true, true));
         assertThrows(IllegalArgumentException.class,
-                () -> new StructuralAnalysis.Settings(G, 64, 0.02, 0, true, true));
+                () -> new StructuralAnalysis.Settings(G, 64, 0.02, 0, true, true, true));
     }
 
     /**

@@ -5,6 +5,7 @@ import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.structure.Frame;
+import io.github.osir933.anchor.core.physics.structure.StructuralAnalysis;
 import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.world.Provenance;
@@ -435,10 +436,35 @@ final class HeatText {
         if (r.analyses() == 0) {
             return "Structures: none analysed yet" + waiting;
         }
+        String sunk = r.sunk() == 0 ? "" : "; footings sank into " + count(r.sunk(), "block", "blocks") + " of ground";
         return String.format(Locale.ROOT, "Structures: %s analysed, %d in the background%s; the largest had %s and "
-                + "the last took %.1f ms; %s cracked and %s fell%s", count(r.analyses(), "structure", "structures"),
+                + "the last took %.1f ms; %s cracked and %s fell%s%s", count(r.analyses(), "structure", "structures"),
                 r.inBackground(), r.analysing() ? ", one of them now" : "", count(r.largest(), "block", "blocks"),
-                r.lastMillis(), count(r.cracks(), "joint", "joints"), count(r.fallen(), "block", "blocks"), waiting);
+                r.lastMillis(), count(r.cracks(), "joint", "joints"), count(r.fallen(), "block", "blocks"), sunk,
+                waiting);
+    }
+
+    /**
+     * Describes how the ground holds up a structure's most loaded footing: how hard it is pressed against what it
+     * bears, how far it has settled, and whether it gives way.
+     *
+     * @param footing the footing, or {@code null} if the structure stands on no ground that gives
+     * @return the line, or {@code null} if there is nothing to say
+     */
+    static String ground(StructuralAnalysis.Footing footing) {
+        if (footing == null) {
+            return null;
+        }
+        String pressed = String.format(Locale.ROOT, "Its most loaded footing presses the ground with %.0f%% of what "
+                + "the ground bears there", 100.0 * footing.load());
+        int sunk = footing.sunk().size();
+        if (sunk > 0) {
+            return pressed + ", so the ground gives way: " + count(sunk, "block", "blocks") + " of it would be pushed "
+                    + "aside";
+        }
+        double mm = 1000 * footing.settlement();
+        return pressed + ", and has settled " + (mm < 0.05 ? "less than 0.1 mm"
+                : String.format(Locale.ROOT, mm < 10 ? "%.1f mm" : "%.0f mm", mm)) + " into it";
     }
 
     /** Counts things, as "1 block" or "3 blocks". */

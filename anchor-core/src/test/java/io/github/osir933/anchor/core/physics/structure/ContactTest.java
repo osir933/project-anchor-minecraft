@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ContactTest {
@@ -104,6 +105,66 @@ class ContactTest {
         double cz = stair.centroidZ();
         double fraction = stair.bearable(0.45, 0.45, 0.2);
         assertEquals(0.2, stair.effectiveArea(cy + fraction * (0.45 - cy), cz + fraction * (0.45 - cz)), 1e-9);
+    }
+
+    @Test
+    void anIntactJointPressesWithThePartOfItsStressThatPresses() {
+        // Pressed by 51.6 kN and bent by 25.8 kN m, a whole face carries stress that runs, as Navier has it, from
+        // 103.2 kPa of pull at one edge to 206.4 kPa of pressure at the other, crossing zero a third of the way
+        // across: the pressing part is a triangle of 68.8 kN, which acts a third of its width in from its edge.
+        double[] p = Contact.FULL.pressing(-51.6e3, 0, 25.8e3);
+        assertEquals(68.8e3, p[0], 1e-9 * 68.8e3);
+        assertEquals(0.5 - 2 / 9.0, p[1], 1e-12);
+        assertEquals(0, p[2], 1e-12);
+        // Bent the other way, about the other axis, it presses the opposite edge of the other axis.
+        double[] q = Contact.FULL.pressing(-51.6e3, 25.8e3, 0);
+        assertEquals(68.8e3, q[0], 1e-9 * 68.8e3);
+        assertEquals(0, q[1], 1e-12);
+        assertEquals(-(0.5 - 2 / 9.0), q[2], 1e-12);
+        // Bent less than the middle third allows, the whole face presses, so the pressing acts where the force does.
+        double[] whole = Contact.FULL.pressing(-100e3, 0, 10e3);
+        assertEquals(100e3, whole[0], 1e-9 * 100e3);
+        assertEquals(0.1, whole[1], 1e-12);
+        // Pulled, it presses nowhere.
+        assertEquals(0, Contact.FULL.pressing(100e3, 0, 0)[0]);
+    }
+
+    @Test
+    void thePressingPartOfAnyPatchAddsUpAsItsStressDoes() {
+        // Against a fine sum over the patch, for a slab and an L, bent about both axes at once.
+        for (Contact c : List.of(Contact.rectangle(0, 0, 1, 0.5), Contact.of(new double[] {0, 0, 1, 0.5, 0, 0.5,
+            0.5, 1}))) {
+            double n = -50e3;
+            double my = 8e3;
+            double mz = -6e3;
+            double cs = c.centroidY() + 0.5;
+            double ct = c.centroidZ() + 0.5;
+            double[] r = c.rectangles();
+            double force = 0;
+            double alongS = 0;
+            double alongT = 0;
+            int steps = 1000;
+            for (int i = 0; i < r.length; i += 4) {
+                double ds = (r[i + 2] - r[i]) / steps;
+                double dt = (r[i + 3] - r[i + 1]) / steps;
+                for (int a = 0; a < steps; a++) {
+                    for (int b = 0; b < steps; b++) {
+                        double s = r[i] + (a + 0.5) * ds;
+                        double t = r[i + 1] + (b + 0.5) * dt;
+                        double stress = n / c.area() - mz / c.inertiaS() * (s - cs) + my / c.inertiaT() * (t - ct);
+                        if (stress < 0) {
+                            force -= stress * ds * dt;
+                            alongS -= stress * s * ds * dt;
+                            alongT -= stress * t * ds * dt;
+                        }
+                    }
+                }
+            }
+            double[] p = c.pressing(n, my, mz);
+            assertEquals(force, p[0], 1e-4 * force, c::toString);
+            assertEquals(alongS / force - 0.5, p[1], 1e-4, c::toString);
+            assertEquals(alongT / force - 0.5, p[2], 1e-4, c::toString);
+        }
     }
 
     @Test

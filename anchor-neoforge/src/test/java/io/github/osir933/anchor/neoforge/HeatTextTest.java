@@ -10,6 +10,7 @@ import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.structure.Frame;
+import io.github.osir933.anchor.core.physics.structure.StructuralAnalysis;
 import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
@@ -27,8 +28,8 @@ class HeatTextTest {
     private static final Pacer.Status NORMAL = new Pacer(4, 20.0).status();
 
     /** Structures that have done nothing yet. */
-    private static final LevelStructures.Report STRUCTURES = new LevelStructures.Report(true, true, 0L, 0L, 0L, 0L, 0,
-            0.0, 0, false, null);
+    private static final LevelStructures.Report STRUCTURES = new LevelStructures.Report(true, true, 0L, 0L, 0L, 0L,
+            0L, 0, 0.0, 0, false, null);
 
     @Test
     void numbersReadNaturally() {
@@ -192,13 +193,35 @@ class HeatTextTest {
         assertEquals("Structures: none analysed yet", HeatText.structures(STRUCTURES));
         assertEquals("Structures: 12 structures analysed, 1 in the background, one of them now; the largest had 300 "
                 + "blocks and the last took 2.5 ms; 1 joint cracked and 2 blocks fell; 1 built block waits to be "
-                + "checked", HeatText.structures(new LevelStructures.Report(true, true, 12L, 1L, 1L, 2L, 1, 2.5, 300,
-                        true, null)));
-        assertTrue(HeatText.structures(new LevelStructures.Report(false, true, 12L, 1L, 1L, 2L, 1, 2.5, 300, false,
-                null)).contains("switched off"));
+                + "checked", HeatText.structures(new LevelStructures.Report(true, true, 12L, 1L, 1L, 2L, 0L, 1, 2.5,
+                        300, true, null)));
+        assertTrue(HeatText.structures(new LevelStructures.Report(false, true, 12L, 1L, 1L, 2L, 0L, 1, 2.5, 300,
+                false, null)).contains("switched off"));
+        assertEquals("Structures: 12 structures analysed, 1 in the background; the largest had 300 blocks and the last "
+                + "took 2.5 ms; 1 joint cracked and 2 blocks fell; footings sank into 3 blocks of ground",
+                HeatText.structures(new LevelStructures.Report(true, true, 12L, 1L, 1L, 2L, 3L, 0, 2.5, 300, false,
+                        null)));
         assertEquals("Structures stopped after an error, while heat carries on: java.lang.IllegalStateException: boom",
-                HeatText.structures(new LevelStructures.Report(true, true, 0L, 0L, 0L, 0L, 0, 0.0, 0, false,
+                HeatText.structures(new LevelStructures.Report(true, true, 0L, 0L, 0L, 0L, 0L, 0, 0.0, 0, false,
                         "java.lang.IllegalStateException: boom")));
+    }
+
+    @Test
+    void inspectingAStructureSaysHowItsGroundHoldsItUp() {
+        GridPos ground = new GridPos(0, 0, 0);
+        assertEquals("Its most loaded footing presses the ground with 32% of what the ground bears there, and has "
+                + "settled 2.1 mm into it", HeatText.ground(new StructuralAnalysis.Footing(List.of(ground),
+                        0.317, 0.00207, List.of())));
+        assertEquals("Its most loaded footing presses the ground with 5% of what the ground bears there, and has "
+                + "settled 25 mm into it", HeatText.ground(new StructuralAnalysis.Footing(List.of(ground),
+                        0.05, 0.025, List.of())));
+        assertEquals("Its most loaded footing presses the ground with 0% of what the ground bears there, and has "
+                + "settled less than 0.1 mm into it", HeatText.ground(new StructuralAnalysis.Footing(
+                        List.of(ground), 1e-4, 4e-6, List.of())));
+        assertEquals("Its most loaded footing presses the ground with 106% of what the ground bears there, so the "
+                + "ground gives way: 1 block of it would be pushed aside", HeatText.ground(
+                        new StructuralAnalysis.Footing(List.of(ground), 1.06, 0.004, List.of(ground))));
+        assertNull(HeatText.ground(null));
     }
 
     @Test

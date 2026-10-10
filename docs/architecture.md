@@ -216,8 +216,9 @@ centre, half its length in each block's material, with the cross-section of the 
 beside a block over half of it. `BeamElement` builds a joint's 12 by 12 stiffness matrix by integrating the
 flexibility of its two pieces, which is exact for a beam that is uniform piece by piece, shear deformation
 included. **Ground** blocks hold still; a joint to the ground is the half beam inside the free block, clamped at
-the face. The ground is hemmed in by the earth around and below it, so pressing does not crush it, but a joint to it
-can still crack on its side: stone cannot hang from soil.
+the face, or resting there on springs where the ground gives, as below. The ground is hemmed in by the earth around
+and below it, so pressing does not crush its block, though a footing pressed too hard sinks into it, as below, and a
+joint to it can still crack on its side: stone cannot hang from soil.
 
 A joint is **intact**, joining its blocks like one piece of material, or **cracked**, carrying only what contact
 can. `StructuralAnalysis` solves for the blocks' displacements under their weight, linear and elastic, takes each
@@ -374,10 +375,49 @@ depth, as 6 blocks of granite do while 7 hold; an overhang still falling when it
 built, where without arches it falls. A granite floor 36 blocks square held on all sides stands on its cracked edges
 too; finding its hinges takes about twice as long as letting it fall.
 
+**Soft ground** (`Soil`, `Footprint`) gives under what stands on it. The joints to the ground along one axis, with
+the ground on the same side and their ground blocks side by side on one level, make a **footing**, which the ground
+holds as one, as a uniform elastic half-space holds a rigid footing of its shape. Gazetas fitted that to rigorous
+solutions for footings of any shape pressing, sliding, rocking and twisting, from the footing's area, the second
+moments of its area and the rectangle around it, and the ground's shear modulus and Poisson's ratio (G. Gazetas,
+Journal of Geotechnical Engineering 117, 1991). Each joint rests on its share of that by area, springs at its face
+that its half beam carries in series, K' = (F + RS⁻¹Rᵀ)⁻¹ (`BeamElement.onSprings`), so the footing settles, slides
+and twists as one; its joints pressing in step make part of its rocking stiffness, and springs that turn each face
+add the rest, which a rigid footing owes to the ground's pressure gathering toward its edges. Geometric stiffness
+follows the springs as it follows the beams, so a tower on soft ground leans over as a whole once its weight turns
+it harder than the ground turns it back, at K = Wh, as the Tower of Pisa nearly did; a frame that leans as a whole
+barely bends as it does, so its bow from the start is capped where its lean on the ground reaches 1/500, as out of
+plumb as a column that starts bowed by L/500.
+
+A footing on the ground below it bears what Eurocode 7 works out for ground that drains (EN 1997-1 Annex D.4), or
+for ground that cannot when it has no friction (D.3): the soil's cohesion, taken from its unconfined compressive
+strength by Mohr and Coulomb, the weight of the ground heaped beside the footing, from its base up, and the weight
+of the soil under it, each grown by the factors its angle of friction sets and by the footing's shape, and shrunk the
+more the load leans. The load bears on the part of the footing centred where it acts, as Meyerhof took it, taken as
+the rectangle with that part's area and outline, so a ring of walls bears as a strip as wide as its walls; an intact
+joint presses with the part of its stress that presses, a cracked one with all its force. A footing pressed past what
+it bears sinks: the joints whose patches that part mostly covers let go, the ground under them is pressed aside, and
+what they held falls, unless something else holds it.
+
+The tests check a block settling into soil by its weight over Gazetas' stiffness, within a percent of a rigid disc's
+4GR/(1 − ν); Eurocode 7's factors against their tables, and its bearing for square, long, leaning and undrained
+footings; a granite tower of ten blocks on soil leaning over at 1.98 times its weight, as K/(Wn²/2) says to a part in
+a thousand, while one of twenty leans, presses the edge of its footing into the ground and falls; a tower three
+blocks square rocking as one footing 3 m square does, to 2 %; sand bearing 170 kPa under a block, so that six blocks
+of granite stand on it and seven sink into it without a crack, while a footing set a block deep in sand bears four
+and a half times as much; a footing pressed off centre sinking only under its loaded side; and an analysis with soft
+ground the same to the bit on any number of threads. Rock, thousands of times stiffer
+than soil, gives next to nothing: a span clamped into granite is bent at its ends 2.4 % less than in rigid ground.
+A granite tower one block wide stands 13 blocks tall on soil and leans over and falls at 14; it stands 19 blocks
+tall on clay and 22 on gravel, and sinks into sand at 7.
+
 What the model leaves out, so far: yielding steel gives way at once instead of hinging and handing its load on, so
 redundant metal frames fall somewhat early; only the forces along joints soften a frame, so a beam bent about its
-stiff side does not twist aside; the ground neither gives nor stretches, however hard an arch pushes on it;
-deflections are small, bowing included; and loads are static: the weight of blocks and the strain of heat.
+stiff side does not twist aside; the ground gives as though the block a footing touches went down for ever, so a
+layer of sand on rock settles and gives way as deep sand would, it gives way only under a footing that presses down
+on it, not beside one that pushes it sideways, as an arch's end does, it settles at once rather than over months as
+clay does, and it does not stretch with heat; deflections are small, bowing included; and loads are static: the
+weight of blocks and the strain of heat.
 
 ## Hosting
 
@@ -537,6 +577,15 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   and when it changes every built block waits to be checked again. `/anchor structure inspect` says how many times
   its loads a slender structure could carry before it buckles, and how loaded its most loaded joint would be standing
   straight.
+- **Soft ground.** `LevelStructures` reads the `softGround` setting of the structures section as it starts each
+  analysis, and the survey gives the analysis each natural block's matter, temperature and mass, so the ground under a
+  footing gives as its matter does and bears more where more of it is heaped around. Ground that a footing sinks into
+  is pushed aside, with its block's breaking sound, low, and a puff of its dust: it moves to the first spot beside the
+  footing, at its level or one higher, west, east, north, then south, that is free and has something sturdy under it,
+  and comes in natural; with nowhere to go, or holding a block entity, it breaks, dropping what it drops, and ground
+  that cannot be broken stays. What stood on it then falls into the hole. `/anchor structure inspect` says how hard
+  the structure's most loaded footing presses its ground, as a share of what the ground bears there, and how far it
+  has settled, and `/anchor heat status` counts the blocks of ground that footings sank into.
 - **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
   snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
   vanilla does, and the result is held between −30 and 45 °C (`Climate`). Its air has a relative humidity of
@@ -701,6 +750,7 @@ rewind it to, hot blocks glow in the colours of a black body, and the Laboratory
 surroundings, with ready-made experiments to build there. Phase 2, structure and fracture, has begun: materials
 have mechanical properties that heat softens, what players build stands or falls by the strength of its blocks,
 cracking where it is overloaded, uneven heat cracks brittle blocks from within, expansion held back by a structure
-loads its joints, and slender structures bow and buckle. Next, arches and fracture inside blocks. After
+loads its joints, slender structures bow and buckle, cracked spans stand as arches, and the ground gives under what
+stands on it. Next, fracture inside blocks. After
 that come rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

@@ -568,6 +568,78 @@ public final class Contact {
         return length;
     }
 
+    /**
+     * Returns the pressing part of the stress an intact joint carries, spread linearly over the patch as its strength
+     * is judged: how hard it presses where it presses, and where that pressing acts. The rest of the patch pulls,
+     * which the joint's bond holds.
+     *
+     * @param n the force along the joint, positive where it pulls
+     * @param my the bending moment about the second face axis's normal, as the joint's stress resultants give it
+     * @param mz the bending moment about the first face axis's normal
+     * @return the pressing force in newtons, zero if no part of the patch presses, then where it acts, along the first
+     *     and the second face axis, in metres from the line between the block centres
+     */
+    double[] pressing(double n, double my, double mz) {
+        // The stress at (s, t) is a + bs (s - centreS) + bt (t - centreT), negative where it presses.
+        double a = n / area;
+        double bs = -mz / inertiaS;
+        double bt = my / inertiaT;
+        double force = 0;
+        double alongS = 0;
+        double alongT = 0;
+        double[] ps = new double[8];
+        double[] pt = new double[8];
+        for (int i = 0; i < rectangles.length; i += 4) {
+            double[] cs = {rectangles[i], rectangles[i + 2], rectangles[i + 2], rectangles[i]};
+            double[] ct = {rectangles[i + 1], rectangles[i + 1], rectangles[i + 3], rectangles[i + 3]};
+            // Clip the rectangle to where the stress presses.
+            int count = 0;
+            for (int k = 0; k < 4; k++) {
+                int next = (k + 1) % 4;
+                double here = a + bs * (cs[k] - centreS) + bt * (ct[k] - centreT);
+                double there = a + bs * (cs[next] - centreS) + bt * (ct[next] - centreT);
+                if (here <= 0) {
+                    ps[count] = cs[k];
+                    pt[count] = ct[k];
+                    count++;
+                }
+                if ((here < 0 && there > 0) || (here > 0 && there < 0)) {
+                    double u = here / (here - there);
+                    ps[count] = cs[k] + u * (cs[next] - cs[k]);
+                    pt[count] = ct[k] + u * (ct[next] - ct[k]);
+                    count++;
+                }
+            }
+            // A fan of triangles from the first corner: the pressure p is linear over each, so its integral is the
+            // area times the mean at the corners, and that of p times s is A / 12 (Σ p s + Σ p Σ s).
+            for (int k = 1; k + 1 < count; k++) {
+                double[] ts = {ps[0], ps[k], ps[k + 1]};
+                double[] tt = {pt[0], pt[k], pt[k + 1]};
+                double tri = Math.abs((ts[1] - ts[0]) * (tt[2] - tt[0]) - (ts[2] - ts[0]) * (tt[1] - tt[0])) / 2;
+                double sumP = 0;
+                double sumS = 0;
+                double sumT = 0;
+                double sumPs = 0;
+                double sumPt = 0;
+                for (int c = 0; c < 3; c++) {
+                    double p = -(a + bs * (ts[c] - centreS) + bt * (tt[c] - centreT));
+                    sumP += p;
+                    sumS += ts[c];
+                    sumT += tt[c];
+                    sumPs += p * ts[c];
+                    sumPt += p * tt[c];
+                }
+                force += tri * sumP / 3;
+                alongS += tri / 12 * (sumPs + sumP * sumS);
+                alongT += tri / 12 * (sumPt + sumP * sumT);
+            }
+        }
+        if (!(force > 0)) {
+            return new double[] {0, 0, 0};
+        }
+        return new double[] {force, alongS / force - 0.5, alongT / force - 0.5};
+    }
+
     /** Returns how far two intervals overlap, or zero if they do not. */
     private static double overlap(double a0, double a1, double b0, double b1) {
         return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));

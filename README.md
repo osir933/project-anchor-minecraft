@@ -92,7 +92,7 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 | `/anchor snapshot remove <name>` | For operators: deletes a snapshot. |
 | `/anchor experiment list` | The ready-made experiments and what each shows. `/anchor experiment` alone does the same. |
 | `/anchor experiment build <name>` | For operators: builds a ready-made experiment in front of you and starts it, with probes where its result shows, a chart of them in your inventory and a snapshot to run it again. |
-| `/anchor structure inspect` | Whether the block you are looking at is built or natural, which of its joints have cracked, how close uneven heat comes to cracking it through and, for a built block, how loaded its structure is: how many blocks were analysed with it, its most loaded joint and how loaded that would be without heat, what would fall, which cracked joints pivot on an edge as an arch's do, and how far heat has stretched the block. Operators can name any block with `/anchor structure inspect <pos>`. |
+| `/anchor structure inspect` | Whether the block you are looking at is built or natural, which of its joints have cracked, how close uneven heat comes to cracking it through and, for a built block, how loaded its structure is: how many blocks were analysed with it, its most loaded joint and how loaded that would be without heat, what would fall, which cracked joints pivot on an edge as an arch's do, how hard its most loaded footing presses the ground and how far it has settled, and how far heat has stretched the block. Operators can name any block with `/anchor structure inspect <pos>`. |
 | `/anchor structure mark <from> <to> built\|natural` | For operators: makes a box of up to 32,768 blocks built, so that it stands or falls by its strength, or natural, so that it holds still. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
@@ -220,7 +220,7 @@ file into the `serverconfig` folder in that world's folder. The settings are: `e
 (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns refinement off), `maxRefinedCells`
 (16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky` (true) under `[heat]`, and `enabled` (true),
 `maxBlocks` (4096), `threads` (0, for half the processors, up to 4), `thermalShock` (true), `thermalExpansion`
-(true), `buckling` (true) and `arching` (true) under `[structures]`.
+(true), `buckling` (true), `arching` (true) and `softGround` (true) under `[structures]`.
 
 ### Describing blocks in a data pack
 
@@ -292,12 +292,20 @@ material's measured strength, stiffness and friction (see [Structure](docs/archi
   held on all four sides cracks along its edges and stands on them. An arch too flat for its span sags through, as
   a granite span 60 blocks long does, and a cracked span too short for its depth slides off its ends. The `arching`
   setting turns it off.
+- The ground gives under what stands on it, as soil does: a block of granite settles 2 mm into soil and under half a
+  millimetre into sand, and a footing pressed harder than its ground can bear sinks into it, pushing the ground
+  aside to heap up beside it. Sand bears six granite blocks stacked on one block of it but not seven, and an iron
+  block but not an iron block with a gold one on top; ground heaped around a footing helps it bear, so a pillar set a
+  block deep in sand bears four and a half times as much. A tall, thin tower on soft ground leans over once its
+  weight turns it harder than the ground turns it back, as the Tower of Pisa nearly did: a granite tower one block
+  wide stands 13 blocks tall on soil and leans over and falls at 14. Rock gives next to nothing, so on stone the same
+  tower stands until it buckles. The `softGround` setting turns it off.
 - Trees and crops grow natural, and so do the stone, cobblestone and obsidian that lava makes where it meets water.
   The blocks of a ready-made experiment are natural too.
 
 `/anchor structure inspect` tells whether a block is built, how loaded its structure is, how near it comes to
-buckling and which of its cracked joints pivot as an arch's do, and operators can make a box of blocks built or
-natural with `/anchor structure mark`, for instance to let a village that came with the
+buckling, which of its cracked joints pivot as an arch's do and how hard it presses its ground, and operators can
+make a box of blocks built or natural with `/anchor structure mark`, for instance to let a village that came with the
 world stand or fall by its strength. Structures are checked where heat runs, near players. Small ones are analysed
 at once; a big building is analysed in the background, shared among a few threads as the `threads` setting says, and
 falls a moment later, at the same moment on every machine that keeps up and as soon as the analysis is done on one
@@ -305,9 +313,11 @@ that does not. What stands and what falls is the same to the bit however many th
 built blocks are analysed together, or what the `maxBlocks` setting says; in a larger building, the part around a
 change is analysed with the rest held still.
 
-What this alpha leaves out: steel that yields gives way at once instead of bending, the ground does not give
-however soft it is, even under the push of an arch, and only the weight of blocks and the strain of heat load a
-structure, not the players, animals or items on it.
+What this alpha leaves out: steel that yields gives way at once instead of bending; the ground gives as though the
+block under a footing went down for ever, so a layer of sand on stone gives way as deep sand would, it gives way only
+under what presses down on it, not beside what pushes it sideways, as an arch's end does, and clay settles at once
+rather than over months; and only the weight of blocks and the strain of heat load a structure, not the players,
+animals or items on it.
 
 ## Design principles
 

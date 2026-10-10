@@ -27,14 +27,17 @@ class ArchingTest {
     private static final double BLOCK = GRANITE.referenceDensity() * G;
     /** What crushes granite, in pascals. */
     private static final double CRUSHES = GRANITE.mechanics().compressiveStrength(ROOM);
+    /** Ground that does not give, as the closed forms here take it. */
+    private static final StructuralAnalysis.Settings RIGID = StructuralAnalysis.Settings.defaults()
+            .withSoftGround(false);
 
     @Test
     void aSpanCrackedAtItsEndsStandsOnThemAsAnArch() {
-        // Clamped at both ends, 28 blocks of granite crack at their ends, which are bent hardest, and the cracked
-        // ends cannot hold the bending. They pivot on their bottom edges instead, which the ground keeps from
-        // spreading, so the span pushes on them as it sags and stands as an arch with two hinges.
+        // Clamped at both ends in ground that does not give, 28 blocks of granite crack at their ends, which are bent
+        // hardest, and the cracked ends cannot hold the bending. They pivot on their bottom edges instead, which the
+        // ground keeps from spreading, so the span pushes on them as it sags and stands as an arch with two hinges.
         int n = 28;
-        Result r = StructuralAnalysis.analyse(bridge(n, Frame.Joint.INTACT));
+        Result r = StructuralAnalysis.analyse(bridge(n, Frame.Joint.INTACT), RIGID);
         assertTrue(r.settled());
         assertTrue(r.falling().isEmpty());
         assertEquals(List.of(new GridPos(0, 0, 0), new GridPos(n, 0, 0)),
@@ -70,8 +73,7 @@ class ArchingTest {
 
     @Test
     void withoutArchesTheSameSpanFalls() {
-        Result r = StructuralAnalysis.analyse(bridge(28, Frame.Joint.INTACT),
-                StructuralAnalysis.Settings.defaults().withArching(false));
+        Result r = StructuralAnalysis.analyse(bridge(28, Frame.Joint.INTACT), RIGID.withArching(false));
         assertEquals(2, r.cracks().size());
         assertEquals(28, r.falling().size());
         assertEquals(1, r.rounds());
@@ -140,12 +142,13 @@ class ArchingTest {
     void aShortCrackedSpanSlidesOffItsEnds() {
         // A span cracked through everywhere has nothing but its thrust to press its ends against the ground, and
         // friction to hold them. The thrust is about w L² / 8 for a metre of rise and the ends must hold w L / 2, so
-        // with granite's friction of 0.6 a span slides off its ends unless it is longer than 4 / 0.6 = 6.7 m.
-        Result six = StructuralAnalysis.analyse(bridge(6, Frame.Joint.CRACKED));
+        // with granite's friction of 0.6 a span slides off its ends unless it is longer than 4 / 0.6 = 6.7 m, on
+        // ground that does not give way as it pushes.
+        Result six = StructuralAnalysis.analyse(bridge(6, Frame.Joint.CRACKED), RIGID);
         assertEquals(6, six.falling().size());
         BondResult end = six.bonds().get(0);
         assertEquals(Mode.SLIDING, end.mode());
-        Result seven = StructuralAnalysis.analyse(bridge(7, Frame.Joint.CRACKED));
+        Result seven = StructuralAnalysis.analyse(bridge(7, Frame.Joint.CRACKED), RIGID);
         assertTrue(seven.falling().isEmpty());
         assertTrue(seven.settled());
         BondResult held = seven.bonds().get(0);

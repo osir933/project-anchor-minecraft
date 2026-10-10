@@ -42,6 +42,7 @@ class HostedStructuresTest {
     private static final int SNOW_LAYER = 10;
     private static final int SNOW_LAYERS = 11;
     private static final int BARRIER = 12;
+    private static final int SAND = 13;
 
     private static final BlockAppearance[] LOOKS = {
         BlockAppearance.of("anchor:air"),
@@ -59,6 +60,7 @@ class HostedStructuresTest {
         BlockAppearance.of("anchor:powder_snow").withFill(0.125).withShape(Shape.NONE),
         BlockAppearance.of("anchor:powder_snow").withFill(0.25).withShape(Shape.bottom(0.125)),
         BlockAppearance.of("anchor:granite").asImmovable(),
+        BlockAppearance.of("anchor:sand"),
     };
 
     private static final long ORIGIN = SectionPos.pack(0, 0, 0);
@@ -379,6 +381,34 @@ class HostedStructuresTest {
     }
 
     @Test
+    void aPillarTooHeavyForTheSandUnderItSinksIntoIt() {
+        // Sand bears about 170 kPa under a block's footing at its surface: six blocks of granite, not seven.
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, i -> SectionPos.localY(i) < 8 ? SAND : AIR, CLIMATE);
+        GridPos foot = new GridPos(4, 8, 4);
+        GridPos sand = foot.offset(Direction.DOWN);
+        for (int k = 0; k < 7; k++) {
+            place(h, foot.offset(0, k, 0), STONE);
+        }
+        StructureSurvey survey = h.survey(foot, 100).orElseThrow();
+        Frame.Block ground = survey.frame().blocks().get(0);
+        assertEquals(sand, ground.pos());
+        assertTrue(ground.ground());
+        assertEquals(h.world().readBlock(sand).mass(), ground.massKg(), "how much sand weighs sets what it bears");
+        HostedWorld.Settled settled = h.settle(survey, StructuralAnalysis.analyse(survey.frame()));
+        assertFalse(settled.stale());
+        assertEquals(List.of(sand), settled.sunk());
+        assertEquals(7, settled.falling().size());
+        assertTrue(settled.cracks().isEmpty());
+        assertFalse(h.isCracked(foot, Direction.DOWN), "the sand is pushed aside, not cracked");
+        place(h, foot.offset(0, 6, 0), AIR);
+        survey = h.survey(foot, 100).orElseThrow();
+        settled = h.settle(survey, StructuralAnalysis.analyse(survey.frame()));
+        assertTrue(settled.sunk().isEmpty());
+        assertTrue(settled.falling().isEmpty());
+    }
+
+    @Test
     void nothingIsSettledOnceTheStructureHasChanged() {
         HostedWorld h = hosted();
         h.importSection(ORIGIN, wall(), CLIMATE);
@@ -411,7 +441,7 @@ class HostedStructuresTest {
         StructuralAnalysis.Result result = new StructuralAnalysis.Result(List.of(),
                 List.of(new StructuralAnalysis.BondResult(bottom, 1, Frame.Joint.CRACKED, true, 0.4,
                         StructuralAnalysis.Mode.TIPPING, 0.4, 0.4, false, -1000.0)), List.of(crack), List.of(), 2,
-                true, Double.POSITIVE_INFINITY, List.of());
+                true, Double.POSITIVE_INFINITY, List.of(), List.of());
         long before = h.sectionVersion(ORIGIN);
         assertEquals(List.of(crack), h.settle(survey, result).cracks());
         assertTrue(h.sectionVersion(ORIGIN) > before, "cracking changes the section");
