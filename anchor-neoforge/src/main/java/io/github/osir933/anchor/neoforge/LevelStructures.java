@@ -109,6 +109,8 @@ final class LevelStructures {
      * @param settled whether the analysis found a state where nothing more gives way
      * @param buckling how many times its loads the structure could carry before it buckles; infinite if it is too
      *     stocky to bow under them, or if slender structures do not buckle
+     * @param hinges how many of the structure's cracked joints pivot on an edge, as the joints of an arch do
+     * @param pivotsToward the directions in which the block's own joints pivot on an edge
      * @param thermalStress the thermal stress in the block's most loaded cell, for a refined block of brittle
      *     matter, or {@code null}
      * @param fractured whether uneven heat has cracked the block through
@@ -119,9 +121,9 @@ final class LevelStructures {
      *     climate where it stands
      */
     record Look(boolean built, List<Direction> crackedToward, int blocks, int edge, boolean falls, int falling,
-            double load, StructuralAnalysis.BondResult worst, boolean settled, double buckling,
-            ThermalShock.Result thermalStress, boolean fractured, boolean thermalShock, Frame.Expansion expansion,
-            double unstrainedK) {
+            double load, StructuralAnalysis.BondResult worst, boolean settled, double buckling, int hinges,
+            List<Direction> pivotsToward, ThermalShock.Result thermalStress, boolean fractured, boolean thermalShock,
+            Frame.Expansion expansion, double unstrainedK) {
     }
 
     /** An analysis running in the background, and the game tick it is settled at. */
@@ -144,8 +146,8 @@ final class LevelStructures {
     private volatile double lastMillis;
     private int largest;
     private String failure;
-    /** The buckling setting as last read, so that every structure is checked again when it changes. */
-    private boolean buckling;
+    /** How structures were analysed as last read, so that every structure is checked again when that changes. */
+    private StructuralAnalysis.Settings checked;
 
     /**
      * Starts structures in a level.
@@ -156,7 +158,7 @@ final class LevelStructures {
     LevelStructures(ServerLevel level, HostedWorld hosted) {
         this.level = level;
         this.hosted = hosted;
-        this.buckling = AnchorConfig.get(AnchorConfig.BUCKLING);
+        this.checked = settings();
     }
 
     /** Runs one game tick: lets blocks fall, settles what is due and analyses what waits, within the tick's time. */
@@ -169,9 +171,9 @@ final class LevelStructures {
                 drop();
                 return;
             }
-            boolean buckles = AnchorConfig.get(AnchorConfig.BUCKLING);
-            if (buckles != buckling) {
-                buckling = buckles;
+            StructuralAnalysis.Settings settings = settings();
+            if (!settings.equals(checked)) {
+                checked = settings;
                 hosted.recheckStructures();
             }
             fallSome();
@@ -216,9 +218,13 @@ final class LevelStructures {
         } while ((System.nanoTime() - start) / 1e6 < MILLIS_PER_TICK);
     }
 
-    /** Returns how structures are analysed now: by default, with slender ones buckling unless that is off. */
+    /**
+     * Returns how structures are analysed now: by default, with slender ones buckling and cracked spans standing as
+     * arches unless those are off.
+     */
     private static StructuralAnalysis.Settings settings() {
-        return StructuralAnalysis.Settings.defaults().withBuckling(AnchorConfig.get(AnchorConfig.BUCKLING));
+        return StructuralAnalysis.Settings.defaults().withBuckling(AnchorConfig.get(AnchorConfig.BUCKLING))
+                .withArching(AnchorConfig.get(AnchorConfig.ARCHING));
     }
 
     /** Analyses a structure, noting how long it took. */
@@ -321,20 +327,32 @@ final class LevelStructures {
         Optional<StructureSurvey> survey = hosted.survey(g, AnchorConfig.get(AnchorConfig.STRUCTURE_BLOCKS));
         if (survey.isEmpty()) {
             return Optional.of(new Look(false, cracked, 0, 0, false, 0, 0.0, null, true, Double.POSITIVE_INFINITY,
-                    seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(), seen.environmentK()));
+                    0, List.of(), seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(),
+                    seen.environmentK()));
         }
         StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame(), settings());
         StructuralAnalysis.BlockResult block = result.block(g);
         StructuralAnalysis.BondResult worst = null;
+        int hinges = 0;
+        List<Direction> pivots = new ArrayList<>();
         for (StructuralAnalysis.BondResult b : result.bonds()) {
             if (b.holds() && (worst == null || b.load() > worst.load())) {
                 worst = b;
             }
+            if (b.hinged()) {
+                hinges++;
+                Direction up = StructuralAnalysis.direction(b.axis());
+                if (b.pos().equals(g)) {
+                    pivots.add(up);
+                } else if (b.pos().offset(up).equals(g)) {
+                    pivots.add(up.opposite());
+                }
+            }
         }
         return Optional.of(new Look(true, cracked, survey.get().blocks(), survey.get().edge(),
                 block == null || block.fell(), result.falling().size(), block == null ? 0.0 : block.load(), worst,
-                result.settled(), result.buckling(), seen.thermalStress(), seen.fractured(), thermalShock,
-                seen.expansion(), seen.environmentK()));
+                result.settled(), result.buckling(), hinges, pivots, seen.thermalStress(), seen.fractured(),
+                thermalShock, seen.expansion(), seen.environmentK()));
     }
 
     /**

@@ -279,9 +279,14 @@ class StructuralAnalysisTest {
                 breaking.cracks().stream().map(Crack::pos).toList());
         double first = breaking.cracks().get(0).load();
         assertEquals(first, breaking.cracks().get(1).load(), 1e-9 * first);
-        // Cracked ends do not wedge into an arch, so the whole span falls, with no need to solve again.
-        assertEquals(28, breaking.falling().size());
-        assertEquals(1, breaking.rounds());
+        // The cracked ends pivot on their edges, and the span stands on them as an arch, as ArchingTest shows.
+        assertTrue(breaking.falling().isEmpty());
+        // Where cracked joints cannot pivot, the whole span falls, with no need to solve again.
+        Result loose = StructuralAnalysis.analyse(bridge(granite, 28),
+                StructuralAnalysis.Settings.defaults().withArching(false));
+        assertEquals(breaking.cracks(), loose.cracks());
+        assertEquals(28, loose.falling().size());
+        assertEquals(1, loose.rounds());
     }
 
     @Test
@@ -339,7 +344,7 @@ class StructuralAnalysisTest {
 
     @Test
     void aShortRoundLimitLeavesTheResultUnsettled() {
-        StructuralAnalysis.Settings oneRound = new StructuralAnalysis.Settings(G, 1, 0.02, 1e-4, true);
+        StructuralAnalysis.Settings oneRound = new StructuralAnalysis.Settings(G, 1, 0.02, 1e-4, true, true);
         Result result = StructuralAnalysis.analyse(tee(12, 9), oneRound);
         assertFalse(result.settled());
         assertEquals(1, result.rounds());
@@ -349,10 +354,14 @@ class StructuralAnalysisTest {
 
     @Test
     void rejectsSettingsThatMakeNoSense() {
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(-1, 64, 0.02, 1e-4, true));
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 0, 0.02, 1e-4, true));
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 64, 1.0, 1e-4, true));
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 64, 0.02, 0, true));
+        assertThrows(IllegalArgumentException.class,
+                () -> new StructuralAnalysis.Settings(-1, 64, 0.02, 1e-4, true, true));
+        assertThrows(IllegalArgumentException.class,
+                () -> new StructuralAnalysis.Settings(G, 0, 0.02, 1e-4, true, true));
+        assertThrows(IllegalArgumentException.class,
+                () -> new StructuralAnalysis.Settings(G, 64, 1.0, 1e-4, true, true));
+        assertThrows(IllegalArgumentException.class,
+                () -> new StructuralAnalysis.Settings(G, 64, 0.02, 0, true, true));
     }
 
     /**

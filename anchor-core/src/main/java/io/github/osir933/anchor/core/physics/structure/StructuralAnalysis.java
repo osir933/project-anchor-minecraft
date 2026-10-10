@@ -23,8 +23,8 @@ import java.util.function.IntFunction;
  * solves for how far each block moves, linear and elastic, then checks every joint: an intact joint against the
  * strength of the materials on each side at their temperatures, a cracked or granular one against what pressing
  * and friction can hold. If something is overloaded, the worst joint gives way: an intact joint cracks, a cracked
- * one lets go. Loads then find other paths, so the analysis solves again, until nothing more breaks. Blocks left
- * with no path to the ground fall.
+ * one pivots on its edge or lets go. Loads then find other paths, so the analysis solves again, until nothing more
+ * breaks. Blocks left with no path to the ground fall.
  *
  * <p>The strain of heat is a matter of hairlines: it moves blocks by fractions of a millimetre, and lets go once
  * they have moved that far. So it cracks brittle matter, which breaks before it moves, but not matter that yields:
@@ -34,6 +34,18 @@ import java.util.function.IntFunction;
  * by a hairline and holds as well as it does without heat. That is why a structure cracked by heat can still
  * stand, and why heat that presses a cracked span together can hold it up. Heat that crushes the edge of a joint
  * has nowhere to go.
+ *
+ * <p>A cracked joint holds only by pressing, so it cannot hold a span up by bending, but the span can still stand
+ * as an arch. A cracked joint that bending would tip, or whose edge it would crush, pivots instead, on a hinge just
+ * in from the edge it presses, where that edge can bear the force through it, and goes on carrying that force. So a
+ * span cracked at its ends sags until it pushes on them, the ground pushes back, and the span stands on them as an
+ * arch, as a masonry arch does, or a cracked floor held on all sides. A joint pivots only where the blocks beyond it
+ * are held by more than it, which would otherwise only swing about the hinge, and of neighbouring joints that would
+ * start to pivot together only the most loaded does, since two hinges side by side can leave the blocks between
+ * them free to swing. A hinge moves inward as the force through it grows, a few times at most, and its joint lets
+ * go once the force acts beyond its patch: so an arch too flat for its span sags through its rise and falls, and one
+ * too short for its rise slides off its ends unless friction holds them. Loose grains have no edge to pivot on, and a
+ * joint the frame broke by buckling lets go, since a hinge would only let it bow further.
  *
  * <p>Slender structures bow under what presses them, and bowing loads them more. Forces along the joints soften
  * the frame where they press and stiffen it where they pull, so under some multiple of its loads, its critical load
@@ -53,9 +65,9 @@ import java.util.function.IntFunction;
  *
  * <p>What the analysis leaves out, so far: a ductile joint that yields gives way at once, where a real steel
  * frame would keep its full plastic moment there and hand on the rest, so redundant metal frames fall somewhat
- * early; cracked joints do not wedge into arches; only forces along the joints soften the frame, so a beam bent
- * about its stiff side does not twist aside; the ground does not give, however soft; and deflections are taken to
- * be small, bowing included. Where they turn out large the result says so.
+ * early; only forces along the joints soften the frame, so a beam bent about its stiff side does not twist aside;
+ * the ground does not give, however soft, so it holds an arch's ends however hard they push; and deflections are
+ * taken to be small, bowing included. Where they turn out large the result says so.
  */
 public final class StructuralAnalysis {
 
@@ -79,6 +91,34 @@ public final class StructuralAnalysis {
      */
     static final double IMPERFECTION = 500.0;
 
+    /**
+     * A hinge keeps this fraction of the stiffness with which its joint resisted turning about it, so that a frame its
+     * hinges leave free to move still solves: such a hinge turns so far that the force through it leaves the patch,
+     * and the joint lets go.
+     */
+    static final double HINGE_SOFTNESS = 1e-6;
+
+    /**
+     * A hinge is put where the edge it pivots on can take this many times the force pressing through it, so that a
+     * little more pressing does not move it again at once.
+     */
+    static final double HINGE_ROOM = 1.05;
+
+    /**
+     * No force can press on an edge alone, so a hinge is put no nearer the edge than where the largest part of the
+     * patch centred on it is this fraction of the whole patch.
+     */
+    static final double HINGE_EDGE = 1e-3;
+
+    /** How many times a hinge may move inward as the force through it grows, before its joint gives up. */
+    static final int HINGE_MOVES = 4;
+
+    /** How many times a hinge may close again as loads find other paths, before it is left as it is. */
+    static final int HINGE_CLOSES = 2;
+
+    /** A hinge that turns back, closing, by more than this many radians closes. */
+    static final double HINGE_CLOSING = 1e-12;
+
     private StructuralAnalysis() {
     }
 
@@ -94,8 +134,11 @@ public final class StructuralAnalysis {
      *     that the equations stay solvable; its strength is not floored
      * @param buckling whether slender structures bow under what presses them and buckle; if not, every structure is
      *     judged in first-order theory
+     * @param arching whether a cracked joint that would tip pivots on the edge it presses, still carrying the thrust
+     *     an arch needs, rather than letting go
      */
-    public record Settings(double gravity, int maxRounds, double together, double stiffnessFloor, boolean buckling) {
+    public record Settings(double gravity, int maxRounds, double together, double stiffnessFloor, boolean buckling,
+            boolean arching) {
 
         /**
          * Validates the settings.
@@ -105,6 +148,7 @@ public final class StructuralAnalysis {
          * @param together the tolerance for giving way together
          * @param stiffnessFloor the stiffness floor
          * @param buckling whether structures buckle
+         * @param arching whether cracked joints pivot on their edges
          */
         public Settings {
             if (!(gravity >= 0 && Double.isFinite(gravity))) {
@@ -123,12 +167,13 @@ public final class StructuralAnalysis {
 
         /**
          * Returns the default settings: standard gravity, 64 rounds, joints within 2 percent of the worst give way
-         * together, materials keep at least one ten-thousandth of their stiffness, and structures buckle.
+         * together, materials keep at least one ten-thousandth of their stiffness, structures buckle and cracked
+         * joints pivot on their edges.
          *
          * @return the settings
          */
         public static Settings defaults() {
-            return new Settings(PhysicalConstants.STANDARD_GRAVITY, 64, 0.02, 1e-4, true);
+            return new Settings(PhysicalConstants.STANDARD_GRAVITY, 64, 0.02, 1e-4, true, true);
         }
 
         /**
@@ -138,7 +183,17 @@ public final class StructuralAnalysis {
          * @return the settings
          */
         public Settings withBuckling(boolean on) {
-            return new Settings(gravity, maxRounds, together, stiffnessFloor, on);
+            return new Settings(gravity, maxRounds, together, stiffnessFloor, on, arching);
+        }
+
+        /**
+         * Returns these settings with arching switched on or off.
+         *
+         * @param on whether cracked joints pivot on their edges
+         * @return the settings
+         */
+        public Settings withArching(boolean on) {
+            return new Settings(gravity, maxRounds, together, stiffnessFloor, buckling, on);
         }
     }
 
@@ -189,9 +244,12 @@ public final class StructuralAnalysis {
      *     heat
      * @param unbowed how loaded it would be in that solution if the structure did not bow under what presses it:
      *     its load in first-order theory, the same as its load unless the structure is slender enough to bow
+     * @param hinged whether it is a cracked joint that pivots on the edge it presses, as the joints of an arch do
+     * @param force the force along it in that solution, from the weight and the strain of heat, in newtons: positive
+     *     where it pulls its blocks together, negative where they press on each other
      */
     public record BondResult(GridPos pos, int axis, Frame.Joint state, boolean holds, double load, Mode mode,
-            double withoutHeat, double unbowed) {
+            double withoutHeat, double unbowed, boolean hinged, double force) {
     }
 
     /**
@@ -345,6 +403,27 @@ public final class StructuralAnalysis {
         private final double tolerance;
         private final List<Crack> cracks = new ArrayList<>();
         private final List<String> notes = new ArrayList<>();
+        /** Each joint's stiffness without a hinge. */
+        private final double[][] base;
+        /**
+         * For a cracked joint that pivots on an edge, a point on its hinge line, y and z in metres from the joint's
+         * axis, and the line's direction, y and z; {@code null} for a joint that does not.
+         */
+        private final double[][] pivot;
+        /** How many times each joint's hinge has moved inward, and closed again. */
+        private final int[] moves;
+        private final int[] closes;
+        /** For each joint, the stress resultants on its face in the case that loaded it most, when last checked. */
+        private final double[][] governing;
+        /** For each cracked joint, whether in that case the force through it acted beyond its patch. */
+        private final boolean[] escaped;
+        /** The force along each joint in the last solution, from the weight and heat, positive pulling. */
+        private final double[] force;
+        /**
+         * For each joint, whether the frame buckling broke it when last checked: bowing overloads it, and a hinge in
+         * it would only let the frame bow further.
+         */
+        private final boolean[] snapped;
 
         Run(Frame frame, Settings settings) {
             this.settings = settings;
@@ -382,6 +461,14 @@ public final class StructuralAnalysis {
             mode = new Mode[m];
             heatShift = new double[m][];
             heatLoad = new double[m][];
+            base = new double[m][];
+            pivot = new double[m][];
+            moves = new int[m];
+            closes = new int[m];
+            governing = new double[m][];
+            escaped = new boolean[m];
+            force = new double[m];
+            snapped = new boolean[m];
             for (int e = 0; e < m; e++) {
                 Frame.Bond b = bonds.get(e);
                 Integer a = nodeAt.get(b.pos());
@@ -412,6 +499,7 @@ public final class StructuralAnalysis {
                     contact[e] = sa.failure() == Failure.GRANULAR || granular(groundAt.get(b.other()));
                 }
             }
+            System.arraycopy(stiffness, 0, base, 0, m);
             boolean heated = false;
             for (int e = 0; e < m; e++) {
                 heatShift[e] = heatShift(e);
@@ -517,6 +605,10 @@ public final class StructuralAnalysis {
                         break;
                     }
                     rounds++;
+                    // A hinge that loads have turned back closes, and the frame is solved again with it shut.
+                    if (closeHinges()) {
+                        continue;
+                    }
                 }
                 double worst = evaluate();
                 if (worst <= 1.0) {
@@ -771,7 +863,7 @@ public final class StructuralAnalysis {
                 }
                 axial[e] = n;
                 if (n != 0) {
-                    geometric[e] = BeamElement.geometric(kind[e] == FREE ? 1.0 : 0.5, n, bonds.get(e).contact());
+                    geometric[e] = geometric(e, n);
                 }
                 pressed |= n < -tolerance;
             }
@@ -816,13 +908,23 @@ public final class StructuralAnalysis {
                 double[][] weightOnly = new double[bonds.size()][];
                 for (int e = 0; e < bonds.size(); e++) {
                     if (active(e) && cold[e] != 0) {
-                        weightOnly[e] = BeamElement.geometric(kind[e] == FREE ? 1.0 : 0.5, cold[e],
-                                bonds.get(e).contact());
+                        weightOnly[e] = geometric(e, cold[e]);
                     }
                 }
                 coldBuckling = Buckling.critical(factor, assemble(e -> weightOnly[e]), BlockCholesky.B * count, 1)
                         .factor();
             }
+        }
+
+        /** Returns a joint's geometric stiffness under a force along it, with its hinge if it pivots on an edge. */
+        private double[] geometric(int e, double axial) {
+            double length = kind[e] == FREE ? 1.0 : 0.5;
+            double[] kg = BeamElement.geometric(length, axial, bonds.get(e).contact());
+            if (pivot[e] == null) {
+                return kg;
+            }
+            return BeamElement.releasedGeometric(kg, base[e], mode(e), HINGE_SOFTNESS, length,
+                    kind[e] == GROUND_BELOW ? 0.0 : 0.5, axial, pivot[e][2], pivot[e][3]);
         }
 
         /** Returns a joint's stiffness plus its geometric stiffness. */
@@ -918,14 +1020,17 @@ public final class StructuralAnalysis {
             double[] t = new double[BeamElement.DOFS];
             Mode[] limit = new Mode[1];
             Mode[] other = new Mode[1];
+            double[] seen = new double[7];
+            double[] most = new double[7];
             for (int e = 0; e < bonds.size(); e++) {
                 if (!active(e)) {
                     continue;
                 }
                 double[] f = forces(e, displacement, heatDisplacement, weight, total);
-                double value = check(e, f, weight, limit);
+                force[e] = face(e, f)[0];
+                double value = check(e, f, weight, limit, most);
                 unbowed[e] = value;
-                double cold = f == weight ? value : check(e, weight, weight, other);
+                double cold = f == weight ? value : check(e, weight, weight, other, null);
                 if (bowedWeight != null) {
                     double[] g = forces(e, bowedWeight, bowedHeat, bowedW, bowedT);
                     elastic(e, bow, start);
@@ -937,17 +1042,21 @@ public final class StructuralAnalysis {
                             t[r] = g[r] + sign * start[r];
                         }
                         double[] both = g == bowedW ? w : t;
-                        double v = check(e, both, w, other);
-                        if (v > value) {
+                        double v = check(e, both, w, other, seen);
+                        if (v > value || sign == 1) {
                             value = v;
                             limit[0] = other[0];
+                            System.arraycopy(seen, 0, most, 0, most.length);
                         }
-                        cold = Math.max(cold, both == w ? v : check(e, w, w, other));
+                        cold = Math.max(cold, both == w ? v : check(e, w, w, other, null));
                     }
                 }
                 load[e] = value;
                 mode[e] = limit[0];
                 withoutHeat[e] = cold;
+                governing[e] = Arrays.copyOf(most, 6);
+                escaped[e] = most[6] != 0;
+                snapped[e] = false;
                 worst = Math.max(worst, value);
             }
             if (buckled != null && worst <= 1.0) {
@@ -976,18 +1085,8 @@ public final class StructuralAnalysis {
 
         /** Computes K d for a joint: the forces its ends need for the given movements of the blocks, in its axes. */
         private void elastic(int e, double[] moves, double[] forces) {
-            int[] map = dofMap(bonds.get(e).axis());
             double[] d = new double[BeamElement.DOFS];
-            if (endI[e] >= 0) {
-                for (int l = 0; l < 6; l++) {
-                    d[l] = moves[BlockCholesky.B * endI[e] + map[l]];
-                }
-            }
-            if (endJ[e] >= 0) {
-                for (int l = 0; l < 6; l++) {
-                    d[6 + l] = moves[BlockCholesky.B * endJ[e] + map[l]];
-                }
-            }
+            nodal(e, moves, d);
             double[] k = stiffness[e];
             for (int r = 0; r < BeamElement.DOFS; r++) {
                 double sum = 0;
@@ -995,6 +1094,15 @@ public final class StructuralAnalysis {
                     sum += k[r * BeamElement.DOFS + c] * d[c];
                 }
                 forces[r] = sum;
+            }
+        }
+
+        /** Copies the movements of a joint's blocks into its own axes, zero at an end on the ground. */
+        private void nodal(int e, double[] moves, double[] d) {
+            int[] map = dofMap(bonds.get(e).axis());
+            for (int l = 0; l < 6; l++) {
+                d[l] = endI[e] >= 0 ? moves[BlockCholesky.B * endI[e] + map[l]] : 0;
+                d[6 + l] = endJ[e] >= 0 ? moves[BlockCholesky.B * endJ[e] + map[l]] : 0;
             }
         }
 
@@ -1047,6 +1155,7 @@ public final class StructuralAnalysis {
                 if (active(e) && at[e] >= peak * (1 - settings.together())) {
                     load[e] = over;
                     mode[e] = modes[e];
+                    snapped[e] = true;
                     // Weight alone breaks it too unless what heat presses the frame with is what buckles it.
                     if (!(coldBuckling > 1)) {
                         withoutHeat[e] = over;
@@ -1100,13 +1209,13 @@ public final class StructuralAnalysis {
                 w[r] = weight[e][r] + a * shape[e][r];
             }
             if (total[e] == weight[e]) {
-                return check(e, w, w, limit);
+                return check(e, w, w, limit, null);
             }
             double[] f = new double[BeamElement.DOFS];
             for (int r = 0; r < BeamElement.DOFS; r++) {
                 f[r] = total[e][r] + a * shape[e][r];
             }
-            return check(e, f, w, limit);
+            return check(e, f, w, limit, null);
         }
 
         /**
@@ -1124,19 +1233,29 @@ public final class StructuralAnalysis {
          *
          * @param f the forces at the joint's ends, heat included
          * @param weight the forces at its ends from the weight alone
+         * @param seen if not {@code null}, receives the stress resultants on the joint's face, heat included, and
+         *     then 1 if the force through a cracked joint acts beyond its patch, 0 if not
          */
-        private double check(int e, double[] f, double[] weight, Mode[] limit) {
+        private double check(int e, double[] f, double[] weight, Mode[] limit, double[] seen) {
             Contact c = bonds.get(e).contact();
             double[] face = face(e, f);
+            if (seen != null) {
+                System.arraycopy(face, 0, seen, 0, 6);
+                seen[6] = 0;
+            }
             Solid a = endI[e] >= 0 ? solids[endI[e]] : groundSolid(bonds.get(e).pos());
             Solid b = endJ[e] >= 0 ? solids[endJ[e]] : groundSolid(bonds.get(e).other());
             if (contact[e] || state[e] == Frame.Joint.CRACKED) {
                 double friction = Math.min(friction(a), friction(b));
                 double crush = Math.min(compression(a), compression(b));
+                double[] carried = f == weight ? face : face(e, weight);
+                if (settings.arching()) {
+                    return bearing(e, c, friction, crush, face, carried, limit, seen);
+                }
                 double holding = holding(c, friction, face, limit);
                 if (f != weight) {
                     Mode[] m = new Mode[1];
-                    double cold = holding(c, friction, face(e, weight), m);
+                    double cold = holding(c, friction, carried, m);
                     if (cold < holding) {
                         holding = cold;
                         limit[0] = m[0];
@@ -1320,6 +1439,128 @@ public final class StructuralAnalysis {
             return ratio(edge, crush);
         }
 
+        /**
+         * Judges a cracked or granular joint as the joints of an arch are judged. It holds while its blocks press
+         * together, friction holds the shear and twist, and the pressing force acts where the patch can bear it:
+         * spread evenly over the largest part of the patch centred where it acts, as masonry codes take a joint (EN
+         * 1996-1-1 6.1.2.2), which shrinks to nothing at the edge, it must not crush the matter. How loaded the
+         * joint is in that is how far out the force acts, over how far out it could act at this pressing: past 1, the
+         * edge it nears crushes, or, with the force beyond the patch, the blocks tip. A joint pressed past what even
+         * its whole patch can bear is crushed right through. A joint loaded beyond what it can take pivots on its edge
+         * if it can, which {@link #giveWay} decides.
+         *
+         * <p>As for any contact, heat that alone would make it open, tip or slip moves it a hairline and lets the
+         * strain go, so it holds if it holds with heat or without; but heat that presses it harder still presses it,
+         * where its force acts, and crushing has nowhere to go.
+         *
+         * @param r the stress resultants on its face, heat included
+         * @param cold those of the weight alone, or {@code r} itself if heat strains nothing
+         * @param seen if not {@code null}, receives the stress resultants it is judged by: its force, pressing as
+         *     hard as with heat, where it acts in the case that holds better; then 1 if that is beyond the patch
+         */
+        private double bearing(int e, Contact c, double friction, double crush, double[] r, double[] cold,
+                Mode[] limit, double[] seen) {
+            double[] chosen = rigid(e, c, friction, r);
+            double[] face = r;
+            if (cold != r) {
+                double[] without = rigid(e, c, friction, cold);
+                if (worst(without) < worst(chosen)) {
+                    chosen = without;
+                    face = cold;
+                }
+            }
+            if (chosen[0] > 0) {
+                // Pulled, but bent so hard that an edge would still press: it rocks open on that edge, unless it
+                // already pivots there and the pull is on its hinge.
+                limit[0] = pivot[e] == null && rocks(c, face) ? Mode.TIPPING : Mode.PULLED_APART;
+                return chosen[0];
+            }
+            double acting = significant(-face[0]);
+            double press = Math.max(acting, significant(-r[0]));
+            double my = moment(face[4]);
+            double mz = moment(face[5]);
+            double y = acting > 0 ? mz / acting : 0;
+            double z = acting > 0 ? -my / acting : 0;
+            boolean beyond = chosen[1] > 1;
+            if (seen != null) {
+                seen[0] = -press;
+                System.arraycopy(face, 1, seen, 1, 3);
+                seen[4] = acting > 0 ? -z * press : face[4];
+                seen[5] = acting > 0 ? y * press : face[5];
+                seen[6] = beyond ? 1 : 0;
+            }
+            double outright = ratio(press, crush * c.effectiveArea(c.centroidY(), c.centroidZ()));
+            if (outright > 1) {
+                limit[0] = chosen[2] > outright ? Mode.SLIDING : Mode.CRUSHING;
+                return Math.max(outright, chosen[2]);
+            }
+            double out;
+            if (acting > 0) {
+                double fraction = c.bearable(y, z, press / crush);
+                out = fraction > 0 ? 1 / fraction : Double.POSITIVE_INFINITY;
+            } else {
+                out = my != 0 || mz != 0 ? Double.POSITIVE_INFINITY : 0;
+            }
+            if (beyond) {
+                limit[0] = Mode.TIPPING;
+            } else if (out >= chosen[2] && out >= outright) {
+                // Short of the patch's edge, the force may still act where the edge cannot bear it: then it crushes.
+                double crushing = acting > 0 ? ratio(press, crush * c.effectiveArea(y, z)) : 0;
+                limit[0] = crushing > chosen[1] ? Mode.CRUSHING : Mode.TIPPING;
+            } else {
+                limit[0] = chosen[2] >= outright ? Mode.SLIDING : Mode.CRUSHING;
+            }
+            return Math.max(Math.max(out, chosen[2]), outright);
+        }
+
+        /** Returns whether some corner of a contact would be pressed, the stress spread linearly over it. */
+        private static boolean rocks(Contact c, double[] r) {
+            for (int k = 0; k < c.corners(); k++) {
+                if (r[0] / c.area() + r[4] * c.cornerT(k) / c.inertiaT() - r[5] * c.cornerS(k) / c.inertiaS() < 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Returns how near a contact is to opening, tipping and slipping under one set of stress resultants: how far
+         * it is pulled apart, zero if it is pressed; how far toward the edge of its patch the pressing force acts, 1 at
+         * the edge; and how far shear and twist go beyond what friction holds. A hinge twists against friction only
+         * along its line.
+         */
+        private double[] rigid(int e, Contact c, double friction, double[] r) {
+            double n = r[0];
+            if (n > tolerance) {
+                return new double[] {1.0 + n / tolerance, 0, 0};
+            }
+            double press = significant(-n);
+            double shear = significant(length(r[1], r[2]));
+            double twist = significant(Math.abs(r[3]));
+            double my = moment(r[4]);
+            double mz = moment(r[5]);
+            double tip;
+            if (press > 0) {
+                tip = c.reach(mz / press, -my / press);
+            } else {
+                tip = my != 0 || mz != 0 ? Double.POSITIVE_INFINITY : 0;
+            }
+            double radius = pivot[e] == null ? c.frictionRadius()
+                    : c.chord(pivot[e][0], pivot[e][1], pivot[e][2], pivot[e][3]) / 4;
+            double slide = Math.max(ratio(shear, friction * press), ratio(twist, friction * press * radius));
+            return new double[] {0, tip, slide};
+        }
+
+        /** Returns the worst of how near a contact is to opening, tipping and slipping, from {@link #rigid}. */
+        private static double worst(double[] rigid) {
+            return rigid[0] > 0 ? rigid[0] : Math.max(rigid[1], rigid[2]);
+        }
+
+        /** Returns a moment, keeping its sign, or zero if it is within the tolerance. */
+        private double moment(double value) {
+            return Math.abs(value) > tolerance ? value : 0;
+        }
+
         /** Returns a force in newtons, or a moment in newton metres, or zero if it is within the tolerance. */
         private double significant(double value) {
             return value > tolerance ? value : 0;
@@ -1342,19 +1583,57 @@ public final class StructuralAnalysis {
         }
 
         /**
-         * Lets every joint loaded to at least the threshold give way: intact ones crack, cracked ones let go.
-         * Returns whether the frame must be solved again: a joint let go, or one that cracked was bent by heat,
-         * which it no longer is.
+         * Lets every joint loaded to at least the threshold give way: intact ones crack, cracked ones pivot on the
+         * edge they press if they tip and can, and let go otherwise. Returns whether the frame must be solved again:
+         * a joint let go or pivots, or one that cracked was bent by heat, which it no longer is.
+         *
+         * <p>Of a run of neighbouring joints that would start to pivot, joints that share blocks, only the most loaded
+         * does, and the rest wait for the next solution: a block that starts to pivot eases the joints beside it, and
+         * two hinges at once could leave the blocks between them free to swing, as no one hinge would.
          */
         private boolean giveWay(double threshold) {
             boolean changed = false;
+            boolean[] bridge = settings.arching() ? bridges() : null;
+            List<Integer> over = new ArrayList<>();
             for (int e = 0; e < bonds.size(); e++) {
-                if (!active(e) || load[e] < threshold || load[e] <= 1.0) {
-                    continue;
+                if (active(e) && load[e] >= threshold && load[e] > 1.0) {
+                    over.add(e);
                 }
-                boolean asContact = contact[e] || state[e] == Frame.Joint.CRACKED;
-                if (asContact) {
-                    open[e] = true;
+            }
+            double[][] at = new double[bonds.size()][];
+            int[] run = new int[free.size()];
+            for (int i = 0; i < run.length; i++) {
+                run[i] = i;
+            }
+            for (int e : over) {
+                if (contact[e] || state[e] == Frame.Joint.CRACKED) {
+                    at[e] = pivotFor(e, bridge);
+                    if (at[e] != null && pivot[e] == null && endI[e] >= 0 && endJ[e] >= 0) {
+                        run[find(run, endI[e])] = find(run, endJ[e]);
+                    }
+                }
+            }
+            // The most loaded joint of each run starts to pivot, the first of them if several are loaded alike.
+            int[] starts = new int[free.size()];
+            Arrays.fill(starts, -1);
+            for (int e : over) {
+                if (at[e] != null && pivot[e] == null) {
+                    int first = find(run, endI[e] >= 0 ? endI[e] : endJ[e]);
+                    if (starts[first] < 0 || load[e] > load[starts[first]]) {
+                        starts[first] = e;
+                    }
+                }
+            }
+            for (int e : over) {
+                if (contact[e] || state[e] == Frame.Joint.CRACKED) {
+                    if (at[e] == null) {
+                        open[e] = true;
+                    } else if (pivot[e] != null) {
+                        moves[e]++;
+                        hinge(e, at[e]);
+                    } else if (starts[find(run, endI[e] >= 0 ? endI[e] : endJ[e])] == e) {
+                        hinge(e, at[e]);
+                    }
                     changed = true;
                 } else {
                     state[e] = Frame.Joint.CRACKED;
@@ -1372,6 +1651,241 @@ public final class StructuralAnalysis {
                 }
             }
             return changed;
+        }
+
+        /** Returns the first block of a block's run, halving the path there as it goes. */
+        private static int find(int[] run, int block) {
+            int b = block;
+            while (run[b] != b) {
+                run[b] = run[run[b]];
+                b = run[b];
+            }
+            return b;
+        }
+
+        /**
+         * Returns where an overloaded cracked joint would pivot on the edge it presses, if arches are on and it can,
+         * as for {@link #hinge}: a point on the hinge line and its direction. It must tip or crush its edge, not open,
+         * slip or crush right through; neither side may be granular, since loose grains have no edge to pivot on; the
+         * blocks beyond it must be held by more than this joint, or they would only swing about the hinge; and the
+         * frame buckling must not be what overloads it, since a hinge would only let the frame bow further. A joint
+         * that already pivots moves its hinge inward as the force through it grows, up to {@link #HINGE_MOVES} times,
+         * but lets go once that force acts beyond its patch, which means the blocks it joins can swing about their
+         * hinges. Returns {@code null} if the joint cannot pivot, and so lets go.
+         */
+        private double[] pivotFor(int e, boolean[] bridge) {
+            if (bridge == null || contact[e] || state[e] != Frame.Joint.CRACKED || snapped[e]
+                    || (mode[e] != Mode.TIPPING && mode[e] != Mode.CRUSHING)) {
+                return null;
+            }
+            if (pivot[e] == null ? bridge[e] : escaped[e] || moves[e] >= HINGE_MOVES) {
+                return null;
+            }
+            return placeHinge(e);
+        }
+
+        /**
+         * Works out where a cracked joint pivots: on the way from the patch's centroid toward where the force through
+         * it acts, in the case that loaded it most, at the point where the largest part of the patch centred there
+         * can take the force at the matter's crushing strength, with some room to spare. A joint pressed by nothing
+         * at all pivots next to the edge its moment turns it toward. The hinge line runs across the direction in which
+         * that part shrinks fastest, so along the edge where the force nears one edge, and it turns so that it opens
+         * away from the centroid. A joint that already pivots keeps its line's direction and moves the line inward,
+         * to where the part of the patch centred beside the force can take it: a force that wanders along the line
+         * asks for a deeper hinge, as the part around it shrinks, but turning the line after it would only send it
+         * wandering farther. Returns a point on the line, y and z in metres from the joint's axis, and its direction,
+         * or {@code null} if the patch could not bear the force anywhere.
+         */
+        private double[] placeHinge(int e) {
+            double[] r = governing[e];
+            Contact c = bonds.get(e).contact();
+            double crush = Math.min(compression(endI[e] >= 0 ? solids[endI[e]] : groundSolid(bonds.get(e).pos())),
+                    compression(endJ[e] >= 0 ? solids[endJ[e]] : groundSolid(bonds.get(e).other())));
+            double press = significant(-r[0]);
+            double my = moment(r[4]);
+            double mz = moment(r[5]);
+            double cy = c.centroidY();
+            double cz = c.centroidZ();
+            double need = Math.max(press * HINGE_ROOM / crush, HINGE_EDGE * c.area());
+            if (pivot[e] != null && press > 0) {
+                // The force acts on the line, give or take how little the hinge still resists turning; from beside it
+                // the line moves straight in, the way it opens away from.
+                double[] line = pivot[e];
+                double ny = -line[3];
+                double nz = line[2];
+                double off = (mz / press - line[0]) * ny + (-my / press - line[1]) * nz;
+                double qy = mz / press - off * ny;
+                double qz = -my / press - off * nz;
+                double in = c.inward(qy, qz, ny, nz, need);
+                return Double.isNaN(in) ? null : new double[] {qy + in * ny, qz + in * nz, line[2], line[3]};
+            }
+            // A point the force acts toward: where it acts, or for a joint pressed by nothing, a metre from the
+            // centroid the way its moment turns it, beyond any patch.
+            double py;
+            double pz;
+            if (press > 0) {
+                py = mz / press;
+                pz = -my / press;
+            } else {
+                double turn = length(my, mz);
+                if (turn == 0) {
+                    return null;
+                }
+                py = cy + mz / turn;
+                pz = cz - my / turn;
+            }
+            double fraction = c.bearable(py, pz, need);
+            if (!(fraction > 0 && fraction < Double.POSITIVE_INFINITY)) {
+                return null;
+            }
+            double hy = cy + fraction * (py - cy);
+            double hz = cz + fraction * (pz - cz);
+            double[] grow = c.effectiveAreaGradient(hy, hz);
+            double gy = grow[0];
+            double gz = grow[1];
+            double steep = length(gy, gz);
+            if (!(steep > 0)) {
+                gy = cy - py;
+                gz = cz - pz;
+                steep = length(gy, gz);
+            }
+            double ay = -gz / steep;
+            double az = gy / steep;
+            // Turning the far side of the joint the positive way about the hinge must lift the centroid's side away.
+            if (ay * (cz - hz) - az * (cy - hy) < 0) {
+                ay = -ay;
+                az = -az;
+            }
+            return new double[] {hy, hz, ay, az};
+        }
+
+        /** Puts a hinge in a cracked joint, from {@link #placeHinge}: it turns freely about the line given. */
+        private void hinge(int e, double[] at) {
+            pivot[e] = at;
+            stiffness[e] = BeamElement.released(base[e], mode(e), HINGE_SOFTNESS);
+            heatLoad[e] = heatShift[e] == null ? null : times(stiffness[e], heatShift[e]);
+        }
+
+        /** Shuts a joint's hinge: it bends as stiffly as before it pivoted. */
+        private void unhinge(int e) {
+            pivot[e] = null;
+            stiffness[e] = base[e];
+            heatLoad[e] = heatShift[e] == null ? null : times(stiffness[e], heatShift[e]);
+        }
+
+        /** Returns how a hinged joint's ends move as its hinge turns, in the joint's axes. */
+        private double[] mode(int e) {
+            double[] p = pivot[e];
+            return BeamElement.hingeMode(kind[e] == FREE ? 1.0 : 0.5, kind[e] == GROUND_BELOW ? 0.0 : 0.5, p[0], p[1],
+                    p[2], p[3]);
+        }
+
+        /**
+         * Shuts every hinge that the last solution turned back, closing: loads that found another path have pressed
+         * the joint flat on its patch again. Each hinge closes at most {@link #HINGE_CLOSES} times, so a joint the
+         * loads cannot settle on stops changing. Returns whether any closed.
+         */
+        private boolean closeHinges() {
+            boolean changed = false;
+            double[] d = new double[BeamElement.DOFS];
+            double[] h = new double[BeamElement.DOFS];
+            for (int e = 0; e < bonds.size(); e++) {
+                if (pivot[e] == null || !active(e) || closes[e] >= HINGE_CLOSES) {
+                    continue;
+                }
+                nodal(e, displacement, d);
+                if (heatDisplacement != null) {
+                    nodal(e, heatDisplacement, h);
+                    for (int r = 0; r < BeamElement.DOFS; r++) {
+                        d[r] += h[r] - (heatShift[e] == null ? 0 : heatShift[e][r]);
+                    }
+                }
+                if (BeamElement.hingeTurn(base[e], mode(e), HINGE_SOFTNESS, d) < -HINGE_CLOSING) {
+                    unhinge(e);
+                    closes[e]++;
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        /**
+         * Finds the joints that alone hold some blocks to the ground: those whose loss would cut blocks off, the
+         * bridges of the graph of blocks and holding joints, the ground taken as one block. Tarjan's method, without
+         * recursion, so that a long chain of blocks cannot overflow the stack.
+         */
+        private boolean[] bridges() {
+            int n = free.size();
+            int ground = n;
+            int m = bonds.size();
+            int[] head = new int[n + 1];
+            Arrays.fill(head, -1);
+            int[] next = new int[2 * m];
+            int[] to = new int[2 * m];
+            int[] via = new int[2 * m];
+            int edges = 0;
+            for (int e = 0; e < m; e++) {
+                if (!active(e)) {
+                    continue;
+                }
+                int u = endI[e] >= 0 ? endI[e] : ground;
+                int v = endJ[e] >= 0 ? endJ[e] : ground;
+                to[edges] = v;
+                via[edges] = e;
+                next[edges] = head[u];
+                head[u] = edges++;
+                to[edges] = u;
+                via[edges] = e;
+                next[edges] = head[v];
+                head[v] = edges++;
+            }
+            boolean[] bridge = new boolean[m];
+            int[] found = new int[n + 1];
+            Arrays.fill(found, -1);
+            int[] low = new int[n + 1];
+            int[] stack = new int[n + 1];
+            int[] entered = new int[n + 1];
+            int[] cursor = new int[n + 1];
+            int time = 0;
+            int depth = 0;
+            stack[depth] = ground;
+            entered[depth] = -1;
+            cursor[depth] = head[ground];
+            found[ground] = time;
+            low[ground] = time++;
+            depth++;
+            while (depth > 0) {
+                int top = depth - 1;
+                int u = stack[top];
+                int edge = cursor[top];
+                if (edge >= 0) {
+                    cursor[top] = next[edge];
+                    if (via[edge] == entered[top]) {
+                        continue;
+                    }
+                    int v = to[edge];
+                    if (found[v] < 0) {
+                        found[v] = time;
+                        low[v] = time++;
+                        stack[depth] = v;
+                        entered[depth] = via[edge];
+                        cursor[depth] = head[v];
+                        depth++;
+                    } else {
+                        low[u] = Math.min(low[u], found[v]);
+                    }
+                } else {
+                    depth--;
+                    if (depth > 0) {
+                        int parent = stack[depth - 1];
+                        low[parent] = Math.min(low[parent], low[u]);
+                        if (low[u] > found[parent]) {
+                            bridge[entered[depth]] = true;
+                        }
+                    }
+                }
+            }
+            return bridge;
         }
 
         /**
@@ -1393,7 +1907,7 @@ public final class StructuralAnalysis {
                 Frame.Bond b = bonds.get(e);
                 boolean holds = active(e);
                 bondResults.add(new BondResult(b.pos(), b.axis(), state[e], holds, load[e], mode[e], withoutHeat[e],
-                        unbowed[e]));
+                        unbowed[e], holds && pivot[e] != null, force[e]));
                 if (holds) {
                     if (endI[e] >= 0) {
                         nodeLoad[endI[e]] = Math.max(nodeLoad[endI[e]], load[e]);

@@ -227,13 +227,18 @@ strengths (Rankine), and the principal stresses at its centre too, where shear p
 twisting adds Roark's peak for a rectangle. An intact ductile joint holds while (N/N<sub>p</sub>)² +
 |M<sub>y</sub>|/M<sub>py</sub> + |M<sub>z</sub>|/M<sub>pz</sub> stays below one, the plastic interaction of a
 rectangle, with Eurocode 3's reduction of bending strength under heavy shear. A cracked joint, and any joint of
-granular matter, holds while it is pressed together, the resultant stays within the patch so the blocks do not
-tip, shear and twist stay within friction, and the most pressed corner is not crushed. Forces within a millionth
-of a newton plus a billionth of the structure's weight count as round-off, so contacts that carry nothing hold.
+granular matter, holds while it is pressed together, shear and twist stay within friction, and its pressing force
+acts where the patch can bear it: spread evenly over the largest part of the patch centred where it acts, as
+Meyerhof took a footing loaded off centre and masonry codes take a joint (EN 1996-1-1 6.1.2.2), it must not crush
+the matter. That part shrinks to nothing at the patch's edge, so such a joint is as loaded as how far out its force
+acts over how far out it could act at that pressing, and a force beyond the patch tips its blocks. Forces within a
+millionth of a newton plus a billionth of the structure's weight count as round-off, so contacts that carry nothing
+hold.
 
 When joints are overloaded, the worst gives way, and with it every joint within 2 % of it, so a symmetric structure
-breaks symmetrically: an intact joint cracks, a cracked one lets go. A crack leaves the frame as stiff as before, so
-the analysis only checks the joints again; a joint letting go changes the frame, which is solved again. Blocks left
+breaks symmetrically: an intact joint cracks, a cracked one pivots on its edge, as below, or lets go. A crack leaves
+the frame as stiff as before, so the analysis only checks the joints again; a joint letting go or pivoting changes
+the frame, which is solved again. Blocks left
 with no path of holding joints to the ground fall. The analysis stops after 64 solutions, letting everything still
 overloaded go at once, and says so. Its result lists each block's displacement, rotation and the load of its worst
 joint, each joint's state, load and limiting mode, the cracks in the order they formed, the falling blocks, and
@@ -329,11 +334,36 @@ says; and a hardwood post a quarter of a metre square holding a block of iron up
 loaded more than ten times as much as it would be standing straight, and buckling at 12. A granite tower one block wide stands 90 blocks tall and
 buckles at 95. Working out buckling adds between a sixth and a half to an analysis.
 
+**Arches** stand on cracked joints. A cracked joint holds only by pressing, so a cracked span cannot hang by
+bending, but it can stand as an arch, as masonry does. A cracked joint that bending would tip, or whose edge it would
+crush, pivots instead: it gets a hinge, a line on its face just in from the edge it presses, about which its blocks
+turn freely while it carries every other force (`BeamElement.released`). The hinge condenses the joint's stiffness
+by rank one, K − Kggᵀ K/((1 + ε) gᵀKg), g being how its ends move as it turns, keeping ε = 10⁻⁶ of its stiffness
+against turning so that a frame its hinges leave free to move still solves, and its geometric stiffness is that of
+its kinked shape. The line goes where the part of the patch centred on it can bear the force through it at the
+crushing strength with 5 % to spare, across the direction in which that part shrinks fastest. As the force grows the
+line moves straight in, keeping its direction, up to four times, and once the force acts beyond the patch the joint
+lets go, since its blocks can then swing about their hinges. Only a joint whose loss would leave the blocks beyond it
+held by something else pivots, since an overhang's root would only swing down; of neighbouring joints that would
+start to pivot together, only the most loaded does, since two hinges side by side can leave the blocks between them
+free to swing; and a joint the frame broke by buckling lets go, since a hinge would only let it bow further. A hinge
+that the next solution turns back closes, up to twice. Hinges are not kept: each analysis finds them again from the
+cracks the world keeps.
+
+The tests check a granite span clamped at both ends cracking there at 28 blocks and standing on hinges at its bottom
+edges with the thrust of a two-hinged arch, e∫M₀dx/(L(r² + e²)), to a part in ten thousand; at 40 blocks cracking at
+its crown too and standing on three hinges, its thrust times the height between them holding wL²/8; at 41 blocks
+pivoting beside the middle block on one side only; at 60 blocks sagging through its rise in second-order theory and
+falling, while 50 stand; a span cracked through everywhere sliding off its ends when it is shorter than 4/μ times its
+depth, as 6 blocks of granite do while 7 hold; an overhang still falling when its root cracks; and a netherrack floor
+16 blocks square held on all sides cracking along its edges and standing on them, hinged as symmetrically as it is
+built, where without arches it falls. A granite floor 36 blocks square held on all sides stands on its cracked edges
+too; finding its hinges takes about twice as long as letting it fall.
+
 What the model leaves out, so far: yielding steel gives way at once instead of hinging and handing its load on, so
-redundant metal frames fall somewhat early; cracked joints do not wedge into arches, though heat held back can press
-them together; only the forces along joints soften a frame, so a beam bent about its stiff side does not twist
-aside; the ground neither gives nor stretches; deflections are small, bowing included; and loads are static: the
-weight of blocks and the strain of heat.
+redundant metal frames fall somewhat early; only the forces along joints soften a frame, so a beam bent about its
+stiff side does not twist aside; the ground neither gives nor stretches, however hard an arch pushes on it;
+deflections are small, bowing included; and loads are static: the weight of blocks and the strain of heat.
 
 ## Hosting
 

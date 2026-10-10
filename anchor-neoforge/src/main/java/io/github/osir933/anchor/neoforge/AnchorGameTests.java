@@ -102,6 +102,12 @@ final class AnchorGameTests {
     private static final String WIDE = "wide";
 
     /**
+     * The structure of tests that build long spans clear of the barriers: a floor of stone sixteen blocks long and five
+     * wide.
+     */
+    private static final String LONG = "long";
+
+    /**
      * The structure the tests of ready-made experiments are built in: two layers of stone, fifteen blocks wide and five
      * deep, with room for the widest experiment and its bench on top.
      */
@@ -171,7 +177,9 @@ final class AnchorGameTests {
             new Case("stone_span_cracks_and_falls_when_cooled", 400,
                     AnchorGameTests::stoneSpanCracksAndFallsWhenCooled),
             new Case("fence_post_buckles_under_a_wide_iron_roof", 400,
-                    AnchorGameTests::fencePostBucklesUnderAWideIronRoof, HEAT, WIDE));
+                    AnchorGameTests::fencePostBucklesUnderAWideIronRoof, HEAT, WIDE),
+            new Case("netherrack_span_stands_as_an_arch", 400, AnchorGameTests::netherrackSpanStandsAsAnArch, HEAT,
+                    LONG));
 
     private AnchorGameTests() {
     }
@@ -1200,12 +1208,59 @@ final class AnchorGameTests {
         });
     }
 
+    /**
+     * A span of twelve netherrack blocks between two pillars of the world as it was found is bent hardest where it
+     * meets them, and cracks there. It can no longer hang from the pillars, but its cracked ends pivot on their bottom
+     * edges, which the pillars keep from spreading, so it sags until it pushes on them and stands on them as an arch;
+     * were its cracked ends to let go, it would fall.
+     */
+    private static void netherrackSpanStandsAsAnArch(GameTestHelper helper) {
+        List<BlockPos> west = List.of(new BlockPos(1, 1, 2), new BlockPos(1, 2, 2));
+        List<BlockPos> east = List.of(new BlockPos(14, 1, 2), new BlockPos(14, 2, 2));
+        List<BlockPos> span = new ArrayList<>();
+        for (int x = 2; x <= 13; x++) {
+            span.add(new BlockPos(x, 2, 2));
+        }
+        long[] cracked = {-1L};
+        buildThenExpect(helper, 16, 5, heat -> {
+            for (List<BlockPos> pillar : List.of(west, east)) {
+                for (BlockPos p : pillar) {
+                    helper.setBlock(p, Blocks.STONE);
+                }
+                heat.setBuilt(helper.absolutePos(pillar.get(0)), helper.absolutePos(pillar.get(1)), false);
+            }
+            for (BlockPos p : span) {
+                helper.setBlock(p, Blocks.NETHERRACK);
+            }
+        }, heat -> {
+            for (BlockPos p : span) {
+                helper.assertBlockPresent(Blocks.NETHERRACK, p);
+            }
+            LevelStructures.Look end = lookAt(helper, heat, span.get(0));
+            LevelStructures.Look other = lookAt(helper, heat, span.get(span.size() - 1));
+            if (cracked[0] < 0) {
+                if (!end.crackedToward().contains(Direction.WEST) || !other.crackedToward().contains(Direction.EAST)) {
+                    throw helper.assertionException(Component.literal("waiting for the span's ends to crack: "
+                            + summary(end)));
+                }
+                cracked[0] = helper.getTick();
+            }
+            helper.assertTrue(end.built() && !end.falls() && end.falling() == 0 && end.hinges() >= 2
+                    && end.pivotsToward().contains(Direction.WEST) && other.pivotsToward().contains(Direction.EAST),
+                    "the span should stand on its cracked ends as an arch: " + summary(end) + "; cracked toward "
+                            + end.crackedToward() + ", pivots toward " + end.pivotsToward());
+            if (helper.getTick() - cracked[0] < 40) {
+                throw helper.assertionException(Component.literal("waiting to see the arch stay up"));
+            }
+        });
+    }
+
     /** Sums up a look at a structure for a test's messages. */
     private static String summary(LevelStructures.Look look) {
         StructuralAnalysis.BondResult worst = look.worst();
-        return String.format(Locale.ROOT, "%s, %d blocks, %s, %d falling, buckling at %.3f, worst joint %s",
+        return String.format(Locale.ROOT, "%s, %d blocks, %s, %d falling, buckling at %.3f, %d hinges, worst joint %s",
                 look.built() ? "built" : "natural", look.blocks(), look.falls() ? "falls" : "stands",
-                look.falling(), look.buckling(), worst == null ? "none"
+                look.falling(), look.buckling(), look.hinges(), worst == null ? "none"
                         : String.format(Locale.ROOT, "%s/%d %s %.3f (straight %.3f)", worst.pos(), worst.axis(),
                                 worst.mode(), worst.load(), worst.unbowed()));
     }
@@ -1221,8 +1276,17 @@ final class AnchorGameTests {
     /** Builds and checks as {@link #buildThenExpect(GameTestHelper, Consumer, Consumer)} does on a wider floor. */
     private static void buildThenExpect(GameTestHelper helper, int width, Consumer<LevelHeat> build,
             Consumer<LevelHeat> check) {
+        buildThenExpect(helper, width, width, build, check);
+    }
+
+    /**
+     * Builds and checks as {@link #buildThenExpect(GameTestHelper, Consumer, Consumer)} does on a floor {@code length}
+     * blocks along x and {@code width} along z.
+     */
+    private static void buildThenExpect(GameTestHelper helper, int length, int width, Consumer<LevelHeat> build,
+            Consumer<LevelHeat> check) {
         BlockPos corner = helper.absolutePos(BlockPos.ZERO);
-        BlockPos far = helper.absolutePos(new BlockPos(width - 1, 4, width - 1));
+        BlockPos far = helper.absolutePos(new BlockPos(length - 1, 4, width - 1));
         int[] stage = {0};
         helper.succeedWhen(() -> {
             LevelHeat heat = heat(helper);
@@ -1234,7 +1298,7 @@ final class AnchorGameTests {
                 if (!heat.simulates(corner, far)) {
                     throw helper.assertionException(Component.literal("waiting for the test's space to be simulated"));
                 }
-                heat.setBuilt(corner, helper.absolutePos(new BlockPos(width - 1, 0, width - 1)), false);
+                heat.setBuilt(corner, helper.absolutePos(new BlockPos(length - 1, 0, width - 1)), false);
                 build.accept(heat);
                 stage[0] = 2;
             }

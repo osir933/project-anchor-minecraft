@@ -28,6 +28,7 @@ final class AnchorConfig {
     static final ModConfigSpec.BooleanValue THERMAL_SHOCK;
     static final ModConfigSpec.BooleanValue THERMAL_EXPANSION;
     static final ModConfigSpec.BooleanValue BUCKLING;
+    static final ModConfigSpec.BooleanValue ARCHING;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -113,6 +114,13 @@ final class AnchorConfig {
                         + "presses a long span can buckle it too, unless it is metal, which yields instead. Only "
                         + "matters where structures stand or fall by their strength. Takes effect at once.")
                 .define("buckling", true);
+        ARCHING = b.comment("Whether a cracked span can stand as an arch: a joint cracked through pivots on the edge "
+                        + "it presses instead of letting go, and carries on pressing, so a stone span cracked at its "
+                        + "ends sags until it pushes on them and stands on them, as long as what holds its ends does "
+                        + "not give way, and a floor held on all sides stands on its cracked edges. An arch too flat "
+                        + "for its span still sags through, and a short one slides off its ends. Only matters where "
+                        + "structures stand or fall by their strength. Takes effect at once.")
+                .define("arching", true);
         b.pop();
         SPEC = b.build();
     }

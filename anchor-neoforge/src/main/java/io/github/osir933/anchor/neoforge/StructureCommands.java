@@ -25,8 +25,8 @@ import net.minecraft.world.phys.HitResult;
  * <ul>
  *   <li>{@code /anchor structure inspect} tells whether the block being looked at is built or natural, which of its
  *   joints have cracked, how close uneven heat comes to cracking it through and, for a built block, how loaded its
- *   structure is now and how near it comes to buckling; operators can name any block with
- *   {@code /anchor structure inspect <pos>};</li>
+ *   structure is now, how near it comes to buckling and which cracked joints pivot on an edge, as an arch's do;
+ *   operators can name any block with {@code /anchor structure inspect <pos>};</li>
  *   <li>{@code /anchor structure mark <from> <to> built|natural} lets operators make a box of blocks built, so that
  *   it stands or falls by its strength, or natural, so that it holds still whatever happens around it.</li>
  * </ul>
@@ -154,6 +154,10 @@ final class StructureCommands {
                 lines.add(String.format(Locale.ROOT, "  The structure would buckle under %.2f times its loads, so it "
                         + "bows under them", look.buckling()));
             }
+            if (look.hinges() > 0) {
+                lines.add("  " + look.hinges() + (look.hinges() == 1 ? " cracked joint of the structure pivots"
+                        : " cracked joints of the structure pivot") + " on an edge, pressing on as an arch's do");
+            }
             StructuralAnalysis.BondResult worst = look.worst();
             if (worst != null) {
                 Direction toward = StructuralAnalysis.direction(worst.axis());
@@ -185,6 +189,14 @@ final class StructureCommands {
             }
             lines.add("  Cracked toward " + String.join(", ", names) + ": those joints hold only by pressing and "
                     + "friction");
+        }
+        if (!look.pivotsToward().isEmpty()) {
+            List<String> names = new ArrayList<>();
+            for (Direction d : look.pivotsToward()) {
+                names.add(name(d));
+            }
+            lines.add("  Its " + (names.size() == 1 ? "joint" : "joints") + " toward " + String.join(", ", names)
+                    + (names.size() == 1 ? " pivots" : " pivot") + " on an edge, carrying the push of an arch");
         }
         return lines;
     }

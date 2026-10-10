@@ -410,8 +410,8 @@ class HostedStructuresTest {
                 1.2, false, false);
         StructuralAnalysis.Result result = new StructuralAnalysis.Result(List.of(),
                 List.of(new StructuralAnalysis.BondResult(bottom, 1, Frame.Joint.CRACKED, true, 0.4,
-                        StructuralAnalysis.Mode.TIPPING, 0.4, 0.4)), List.of(crack), List.of(), 2, true,
-                Double.POSITIVE_INFINITY, List.of());
+                        StructuralAnalysis.Mode.TIPPING, 0.4, 0.4, false, -1000.0)), List.of(crack), List.of(), 2,
+                true, Double.POSITIVE_INFINITY, List.of());
         long before = h.sectionVersion(ORIGIN);
         assertEquals(List.of(crack), h.settle(survey, result).cracks());
         assertTrue(h.sectionVersion(ORIGIN) > before, "cracking changes the section");
