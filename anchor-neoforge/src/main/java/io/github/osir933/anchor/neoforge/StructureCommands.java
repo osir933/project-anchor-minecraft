@@ -25,7 +25,8 @@ import net.minecraft.world.phys.HitResult;
  * <ul>
  *   <li>{@code /anchor structure inspect} tells whether the block being looked at is built or natural, which of its
  *   joints have cracked, how close uneven heat comes to cracking it through and, for a built block, how loaded its
- *   structure is now; operators can name any block with {@code /anchor structure inspect <pos>};</li>
+ *   structure is now and how near it comes to buckling; operators can name any block with
+ *   {@code /anchor structure inspect <pos>};</li>
  *   <li>{@code /anchor structure mark <from> <to> built|natural} lets operators make a box of blocks built, so that
  *   it stands or falls by its strength, or natural, so that it holds still whatever happens around it.</li>
  * </ul>
@@ -147,14 +148,22 @@ final class StructureCommands {
                     lines.add("  " + look.falling() + " other blocks of the structure would fall");
                 }
             }
+            if (look.buckling() <= 1) {
+                lines.add("  The structure is too slender for its loads: it buckles under them");
+            } else if (look.buckling() < Double.POSITIVE_INFINITY) {
+                lines.add(String.format(Locale.ROOT, "  The structure would buckle under %.2f times its loads, so it "
+                        + "bows under them", look.buckling()));
+            }
             StructuralAnalysis.BondResult worst = look.worst();
             if (worst != null) {
                 Direction toward = StructuralAnalysis.direction(worst.axis());
                 String heat = Math.abs(worst.load() - worst.withoutHeat()) < 0.005 ? ""
                         : "; without the strain of heat it would take " + percent(worst.withoutHeat());
+                String bow = Math.abs(worst.load() - worst.unbowed()) < 0.005 ? ""
+                        : "; standing straight it would take " + percent(worst.unbowed());
                 lines.add("  The structure's most loaded joint takes " + percent(worst.load()) + " of what it can, "
                         + mode(worst.mode()) + ", between " + worst.pos().x() + " " + worst.pos().y() + " "
-                        + worst.pos().z() + " and the block " + name(toward) + " of it" + heat);
+                        + worst.pos().z() + " and the block " + name(toward) + " of it" + heat + bow);
             }
             if (!look.settled()) {
                 lines.add("  The analysis did not come to rest: more of it may give way");

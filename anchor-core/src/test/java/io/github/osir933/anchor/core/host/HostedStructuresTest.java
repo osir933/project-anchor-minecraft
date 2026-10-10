@@ -154,6 +154,21 @@ class HostedStructuresTest {
     }
 
     @Test
+    void everyBuiltBlockWaitsToBeCheckedAgainWhenTheRulesChange() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, ground(Map.of()), CLIMATE);
+        place(h, new GridPos(4, 8, 4), STONE);
+        place(h, new GridPos(4, 9, 4), STONE);
+        place(h, new GridPos(10, 8, 10), STONE);
+        while (h.nextStructure(100).isPresent()) {
+            assertTrue(h.uncheckedStructures() < 3);
+        }
+        assertEquals(0, h.uncheckedStructures());
+        h.recheckStructures();
+        assertEquals(3, h.uncheckedStructures(), "the built blocks wait, the ground does not");
+    }
+
+    @Test
     void blocksThatHoldStillAreNeverBuiltAndHoldUpWhatHangsFromThem() {
         HostedWorld h = hosted();
         h.importSection(ORIGIN, ground(Map.of()), CLIMATE);
@@ -392,10 +407,11 @@ class HostedStructuresTest {
         place(h, bottom.offset(Direction.UP), STONE);
         StructureSurvey survey = h.nextStructure(100).orElseThrow();
         StructuralAnalysis.Crack crack = new StructuralAnalysis.Crack(bottom, 1, StructuralAnalysis.Mode.TENSION,
-                1.2, false);
+                1.2, false, false);
         StructuralAnalysis.Result result = new StructuralAnalysis.Result(List.of(),
                 List.of(new StructuralAnalysis.BondResult(bottom, 1, Frame.Joint.CRACKED, true, 0.4,
-                        StructuralAnalysis.Mode.TIPPING, 0.4)), List.of(crack), List.of(), 2, true, List.of());
+                        StructuralAnalysis.Mode.TIPPING, 0.4, 0.4)), List.of(crack), List.of(), 2, true,
+                Double.POSITIVE_INFINITY, List.of());
         long before = h.sectionVersion(ORIGIN);
         assertEquals(List.of(crack), h.settle(survey, result).cracks());
         assertTrue(h.sectionVersion(ORIGIN) > before, "cracking changes the section");

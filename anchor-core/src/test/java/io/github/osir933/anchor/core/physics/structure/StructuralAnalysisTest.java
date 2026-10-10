@@ -339,7 +339,7 @@ class StructuralAnalysisTest {
 
     @Test
     void aShortRoundLimitLeavesTheResultUnsettled() {
-        StructuralAnalysis.Settings oneRound = new StructuralAnalysis.Settings(G, 1, 0.02, 1e-4);
+        StructuralAnalysis.Settings oneRound = new StructuralAnalysis.Settings(G, 1, 0.02, 1e-4, true);
         Result result = StructuralAnalysis.analyse(tee(12, 9), oneRound);
         assertFalse(result.settled());
         assertEquals(1, result.rounds());
@@ -349,10 +349,10 @@ class StructuralAnalysisTest {
 
     @Test
     void rejectsSettingsThatMakeNoSense() {
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(-1, 64, 0.02, 1e-4));
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 0, 0.02, 1e-4));
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 64, 1.0, 1e-4));
-        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 64, 0.02, 0));
+        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(-1, 64, 0.02, 1e-4, true));
+        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 0, 0.02, 1e-4, true));
+        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 64, 1.0, 1e-4, true));
+        assertThrows(IllegalArgumentException.class, () -> new StructuralAnalysis.Settings(G, 64, 0.02, 0, true));
     }
 
     /**

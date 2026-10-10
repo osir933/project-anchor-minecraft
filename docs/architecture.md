@@ -299,10 +299,41 @@ a pool of lava cracks at its ends in about 30 steps as it bows up; cracked throu
 on the pressing of its expansion held back between its pillars. Walls of concrete, granite, brick and glass in the
 sun through two days take at most a third of what cracks them.
 
+**Buckling** (`Buckling`) is a frame giving way to the forces it carries. A force along a beam, tilted as the beam
+turns and bows, pushes its ends further aside where it presses and draws them back where it pulls: a geometric
+stiffness K<sub>G</sub>, linear in the forces, the standard matrix of cubic bending shapes with Wagner's term for
+twist. Under λ times its loads a frame resists with K + λK<sub>G</sub>, and it buckles at the smallest λ where that
+stops resisting some shape φ. With K already factorized as PᵀLLᵀP for the weight, this is the largest eigenvalue
+μ = 1/λ of L⁻¹P(−K<sub>G</sub>)PᵀL⁻ᵀ, which the Lanczos method finds in at most 30 solves with the same factor. It
+starts from a fixed pseudo-random vector, so every machine finds the same answer, keeps every vector orthogonal to
+the others, and stops after eight steps once λ is clearly above ten, where its estimate, which only grows toward
+the true μ, is all but certain to be within a factor of ten of it (Kuczyński and Woźniakowski, 1992). The forces are
+those of the straight solution: the weight's, and heat's, except through a joint with a ductile side, since metal
+that heat presses bows a hairline and lets the push go, as it yields its strain away.
+
+A frame that could carry ten times its loads or more bows too little to matter and is judged straight, as Eurocode 3
+allows (EN 1993-1-1 5.2.1). One that could carry fewer is taken to start bowed in its buckling shape by L/500, L
+being the length over which it buckles, π√(EI/N<sub>cr</sub>) from the shape's curvature where it presses hardest,
+and is solved in second-order theory: K + K<sub>G</sub> factorized, loaded by the weight, the heat and the push
+−K<sub>G</sub>φ₀ of the bow, so the bow grows by 1/(λ − 1), as Perry and Robertson have it, and bends the joints,
+which are checked as before, bowed either way. One that cannot carry its loads at all, λ ≤ 1, buckles: its joints
+are checked along the buckling shape, scaled until the first gives way, and the joints the shape bends most crack
+together. A crack is marked buckled where the joint would have held standing straight.
+
+The tests check a column under a weight at its top buckling at π²EI/4L² to 0.5 % and bowing as the imperfection
+says to 3 %; a tower of stone buckling under its own weight at Greenhill's height, (7.837 EI/q)<sup>1/3</sup>, to a
+part in a thousand: 107 m for a column a metre wide and 50 GPa stiff, and one a little taller breaking at its foot
+and falling; a span of 60 blocks clamped at both ends buckling when heat presses it with 4π²EI/L², to 0.5 %, while
+metal heated past that stands; four hardwood posts under a granite slab swaying aside together as Euler's sway frame
+says; and a hardwood post a quarter of a metre square holding a block of iron up to 10 blocks high, its foot
+loaded more than ten times as much as it would be standing straight, and buckling at 12. A granite tower one block wide stands 90 blocks tall and
+buckles at 95. Working out buckling adds between a sixth and a half to an analysis.
+
 What the model leaves out, so far: yielding steel gives way at once instead of hinging and handing its load on, so
 redundant metal frames fall somewhat early; cracked joints do not wedge into arches, though heat held back can press
-them together; slender columns do not buckle, not even when heat pushes on them; the ground neither gives nor
-stretches; deflections are small; and loads are static: the weight of blocks and the strain of heat.
+them together; only the forces along joints soften a frame, so a beam bent about its stiff side does not twist
+aside; the ground neither gives nor stretches; deflections are small, bowing included; and loads are static: the
+weight of blocks and the strain of heat.
 
 ## Hosting
 
@@ -456,6 +487,10 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   structures that heat stretches are checked like any other. `/anchor structure inspect` and `/anchor heat inspect`
   say how far heat has made a built block longer or shorter than at the climate where it stands and on which side it
   is warmest, where that bends it, and the structure's most loaded joint says how loaded it would be without heat.
+- **Buckling.** `LevelStructures` reads the `buckling` setting of the structures section as it starts each analysis,
+  and when it changes every built block waits to be checked again. `/anchor structure inspect` says how many times
+  its loads a slender structure could carry before it buckles, and how loaded its most loaded joint would be standing
+  straight.
 - **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
   snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
   vanilla does, and the result is held between −30 and 45 °C (`Climate`). Its air has a relative humidity of
@@ -619,7 +654,7 @@ operators can pause heat, step it, run it faster or slower, send it ahead, and s
 rewind it to, hot blocks glow in the colours of a black body, and the Laboratory world type gives experiments steady
 surroundings, with ready-made experiments to build there. Phase 2, structure and fracture, has begun: materials
 have mechanical properties that heat softens, what players build stands or falls by the strength of its blocks,
-cracking where it is overloaded, uneven heat cracks brittle blocks from within, and expansion held back by a
-structure loads its joints. Next, buckling and fracture inside blocks. After
+cracking where it is overloaded, uneven heat cracks brittle blocks from within, expansion held back by a structure
+loads its joints, and slender structures bow and buckle. Next, arches and fracture inside blocks. After
 that come rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

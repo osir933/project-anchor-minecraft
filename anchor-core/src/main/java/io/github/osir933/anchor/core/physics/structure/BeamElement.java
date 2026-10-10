@@ -73,6 +73,47 @@ final class BeamElement {
         return k;
     }
 
+    /**
+     * Returns the geometric stiffness of a beam that carries a force along it: how that force, tilted as the beam
+     * turns and bows, pushes its ends further aside. Pulling stiffens a beam and pressing softens it, and a frame
+     * buckles where the softening cancels its own stiffness. This is the standard matrix from cubic bending shapes,
+     * with the Wagner term for the twist a force along a twisted beam adds.
+     *
+     * @param length the beam's length in metres
+     * @param axial the force along it in newtons, positive when it pulls
+     * @param contact the cross-section, the same throughout
+     * @return the 12 by 12 matrix in row-major order, which adds to the beam's stiffness in second-order theory
+     */
+    static double[] geometric(double length, double axial, Contact contact) {
+        double[] k = new double[DOFS * DOFS];
+        double c = axial / length;
+        // A slope toward +y turns the beam the positive way about z; one toward +z turns it the negative way about y.
+        addTilt(k, new int[] {1, 5, 7, 11}, c, length);
+        addTilt(k, new int[] {2, 4, 8, 10}, c, -length);
+        addSpring(k, 3, 9, axial * (contact.inertiaS() + contact.inertiaT()) / (contact.area() * length));
+        return k;
+    }
+
+    /**
+     * Adds the geometric stiffness of bending in one plane, (N / 30 L) times [[36, 3L, -36, 3L], [3L, 4L², -3L,
+     * -L²], [-36, -3L, 36, -3L], [3L, -L², -3L, 4L²]] for the movement and turn at each end, with the sign of the
+     * couplings between movement and turn as the plane's turns go.
+     */
+    private static void addTilt(double[] k, int[] dofs, double perLength, double arm) {
+        double l2 = arm * arm;
+        double[] g = {
+            1.2, arm / 10, -1.2, arm / 10,
+            arm / 10, 2 * l2 / 15, -arm / 10, -l2 / 30,
+            -1.2, -arm / 10, 1.2, -arm / 10,
+            arm / 10, -l2 / 30, -arm / 10, 2 * l2 / 15,
+        };
+        for (int p = 0; p < 4; p++) {
+            for (int q = 0; q < 4; q++) {
+                k[dofs[p] * DOFS + dofs[q]] += perLength * g[p * 4 + q];
+            }
+        }
+    }
+
     /** Adds a spring between two degrees of freedom. */
     private static void addSpring(double[] k, int a, int b, double stiffness) {
         k[a * DOFS + a] += stiffness;

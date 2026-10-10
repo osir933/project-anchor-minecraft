@@ -161,7 +161,9 @@ final class AnchorGameTests {
             new Case("stone_and_glass_crack_beside_lava", 1200, AnchorGameTests::stoneAndGlassCrackBesideLava,
                     THERMAL_SHOCK),
             new Case("stone_span_cracks_and_falls_when_cooled", 400,
-                    AnchorGameTests::stoneSpanCracksAndFallsWhenCooled));
+                    AnchorGameTests::stoneSpanCracksAndFallsWhenCooled),
+            new Case("fence_post_buckles_under_a_wide_iron_roof", 400,
+                    AnchorGameTests::fencePostBucklesUnderAWideIronRoof));
 
     private AnchorGameTests() {
     }
@@ -1139,6 +1141,45 @@ final class AnchorGameTests {
             for (BlockPos p : span) {
                 helper.assertBlockPresent(Blocks.AIR, p);
                 helper.assertBlockPresent(Blocks.STONE, p.below());
+            }
+        });
+    }
+
+    /**
+     * An oak fence post two blocks tall holds up a roof of iron three blocks square, bowing a little under its 70
+     * tonnes, but buckles under one five blocks square, which it could bear standing straight: it gives way at its
+     * foot, and the roof falls to the floor.
+     */
+    private static void fencePostBucklesUnderAWideIronRoof(GameTestHelper helper) {
+        BlockPos centre = new BlockPos(2, 3, 2);
+        List<BlockPos> corners = List.of(new BlockPos(0, 3, 0), new BlockPos(4, 3, 0), new BlockPos(0, 3, 4),
+                new BlockPos(4, 3, 4));
+        boolean[] widened = {false};
+        buildThenExpect(helper, heat -> {
+            helper.setBlock(centre.below(2), Blocks.OAK_FENCE);
+            helper.setBlock(centre.below(), Blocks.OAK_FENCE);
+            for (int x = 1; x <= 3; x++) {
+                for (int z = 1; z <= 3; z++) {
+                    helper.setBlock(new BlockPos(x, 3, z), Blocks.IRON_BLOCK);
+                }
+            }
+        }, heat -> {
+            if (!widened[0]) {
+                LevelStructures.Look look = lookAt(helper, heat, centre);
+                helper.assertTrue(look.built() && !look.falls() && look.blocks() == 11 && look.buckling() > 1.5
+                        && look.buckling() < 4.0, "the small roof should stand, bowing its post a little: " + look);
+                for (int x = 0; x < 5; x++) {
+                    for (int z = 0; z < 5; z++) {
+                        if (x == 0 || x == 4 || z == 0 || z == 4) {
+                            helper.setBlock(new BlockPos(x, 3, z), Blocks.IRON_BLOCK);
+                        }
+                    }
+                }
+                widened[0] = true;
+            }
+            for (BlockPos p : corners) {
+                helper.assertBlockPresent(Blocks.AIR, p);
+                helper.assertBlockPresent(Blocks.IRON_BLOCK, p.below(2));
             }
         });
     }

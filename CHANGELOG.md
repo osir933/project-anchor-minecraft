@@ -99,6 +99,14 @@ its blocks. Anchor needs Minecraft 26.3 with NeoForge 26.3 and Java 25, on both 
   of bearing it, so the sun's warmth cracks nothing. `/anchor structure inspect` says how far heat has stretched a
   block and how loaded its structure's worst joint would be without heat, and the `thermalExpansion` setting turns it
   off.
+- **Slender structures buckle.** What presses a structure softens it against bowing, so a slender one bows under its
+  loads, from a start a five-hundredth of its length out of true as no column is quite straight, and the bow bends
+  its joints, more the nearer the loads come to what would buckle it; past that it buckles and gives way, though it
+  could bear the loads standing straight. An oak fence post two blocks tall holds up a roof of iron three blocks
+  square but buckles under one five blocks square, a granite tower one block wide buckles under its own weight at
+  about 95 blocks tall, and heat that presses a long stone span can buckle it, though metal yields instead.
+  `/anchor structure inspect` says how many times its loads a slender structure could carry before it buckles, and
+  the `buckling` setting turns it off.
 
 Known limits of this alpha:
 
@@ -121,9 +129,9 @@ Known limits of this alpha:
   blocks around it alone, so water that ran out of the box stays where it went.
 - The glow is drawn as an eye used to the dark sees it, so in bright daylight it shows more than a real glow
   would, and glowing blocks do not light up what is around them.
-- Structures carry only the weight of their blocks, not the players, animals or items on them. Steel that yields
-  gives way at once instead of bending, cracked blocks do not wedge into arches, slender columns do not buckle and
-  expansion that the blocks around hold back does not yet stress a structure.
+- Structures carry only the weight of their blocks and the strain of heat, not the players, animals or items on
+  them. Steel that yields gives way at once instead of bending, cracked blocks do not wedge into arches and the
+  ground does not give, however soft it is.
 - Blocks crack from heat only where they are refined into smaller cells, where neighbouring temperatures differ by
   50 K or more, and a 25 cm cell blurs the steep fall in temperature at a quenched face, so hot glass doused with
   water does not crack.

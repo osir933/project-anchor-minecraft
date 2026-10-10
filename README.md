@@ -219,7 +219,7 @@ file into the `serverconfig` folder in that world's folder. The settings are: `e
 `gameTicksPerStep` (4), `stepBudgetMillis` (20), `radius` and `verticalRadius` (2 sections), `sectionsLoadedPerStep`
 (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns refinement off), `maxRefinedCells`
 (16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky` (true) under `[heat]`, and `enabled` (true),
-`maxBlocks` (4096), `thermalShock` (true) and `thermalExpansion` (true) under `[structures]`.
+`maxBlocks` (4096), `thermalShock` (true), `thermalExpansion` (true) and `buckling` (true) under `[structures]`.
 
 ### Describing blocks in a data pack
 
@@ -280,10 +280,16 @@ material's measured strength, stiffness and friction (see [Structure](docs/archi
   cracks at its ends as it bows. Blocks are free of strain at the climate where they stand, so the sun's warmth
   cracks nothing; metal yields a little instead of cracking, and a cracked joint rocks and slips by a hairline and
   lets the strain go. The `thermalExpansion` setting turns it off.
+- Slender structures bow under what presses them, and the bow bends their joints, more the nearer the load comes to
+  what would buckle them; past that they buckle and give way, though they could bear the load standing straight. An
+  oak fence post two blocks tall holds up a roof of iron three blocks square but buckles under one five blocks
+  square, and a granite tower one block wide buckles under its own weight at about 95 blocks tall. Heat that presses
+  a long span can buckle it too, unless it is metal, which yields instead. The `buckling` setting turns it off.
 - Trees and crops grow natural, and so do the stone, cobblestone and obsidian that lava makes where it meets water.
   The blocks of a ready-made experiment are natural too.
 
-`/anchor structure inspect` tells whether a block is built and how loaded its structure is, and operators can make
+`/anchor structure inspect` tells whether a block is built, how loaded its structure is and how near it comes to
+buckling, and operators can make
 a box of blocks built or natural with `/anchor structure mark`, for instance to let a village that came with the
 world stand or fall by its strength. Structures are checked where heat runs, near players. Small ones are analysed
 at once; a big building is analysed in the background and falls a moment later, at the same moment on every machine.
@@ -291,8 +297,8 @@ Up to 4096 built blocks are analysed together, or what the `maxBlocks` setting s
 around a change is analysed with the rest held still.
 
 What this alpha leaves out: steel that yields gives way at once instead of bending, cracked blocks do not wedge
-into arches, slender columns do not buckle, expansion that the blocks around hold back does not yet stress a
-structure, and only the weight of blocks loads a structure, not the players, animals or items on it.
+into arches, the ground does not give however soft it is, and only the weight of blocks and the strain of heat load
+a structure, not the players, animals or items on it.
 
 ## Design principles
 

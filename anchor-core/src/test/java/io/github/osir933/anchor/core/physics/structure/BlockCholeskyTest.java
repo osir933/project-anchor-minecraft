@@ -89,6 +89,21 @@ class BlockCholeskyTest {
         for (int i = 0; i < size; i++) {
             assertEquals(expected[i], solution[i], 1e-10);
         }
+        // The two halves of a solve make the whole; the first alone has bᵀ K⁻¹ b for its square length.
+        assertArrayEquals(solution, factor.backward(factor.forward(rhs)));
+        double[] half = factor.forward(rhs);
+        double square = 0;
+        double energy = 0;
+        for (int i = 0; i < size; i++) {
+            square += half[i] * half[i];
+            energy += rhs[i] * solution[i];
+        }
+        assertEquals(energy, square, 1e-12 * energy);
+        // The matrix times the solution gives the right-hand side back.
+        double[] product = BlockCholesky.multiply(new BlockCholesky.Matrix(diagonal, flat, off), solution);
+        for (int i = 0; i < size; i++) {
+            assertEquals(rhs[i], product[i], 1e-10);
+        }
     }
 
     @Test
