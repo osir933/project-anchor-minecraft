@@ -809,7 +809,10 @@ public final class HostedWorld {
         return true;
     }
 
-    /** Makes a block whose matter was replaced new to structures, built or ground, with every joint around it intact. */
+    /**
+     * Makes a block whose matter was replaced new to structures, built or ground, with every joint around it
+     * intact.
+     */
     private void renewStructure(GridPos pos, boolean built) {
         Hosted ids = hosted.get(pos.sectionKey());
         ids.setFlags(pos.indexInSection(), built ? StructureFlags.BUILT : 0);
@@ -1362,6 +1365,20 @@ public final class HostedWorld {
             return survey;
         }
         return Optional.empty();
+    }
+
+    /**
+     * Makes a structure taken to be checked wait to be checked again, as when its analysis is dropped before it is
+     * settled.
+     *
+     * @param survey the structure's survey, made by this hosted world
+     * @throws IllegalArgumentException if another hosted world made the survey
+     */
+    public void checkLater(StructureSurvey survey) {
+        if (survey.world() != this) {
+            throw new IllegalArgumentException("the survey was made by another hosted world");
+        }
+        uncheck(survey.start());
     }
 
     /**

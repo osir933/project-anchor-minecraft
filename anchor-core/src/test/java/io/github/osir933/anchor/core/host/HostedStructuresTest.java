@@ -139,6 +139,21 @@ class HostedStructuresTest {
     }
 
     @Test
+    void aDroppedAnalysisLeavesItsStructureWaiting() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, ground(Map.of()), CLIMATE);
+        GridPos placed = new GridPos(4, 8, 4);
+        place(h, placed, STONE);
+        StructureSurvey survey = h.nextStructure(100).orElseThrow();
+        assertEquals(0, h.uncheckedStructures(), "taken to be checked");
+        h.checkLater(survey);
+        assertEquals(1, h.uncheckedStructures());
+        assertEquals(placed, h.nextStructure(100).orElseThrow().start());
+        HostedWorld other = hosted();
+        assertThrows(IllegalArgumentException.class, () -> other.checkLater(survey));
+    }
+
+    @Test
     void blocksThatHoldStillAreNeverBuiltAndHoldUpWhatHangsFromThem() {
         HostedWorld h = hosted();
         h.importSection(ORIGIN, ground(Map.of()), CLIMATE);
