@@ -18,6 +18,9 @@ import java.util.Objects;
  *
  * <p>Saved blocks that share a material, owner and provenance share one {@linkplain Entry palette entry}, so a
  * host stores a short palette and, per saved block, its position, palette index, mass and enthalpy.
+ *
+ * <p>Apart from heat, a snapshot keeps the structural state of the blocks that have one: which were built rather
+ * than found in the world, and which of their joints have cracked, as {@linkplain #structureFlags flags} per block.
  */
 public final class SectionSnapshot {
 
@@ -48,6 +51,24 @@ public final class SectionSnapshot {
     private final int[] entries;
     private final double[] mass;
     private final double[] enthalpy;
+    private final int[] structureBlocks;
+    private final byte[] structureFlags;
+
+    /**
+     * Creates a snapshot of heat alone. The arrays are copied.
+     *
+     * @param palette the distinct palette entries
+     * @param blocks the local index of each saved block, as numbered by {@link SectionPos#localIndex}, in
+     *     ascending order
+     * @param entries each saved block's palette index
+     * @param mass each saved block's mass in kilograms
+     * @param enthalpy each saved block's enthalpy in joules
+     * @throws IllegalArgumentException as {@link #SectionSnapshot(List, int[], int[], double[], double[], int[],
+     *     byte[])} does
+     */
+    public SectionSnapshot(List<Entry> palette, int[] blocks, int[] entries, double[] mass, double[] enthalpy) {
+        this(palette, blocks, entries, mass, enthalpy, new int[0], new byte[0]);
+    }
 
     /**
      * Creates a snapshot. The arrays are copied.
@@ -58,10 +79,17 @@ public final class SectionSnapshot {
      * @param entries each saved block's palette index
      * @param mass each saved block's mass in kilograms
      * @param enthalpy each saved block's enthalpy in joules
+     * @param structureBlocks the local index of each block with structural flags, in ascending order
+     * @param structureFlags each such block's flags, as {@link #structureFlags} describes them
      * @throws IllegalArgumentException if the arrays differ in length, the blocks are not ascending local
-     *     indices, a palette index is outside the palette, or a value could not be a block's state
+     *     indices, a palette index is outside the palette, a value could not be a block's state, or flags are
+     *     zero or unknown
      */
-    public SectionSnapshot(List<Entry> palette, int[] blocks, int[] entries, double[] mass, double[] enthalpy) {
+    public SectionSnapshot(List<Entry> palette, int[] blocks, int[] entries, double[] mass, double[] enthalpy,
+            int[] structureBlocks, byte[] structureFlags) {
+        this.structureBlocks = structureBlocks.clone();
+        this.structureFlags = structureFlags.clone();
+        checkStructure(this.structureBlocks, this.structureFlags, SectionPos.BLOCKS);
         this.palette = List.copyOf(palette);
         this.blocks = blocks.clone();
         this.entries = entries.clone();
@@ -197,21 +225,66 @@ public final class SectionSnapshot {
         return enthalpy.clone();
     }
 
+    /**
+     * Returns the local index of every block with structural flags, for storing.
+     *
+     * @return a copy, in ascending order
+     */
+    public int[] structureBlocks() {
+        return structureBlocks.clone();
+    }
+
+    /**
+     * Returns the structural flags of the blocks {@link #structureBlocks} lists: bit 0 set if the block was
+     * built, and bits 1, 2 and 3 set if its joint with the next block along x, y or z has cracked.
+     *
+     * @return a copy, in the order of {@link #structureBlocks()}
+     */
+    public byte[] structureFlags() {
+        return structureFlags.clone();
+    }
+
+    /**
+     * Checks blocks with structural flags: ascending indices below a limit, each with known, non-zero flags.
+     *
+     * @param blocks the indices
+     * @param flags the flags
+     * @param limit the number of blocks there are
+     * @throws IllegalArgumentException if they do not pass
+     */
+    static void checkStructure(int[] blocks, byte[] flags, int limit) {
+        if (blocks.length != flags.length) {
+            throw new IllegalArgumentException("structure needs one set of flags per block: " + blocks.length
+                    + " blocks, " + flags.length + " flags");
+        }
+        for (int k = 0; k < blocks.length; k++) {
+            if (blocks[k] < 0 || blocks[k] >= limit || (k > 0 && blocks[k] <= blocks[k - 1])) {
+                throw new IllegalArgumentException("structure block " + k + " is at " + blocks[k]
+                        + "; blocks are indices in ascending order");
+            }
+            if (flags[k] == 0 || (flags[k] & ~StructureFlags.ALL) != 0) {
+                throw new IllegalArgumentException("block " + blocks[k] + " has structure flags " + flags[k]);
+            }
+        }
+    }
+
     @Override
     public boolean equals(Object o) {
         return o instanceof SectionSnapshot s && palette.equals(s.palette) && Arrays.equals(blocks, s.blocks)
                 && Arrays.equals(entries, s.entries) && Arrays.equals(mass, s.mass)
-                && Arrays.equals(enthalpy, s.enthalpy);
+                && Arrays.equals(enthalpy, s.enthalpy) && Arrays.equals(structureBlocks, s.structureBlocks)
+                && Arrays.equals(structureFlags, s.structureFlags);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(palette, Arrays.hashCode(blocks), Arrays.hashCode(entries), Arrays.hashCode(mass),
-                Arrays.hashCode(enthalpy));
+                Arrays.hashCode(enthalpy), Arrays.hashCode(structureBlocks), Arrays.hashCode(structureFlags));
     }
 
     @Override
     public String toString() {
-        return "SectionSnapshot[" + blocks.length + " blocks, " + palette.size() + " palette entries]";
+        return "SectionSnapshot[" + blocks.length + " blocks, " + palette.size() + " palette entries, "
+                + structureBlocks.length + " with structure]";
     }
 }

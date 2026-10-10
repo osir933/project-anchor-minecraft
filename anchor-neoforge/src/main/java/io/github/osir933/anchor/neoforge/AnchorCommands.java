@@ -34,7 +34,9 @@ import net.neoforged.neoforge.event.RegisterCommandsEvent;
  *   <li>{@code /anchor snapshot ...} saves a box of blocks with its heat and restores it later; see
  *   {@link SnapshotCommands};</li>
  *   <li>{@code /anchor experiment ...} lists ready-made experiments and builds them; see
- *   {@link ExperimentCommands}.</li>
+ *   {@link ExperimentCommands};</li>
+ *   <li>{@code /anchor structure ...} looks at how built blocks hold up and marks blocks built or natural; see
+ *   {@link StructureCommands}.</li>
  * </ul>
  */
 final class AnchorCommands {
@@ -63,7 +65,8 @@ final class AnchorCommands {
                 .then(ProbeCommands.build())
                 .then(TimeCommands.build())
                 .then(SnapshotCommands.build())
-                .then(ExperimentCommands.build()));
+                .then(ExperimentCommands.build())
+                .then(StructureCommands.build()));
     }
 
     private static LiteralArgumentBuilder<CommandSourceStack> setCommand() {

@@ -5,8 +5,8 @@ version it releases as that version's notes.
 
 ## 0.1.0-alpha.1 (unreleased)
 
-The first alpha: heat is the first physics in the game. Anchor needs Minecraft 26.3 with NeoForge 26.3 and
-Java 25, on both the client and the server.
+The first alpha: heat is the first physics in the game, and what players build stands or falls by the strength of
+its blocks. Anchor needs Minecraft 26.3 with NeoForge 26.3 and Java 25, on both the client and the server.
 
 - **Every block near a player is matter.** Each block is a material such as granite, oak, iron, water or
   air, with a mass and a temperature. Blocks Anchor does not know are described from their name, sound and
@@ -72,6 +72,16 @@ Java 25, on both the client and the server.
   cooling, a race of heat up rods of copper, iron, stone and brick, ice that stays at 0 °C while it melts beside
   stone that warms on, and iron cooling bare, in glass and in wool. Each comes with probes, a chart of them and a
   snapshot to run it again, and `/anchor experiment list` tells what each shows.
+- **Structures stand or fall.** Every block a player places is built and stands or falls by the strength of its
+  blocks, while the world as it was found holds still. Anchor works out how each block's weight passes through the
+  patches where blocks touch, from each material's measured strength, stiffness and friction, softened by heat as
+  in fire. A joint loaded beyond what it can take cracks, with the sound of its block breaking and a puff of dust,
+  and blocks left with nothing to hold them up fall: a stone overhang breaks at 12 blocks long, an iron one at 32,
+  or 22 at 600 °C. Blocks touch where their shapes do, so slabs, stairs and fences carry what their shapes can.
+  Trees, crops and the stone lava makes where it meets water grow natural. `/anchor structure inspect` tells
+  whether a block is built and how loaded its structure is, operators can mark a box of blocks built or natural
+  with `/anchor structure mark`, and the `[structures]` settings switch it off or bound how many blocks are
+  analysed together. Big buildings are analysed in the background and fall at the same moment on every machine.
 
 Known limits of this alpha:
 
@@ -94,3 +104,6 @@ Known limits of this alpha:
   blocks around it alone, so water that ran out of the box stays where it went.
 - The glow is drawn as an eye used to the dark sees it, so in bright daylight it shows more than a real glow
   would, and glowing blocks do not light up what is around them.
+- Structures carry only the weight of their blocks, not the players, animals or items on them. Steel that yields
+  gives way at once instead of bending, cracked blocks do not wedge into arches, slender columns do not buckle and
+  heat does not yet stress what it expands.

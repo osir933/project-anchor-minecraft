@@ -4,7 +4,8 @@ Anchor turns Minecraft into a physical world. Matter, heat, forces and chemistry
 tools, machines and industry emerge from physics instead of recipes. It is meant as a science sandbox: build
 experiments, inspect what the simulation knows and how sure it is, and watch societies grow on top of it.
 
-**Status: first alpha.** Heat is the first physics in the game; everything else above is still ahead (see
+**Status: first alpha.** Heat is the first physics in the game, and what players build stands or falls by the
+strength of its blocks; everything else above is still ahead (see
 the [roadmap](docs/architecture.md#roadmap) and the [changelog](CHANGELOG.md)). Anchor needs Minecraft 26.3
 with NeoForge 26.3 and Java 25, installed on both the game and the server. To get started, create a world of the
 Anchor Laboratory type: a flat floor in steady 20 °C air, with a thermometer and a thermal camera in hand (see
@@ -91,6 +92,8 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 | `/anchor snapshot remove <name>` | For operators: deletes a snapshot. |
 | `/anchor experiment list` | The ready-made experiments and what each shows. `/anchor experiment` alone does the same. |
 | `/anchor experiment build <name>` | For operators: builds a ready-made experiment in front of you and starts it, with probes where its result shows, a chart of them in your inventory and a snapshot to run it again. |
+| `/anchor structure inspect` | Whether the block you are looking at is built or natural, which of its joints have cracked and, for a built block, how loaded its structure is: how many blocks were analysed with it, its most loaded joint and what would fall. Operators can name any block with `/anchor structure inspect <pos>`. |
+| `/anchor structure mark <from> <to> built\|natural` | For operators: makes a box of up to 32,768 blocks built, so that it stands or falls by its strength, or natural, so that it holds still. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
 ### Thermometer
@@ -210,13 +213,13 @@ sun, the weather and the air of other places change its numbers.
 
 ### Settings
 
-Anchor's settings are in `config/anchor-synced.toml` in the game's folder, or the server's, under `[heat]`, and each
-is described there. Every world shares them; to give one world settings of its own, copy the file into the
-`serverconfig` folder in that world's folder. The settings are:
-`enabled`, `secondsPerGameTick` (3.6), `gameTicksPerStep` (4), `stepBudgetMillis` (20), `radius` and
-`verticalRadius` (2 sections), `sectionsLoadedPerStep` (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for
-25 cm cells; 0 turns refinement off), `maxRefinedCells` (16384 in each dimension), `showPhaseChanges` (true) and
-`sunAndSky` (true).
+Anchor's settings are in `config/anchor-synced.toml` in the game's folder, or the server's, under `[heat]` and
+`[structures]`, and each is described there. Every world shares them; to give one world settings of its own, copy the
+file into the `serverconfig` folder in that world's folder. The settings are: `enabled`, `secondsPerGameTick` (3.6),
+`gameTicksPerStep` (4), `stepBudgetMillis` (20), `radius` and `verticalRadius` (2 sections), `sectionsLoadedPerStep`
+(8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns refinement off), `maxRefinedCells`
+(16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky` (true) under `[heat]`, and `enabled` (true) and
+`maxBlocks` (4096) under `[structures]`.
 
 ### Describing blocks in a data pack
 
@@ -246,6 +249,36 @@ data map, at `data/anchor/data_maps/block/materials.json`:
 | `temperature` | Optional: the temperature the block starts at, in kelvin, instead of its surroundings'. |
 | `source` | Optional: a heat source that holds the block at `temperature` (kelvin) with up to `power` (watts). Blocks with a `lit` property only heat while lit. |
 | `becomes` | Optional: the block to show once the material has melted, frozen or boiled into another phase. |
+
+## Structures in the game
+
+What players build stands or falls by the strength of its blocks. Every block a player places is **built**; the
+world as it was found, overhangs and floating islands included, is **natural** and holds still. Whenever something
+changes, Anchor checks the structures of the built blocks around it: how the weight of each block passes through the
+patches where blocks touch down to the natural ground, and whether each joint can take its load, from its
+material's measured strength, stiffness and friction (see [Structure](docs/architecture.md#structure)).
+
+- A block with nothing to hold it up falls, as sand does. Blocks that cannot fall whole, such as chests, doors and
+  beds, break where they stand.
+- A joint loaded beyond what it can take cracks, with the sound of its block breaking and a puff of dust, and from
+  then on holds only by pressing and friction. A stone overhang breaks at 12 blocks long, an iron one at 32.
+- Blocks touch where their shapes do: a slab touches the block beside it over half a face, a fence holds up what
+  stands on its post, and a block that rests on nothing but a torch or a flower falls.
+- Heat softens matter as fire does: iron keeps less than half its strength at 600 °C, so heated that far an iron
+  overhang breaks at 22 blocks long.
+- Trees and crops grow natural, and so do the stone, cobblestone and obsidian that lava makes where it meets water.
+  The blocks of a ready-made experiment are natural too.
+
+`/anchor structure inspect` tells whether a block is built and how loaded its structure is, and operators can make
+a box of blocks built or natural with `/anchor structure mark`, for instance to let a village that came with the
+world stand or fall by its strength. Structures are checked where heat runs, near players. Small ones are analysed
+at once; a big building is analysed in the background and falls a moment later, at the same moment on every machine.
+Up to 4096 built blocks are analysed together, or what the `maxBlocks` setting says; in a larger building, the part
+around a change is analysed with the rest held still.
+
+What this alpha leaves out: steel that yields gives way at once instead of bending, cracked blocks do not wedge
+into arches, slender columns do not buckle, heat softens matter but its expansion does not yet stress it, and only
+the weight of blocks loads a structure, not the players, animals or items on it.
 
 ## Design principles
 

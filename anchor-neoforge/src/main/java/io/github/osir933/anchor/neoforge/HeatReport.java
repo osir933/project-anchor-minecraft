@@ -17,8 +17,9 @@ import io.github.osir933.anchor.core.host.Pacer;
  * @param pace how the simulation is paced: paused or not, its speed and the steps asked for by hand
  * @param ticksPerStep how many game ticks apart steps come at normal speed
  * @param laboratory whether the level is a laboratory, with no sun or sky
+ * @param structures what the level's structures have done
  */
 record HeatReport(HostedWorld.Status world, double stepSeconds, double lastStepMillis, double averageStepMillis,
         long shownPhaseChanges, long restoredBlocks, int restoredSections, String failure, Pacer.Status pace,
-        int ticksPerStep, boolean laboratory) {
+        int ticksPerStep, boolean laboratory, LevelStructures.Report structures) {
 }

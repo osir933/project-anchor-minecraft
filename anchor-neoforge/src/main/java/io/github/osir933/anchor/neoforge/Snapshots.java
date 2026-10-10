@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.LongStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -76,11 +77,15 @@ final class Snapshots {
 
     /**
      * A snapshot's heat as it is written: the box's size, the palette, the saved blocks, their packed cells with their
-     * palette indices, and masses and enthalpies as the raw bits of their doubles, so they come back exactly.
+     * palette indices, masses and enthalpies as the raw bits of their doubles, so they come back exactly, and, if any
+     * block was built or has a cracked joint, each such block's index in the box packed with its structural flags.
      */
     private record StoredHeat(int[] size, List<SectionSnapshot.Entry> palette, int[] blocks, long[] cells,
-            int[] entries, long[] mass, long[] enthalpy) {
+            int[] entries, long[] mass, long[] enthalpy, Optional<long[]> structure) {
     }
+
+    /** Structural flags are packed in the low byte of a saved block, below its index in the box. */
+    private static final int FLAG_BITS = 8;
 
     /** Reads and writes a snapshot's heat. */
     static final Codec<RegionSnapshot> HEAT = RecordCodecBuilder.<StoredHeat>create(i -> i.group(
@@ -90,10 +95,12 @@ final class Snapshots {
             Codec.LONG_STREAM.fieldOf("cells").forGetter(s -> Arrays.stream(s.cells())),
             Codec.INT_STREAM.fieldOf("entries").forGetter(s -> Arrays.stream(s.entries())),
             Codec.LONG_STREAM.fieldOf("mass").forGetter(s -> Arrays.stream(s.mass())),
-            Codec.LONG_STREAM.fieldOf("enthalpy").forGetter(s -> Arrays.stream(s.enthalpy())))
-            .apply(i, (size, palette, blocks, cells, entries, mass, enthalpy) -> new StoredHeat(size.toArray(),
-                    palette, blocks.toArray(), cells.toArray(), entries.toArray(), mass.toArray(),
-                    enthalpy.toArray())))
+            Codec.LONG_STREAM.fieldOf("enthalpy").forGetter(s -> Arrays.stream(s.enthalpy())),
+            Codec.LONG_STREAM.xmap(LongStream::toArray, Arrays::stream).optionalFieldOf("structure")
+                    .forGetter(StoredHeat::structure))
+            .apply(i, (size, palette, blocks, cells, entries, mass, enthalpy, structure) -> new StoredHeat(
+                    size.toArray(), palette, blocks.toArray(), cells.toArray(), entries.toArray(), mass.toArray(),
+                    enthalpy.toArray(), structure)))
             .comapFlatMap(Snapshots::fromStored, Snapshots::toStored);
 
     /**
@@ -344,9 +351,20 @@ final class Snapshots {
         for (int c = 0; c < enthalpy.length; c++) {
             enthalpy[c] = Double.longBitsToDouble(s.enthalpy()[c]);
         }
+        long[] structure = s.structure().orElse(new long[0]);
+        int[] built = new int[structure.length];
+        byte[] flags = new byte[structure.length];
+        for (int k = 0; k < structure.length; k++) {
+            long index = structure[k] >>> FLAG_BITS;
+            if (index > Integer.MAX_VALUE) {
+                return DataResult.error(() -> "a structural flag lies outside any box");
+            }
+            built[k] = (int) index;
+            flags[k] = (byte) structure[k];
+        }
         try {
             return DataResult.success(new RegionSnapshot(s.size()[0], s.size()[1], s.size()[2], s.palette(),
-                    s.blocks(), s.cells(), s.entries(), mass, enthalpy));
+                    s.blocks(), s.cells(), s.entries(), mass, enthalpy, built, flags));
         } catch (IllegalArgumentException e) {
             return DataResult.error(e::getMessage);
         }
@@ -361,7 +379,14 @@ final class Snapshots {
             massBits[c] = Double.doubleToRawLongBits(mass[c]);
             enthalpyBits[c] = Double.doubleToRawLongBits(enthalpy[c]);
         }
+        int[] built = heat.structureBlocks();
+        byte[] flags = heat.structureFlags();
+        long[] structure = new long[built.length];
+        for (int k = 0; k < built.length; k++) {
+            structure[k] = (long) built[k] << FLAG_BITS | (flags[k] & 0xFF);
+        }
         return new StoredHeat(new int[] {heat.sizeX(), heat.sizeY(), heat.sizeZ()}, heat.palette(), heat.blocks(),
-                heat.cells(), heat.paletteIndices(), massBits, enthalpyBits);
+                heat.cells(), heat.paletteIndices(), massBits, enthalpyBits,
+                structure.length == 0 ? Optional.empty() : Optional.of(structure));
     }
 }

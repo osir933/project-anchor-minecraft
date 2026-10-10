@@ -9,8 +9,10 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.event.TagsUpdatedEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
+import net.neoforged.neoforge.event.level.BlockGrowFeatureEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.event.level.LevelEvent;
+import net.neoforged.neoforge.event.level.block.CropGrowEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
@@ -31,6 +33,9 @@ final class HeatEvents {
     static void register(IEventBus bus) {
         bus.addListener(HeatEvents::onLevelTick);
         bus.addListener(HeatEvents::onBlockChanged);
+        bus.addListener(HeatEvents::onFeatureGrowing);
+        bus.addListener(HeatEvents::onCropGrown);
+        bus.addListener(HeatEvents::onFluidPlacing);
         bus.addListener(HeatEvents::onChunkUnload);
         bus.addListener(HeatEvents::onLevelSave);
         bus.addListener(HeatEvents::onLevelUnload);
@@ -71,6 +76,36 @@ final class HeatEvents {
             LevelHeat heat = LEVELS.get(level);
             if (heat != null) {
                 heat.blockChanged(event.getPos());
+            }
+        }
+    }
+
+    /** A tree, a huge mushroom or another feature grows right after this event; what it puts in is natural. */
+    private static void onFeatureGrowing(BlockGrowFeatureEvent event) {
+        if (event.getLevel() instanceof ServerLevel level && !event.isCanceled()) {
+            LevelHeat heat = LEVELS.get(level);
+            if (heat != null) {
+                heat.featureGrowing(event.getPos());
+            }
+        }
+    }
+
+    /** A crop, a cactus, sugar cane or bamboo has just grown; what it grew is natural. */
+    private static void onCropGrown(CropGrowEvent.Post event) {
+        if (event.getLevel() instanceof ServerLevel level) {
+            LevelHeat heat = LEVELS.get(level);
+            if (heat != null) {
+                heat.grownAround(event.getPos());
+            }
+        }
+    }
+
+    /** Lava meeting water is about to put stone, cobblestone, obsidian or basalt in; that block is natural. */
+    private static void onFluidPlacing(BlockEvent.FluidPlaceBlockEvent event) {
+        if (event.getLevel() instanceof ServerLevel level && !event.isCanceled()) {
+            LevelHeat heat = LEVELS.get(level);
+            if (heat != null) {
+                heat.grown(event.getPos());
             }
         }
     }
