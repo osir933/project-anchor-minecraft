@@ -82,6 +82,15 @@ its blocks. Anchor needs Minecraft 26.3 with NeoForge 26.3 and Java 25, on both 
   whether a block is built and how loaded its structure is, operators can mark a box of blocks built or natural
   with `/anchor structure mark`, and the `[structures]` settings switch it off or bound how many blocks are
   analysed together. Big buildings are analysed in the background and fall at the same moment on every machine.
+- **Uneven heat cracks blocks.** Built blocks of brittle matter crack through when the side that warms or cools first
+  strains against the rest, as a cold glass cracks under hot water: from the temperatures of a refined block's cells,
+  Anchor works out the stress at which the rest of the block holds each part and checks it against the material's
+  measured strength. Stone put beside lava cracks into cobblestone in about half a minute of play and stone bricks
+  into cracked stone bricks, glass beside lava shatters in about two minutes, and a campfire cracks a concrete wall
+  in about a minute and stone in about four, while torches and lanterns crack nothing. A cracked block keeps its heat,
+  holds only by pressing and friction and does not crack again, and the world as it was found never cracks.
+  `/anchor heat inspect` says how close a block comes to cracking, data packs can name what a block cracks into, and
+  the `thermalShock` setting turns it off.
 
 Known limits of this alpha:
 
@@ -106,4 +115,7 @@ Known limits of this alpha:
   would, and glowing blocks do not light up what is around them.
 - Structures carry only the weight of their blocks, not the players, animals or items on them. Steel that yields
   gives way at once instead of bending, cracked blocks do not wedge into arches, slender columns do not buckle and
-  heat does not yet stress what it expands.
+  expansion that the blocks around hold back does not yet stress a structure.
+- Blocks crack from heat only where they are refined into smaller cells, where neighbouring temperatures differ by
+  50 K or more, and a 25 cm cell blurs the steep fall in temperature at a quenched face, so hot glass doused with
+  water does not crack.

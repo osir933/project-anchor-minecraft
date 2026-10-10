@@ -73,8 +73,8 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 
 | Command | What it does |
 | --- | --- |
-| `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy, where the value came from, for a block open to the sky how warm its top is and how much sunlight it takes in, and, for a refined block, how warm its coolest and hottest cells are. Operators can name any block with `/anchor heat inspect <pos>`. |
-| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks are refined into how many cells, the sunlight on level ground and how many surfaces are open to the sky, how many blocks came back as they were saved, and whether energy and mass balanced at the last audit. |
+| `/anchor heat inspect` | What the simulation knows about the block you are looking at: material, temperature, phase, mass, enthalpy, where the value came from, for a block open to the sky how warm its top is and how much sunlight it takes in, and, for a refined block, how warm its coolest and hottest cells are and how close uneven heat comes to cracking it. Operators can name any block with `/anchor heat inspect <pos>`. |
+| `/anchor heat status` | Heat in your dimension: sections simulated and awake, the cost of each step, how many blocks are refined into how many cells, the sunlight on level ground and how many surfaces are open to the sky, how many blocks came back as they were saved, whether energy and mass balanced at the last audit, what structures have done and how many built blocks uneven heat has cracked. |
 | `/anchor heat set <pos> <celsius>` | For operators: sets a block's temperature, keeping its matter, to start an experiment. |
 | `/anchor probe add` | Leaves a probe where you are looking, which records the temperature there every step. Operators can put one in the middle of any block, and name it, with `/anchor probe add <pos> [<name>]`. |
 | `/anchor probe list` | Every probe in your dimension with its latest reading, how fast it is changing and a line of bars of what it recorded. `/anchor probe show <name>` tells more about one. |
@@ -92,7 +92,7 @@ reaches only the tops of blocks, while the air keeps its biome's temperature by 
 | `/anchor snapshot remove <name>` | For operators: deletes a snapshot. |
 | `/anchor experiment list` | The ready-made experiments and what each shows. `/anchor experiment` alone does the same. |
 | `/anchor experiment build <name>` | For operators: builds a ready-made experiment in front of you and starts it, with probes where its result shows, a chart of them in your inventory and a snapshot to run it again. |
-| `/anchor structure inspect` | Whether the block you are looking at is built or natural, which of its joints have cracked and, for a built block, how loaded its structure is: how many blocks were analysed with it, its most loaded joint and what would fall. Operators can name any block with `/anchor structure inspect <pos>`. |
+| `/anchor structure inspect` | Whether the block you are looking at is built or natural, which of its joints have cracked, how close uneven heat comes to cracking it through and, for a built block, how loaded its structure is: how many blocks were analysed with it, its most loaded joint and what would fall. Operators can name any block with `/anchor structure inspect <pos>`. |
 | `/anchor structure mark <from> <to> built\|natural` | For operators: makes a box of up to 32,768 blocks built, so that it stands or falls by its strength, or natural, so that it holds still. |
 | `/anchor selftest` | Runs the engine's self-check. |
 
@@ -218,8 +218,8 @@ Anchor's settings are in `config/anchor-synced.toml` in the game's folder, or th
 file into the `serverconfig` folder in that world's folder. The settings are: `enabled`, `secondsPerGameTick` (3.6),
 `gameTicksPerStep` (4), `stepBudgetMillis` (20), `radius` and `verticalRadius` (2 sections), `sectionsLoadedPerStep`
 (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns refinement off), `maxRefinedCells`
-(16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky` (true) under `[heat]`, and `enabled` (true) and
-`maxBlocks` (4096) under `[structures]`.
+(16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky` (true) under `[heat]`, and `enabled` (true),
+`maxBlocks` (4096) and `thermalShock` (true) under `[structures]`.
 
 ### Describing blocks in a data pack
 
@@ -236,7 +236,8 @@ data map, at `data/anchor/data_maps/block/materials.json`:
       "material": "anchor:water",
       "phase": "liquid",
       "becomes": { "solid": "minecraft:ice", "gas": "minecraft:air" }
-    }
+    },
+    "minecraft:smooth_stone": { "material": "anchor:granite", "fractured": "minecraft:cobblestone" }
   }
 }
 ```
@@ -249,6 +250,7 @@ data map, at `data/anchor/data_maps/block/materials.json`:
 | `temperature` | Optional: the temperature the block starts at, in kelvin, instead of its surroundings'. |
 | `source` | Optional: a heat source that holds the block at `temperature` (kelvin) with up to `power` (watts). Blocks with a `lit` property only heat while lit. |
 | `becomes` | Optional: the block to show once the material has melted, frozen or boiled into another phase. |
+| `fractured` | Optional: the block to show once uneven heat has cracked a built block through, such as `minecraft:air` for a block that shatters. Left out, stone becomes cobblestone, a block with a `cracked_` form becomes that, glass shatters and other blocks stay as they are. |
 
 ## Structures in the game
 
@@ -266,6 +268,12 @@ material's measured strength, stiffness and friction (see [Structure](docs/archi
   stands on its post, and a block that rests on nothing but a torch or a flower falls.
 - Heat softens matter as fire does: iron keeps less than half its strength at 600 °C, so heated that far an iron
   overhang breaks at 22 blocks long.
+- Uneven heat cracks brittle blocks from within, as hot water cracks a cold glass: the side of a block that warms
+  first expands, and the rest of the block holds it back. Stone put beside lava cracks into cobblestone in about half
+  a minute of play and stone bricks into cracked stone bricks, glass beside lava shatters in about two minutes, and a
+  campfire cracks a concrete wall in about a minute and stone in about four. Torches and lanterns crack nothing. A
+  cracked block keeps its heat and its place, holds only by pressing and friction, so what it held up may fall, and
+  does not crack again. The world as it was found does not crack, and the `thermalShock` setting turns cracking off.
 - Trees and crops grow natural, and so do the stone, cobblestone and obsidian that lava makes where it meets water.
   The blocks of a ready-made experiment are natural too.
 
@@ -277,8 +285,8 @@ Up to 4096 built blocks are analysed together, or what the `maxBlocks` setting s
 around a change is analysed with the rest held still.
 
 What this alpha leaves out: steel that yields gives way at once instead of bending, cracked blocks do not wedge
-into arches, slender columns do not buckle, heat softens matter but its expansion does not yet stress it, and only
-the weight of blocks loads a structure, not the players, animals or items on it.
+into arches, slender columns do not buckle, expansion that the blocks around hold back does not yet stress a
+structure, and only the weight of blocks loads a structure, not the players, animals or items on it.
 
 ## Design principles
 
