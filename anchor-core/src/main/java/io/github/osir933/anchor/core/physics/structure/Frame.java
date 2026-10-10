@@ -18,7 +18,8 @@ import java.util.TreeMap;
  * length in each block's material. A joint to the ground is the half of that beam inside the free block,
  * clamped at the face. A joint is either intact, joining the blocks as if they were one piece of material, or
  * cracked: then it only carries what pressing and friction can, as do all joints of granular materials such as
- * sand.
+ * sand. Heat makes a free block's matter longer, and cold shorter, by its {@linkplain Expansion thermal strain};
+ * where the frame stops it moving, its joints are loaded. The ground holds still and does not expand.
  *
  * <p>Blocks and joints are kept in position order, so a frame built from the same blocks in any order is the
  * same frame.
@@ -44,9 +45,11 @@ public final class Frame {
      *     proportionally weaker
      * @param massKg the mass of its matter in kilograms; zero for ground
      * @param ground whether it is part of the ground
+     * @param expansion how far heat has stretched its matter; {@link Expansion#NONE} for ground, which does not
+     *     expand
      */
     public record Block(GridPos pos, Mechanics mechanics, double temperatureK, double solidFraction, double massKg,
-            boolean ground) {
+            boolean ground, Expansion expansion) {
 
         /**
          * Validates the block.
@@ -57,9 +60,14 @@ public final class Frame {
          * @param solidFraction the solid fraction
          * @param massKg the mass
          * @param ground whether it is ground
+         * @param expansion the thermal strain
          */
         public Block {
             Objects.requireNonNull(pos, "pos");
+            Objects.requireNonNull(expansion, "expansion");
+            if (ground && expansion.any()) {
+                throw new IllegalArgumentException("ground does not expand: " + pos);
+            }
             if (mechanics == null && !ground) {
                 throw new IllegalArgumentException("a free block needs mechanics: " + pos);
             }
@@ -72,6 +80,112 @@ public final class Frame {
             if (!(massKg >= 0 && Double.isFinite(massKg))) {
                 throw new IllegalArgumentException("mass must be finite and non-negative: " + massKg);
             }
+        }
+    }
+
+    /**
+     * How far heat has stretched a block's matter beyond the length it has where it is free of thermal strain: by
+     * its thermal strain at its centre, which changes across the block where it is hotter on one side than the
+     * other. A block stretched evenly grows; one stretched more on one side bends away from it.
+     *
+     * <p>Two measures of that change serve two ends. The straight line that best fits the strain of the block's parts
+     * gives the gradient, which bends the block. The mean strain of each half of the block along an axis gives the
+     * stretch, which says how much longer each half grows: the halves are strained by the strain at the centre plus
+     * and minus a quarter of a metre times the stretch. The two agree where the strain changes in a straight line;
+     * where it does not, as in a block heated hard on one face, a straight line that bends the block rightly can make
+     * its far half shorter than it is.
+     *
+     * @param strain the thermal strain at the block's centre: the fraction by which heat has made its matter longer,
+     *     negative where cold has made it shorter
+     * @param gradientX how the thermal strain changes along x, per metre, for bending
+     * @param gradientY how it changes along y, per metre, for bending
+     * @param gradientZ how it changes along z, per metre, for bending
+     * @param stretchX how the mean strain of the block's half toward +x exceeds that of its half toward -x, per
+     *     metre between the middles of the halves
+     * @param stretchY the same along y
+     * @param stretchZ the same along z
+     */
+    public record Expansion(double strain, double gradientX, double gradientY, double gradientZ, double stretchX,
+            double stretchY, double stretchZ) {
+
+        /** No thermal strain at all. */
+        public static final Expansion NONE = new Expansion(0, 0, 0, 0);
+
+        /**
+         * Validates the expansion.
+         *
+         * @param strain the strain at the centre
+         * @param gradientX the change along x, for bending
+         * @param gradientY the change along y, for bending
+         * @param gradientZ the change along z, for bending
+         * @param stretchX the change along x between the halves
+         * @param stretchY the change along y between the halves
+         * @param stretchZ the change along z between the halves
+         */
+        public Expansion {
+            for (double v : new double[] {strain, gradientX, gradientY, gradientZ, stretchX, stretchY, stretchZ}) {
+                if (!Double.isFinite(v)) {
+                    throw new IllegalArgumentException("thermal strain must be finite: " + strain + ", " + gradientX
+                            + ", " + gradientY + ", " + gradientZ + ", " + stretchX + ", " + stretchY + ", "
+                            + stretchZ);
+                }
+            }
+        }
+
+        /**
+         * Makes an expansion whose strain changes in a straight line through the block, so that each half is
+         * stretched as the gradient says.
+         *
+         * @param strain the strain at the centre
+         * @param gradientX the change along x, per metre
+         * @param gradientY the change along y, per metre
+         * @param gradientZ the change along z, per metre
+         */
+        public Expansion(double strain, double gradientX, double gradientY, double gradientZ) {
+            this(strain, gradientX, gradientY, gradientZ, gradientX, gradientY, gradientZ);
+        }
+
+        /**
+         * Returns how the thermal strain changes along an axis through the block's centre, as the straight line that
+         * bends it says.
+         *
+         * @param axis the axis: 0 for x, 1 for y, 2 for z
+         * @return the change per metre
+         */
+        public double gradient(int axis) {
+            return switch (axis) {
+                case 0 -> gradientX;
+                case 1 -> gradientY;
+                case 2 -> gradientZ;
+                default -> throw new IllegalArgumentException("axis must be 0, 1 or 2: " + axis);
+            };
+        }
+
+        /**
+         * Returns how the mean strain of the block's two halves along an axis differs, per metre between their
+         * middles: the half toward the positive side is strained by the strain at the centre plus a quarter of
+         * this, the other by the strain at the centre less a quarter of it.
+         *
+         * @param axis the axis: 0 for x, 1 for y, 2 for z
+         * @return the change per metre
+         */
+        public double stretch(int axis) {
+            return switch (axis) {
+                case 0 -> stretchX;
+                case 1 -> stretchY;
+                case 2 -> stretchZ;
+                default -> throw new IllegalArgumentException("axis must be 0, 1 or 2: " + axis);
+            };
+        }
+
+        /**
+         * Tells whether heat has stretched the block at all.
+         *
+         * @return whether any part of it is strained
+         */
+        public boolean any() {
+            return strain != 0 || gradientX != 0 || gradientY != 0 || gradientZ != 0 || stretchX != 0
+                    || stretchY != 0 || stretchZ != 0;
         }
     }
 
@@ -169,8 +283,25 @@ public final class Frame {
          */
         public Builder block(GridPos pos, Mechanics mechanics, double temperatureK, double solidFraction,
                 double massKg) {
+            return block(pos, mechanics, temperatureK, solidFraction, massKg, Expansion.NONE);
+        }
+
+        /**
+         * Adds a free block that heat has stretched.
+         *
+         * @param pos where it is
+         * @param mechanics how its matter carries loads
+         * @param temperatureK its temperature in kelvin
+         * @param solidFraction the solid fraction of its matter, above 0 and at most 1
+         * @param massKg its mass in kilograms
+         * @param expansion how far heat has stretched its matter
+         * @return this builder
+         * @throws IllegalArgumentException if a block is already there
+         */
+        public Builder block(GridPos pos, Mechanics mechanics, double temperatureK, double solidFraction,
+                double massKg, Expansion expansion) {
             return add(new Block(pos, Objects.requireNonNull(mechanics, "mechanics"), temperatureK, solidFraction,
-                    massKg, false));
+                    massKg, false, expansion));
         }
 
         /**
@@ -185,7 +316,7 @@ public final class Frame {
          * @throws IllegalArgumentException if a block is already there
          */
         public Builder ground(GridPos pos, Mechanics mechanics, double temperatureK, double solidFraction) {
-            return add(new Block(pos, mechanics, temperatureK, solidFraction, 0.0, true));
+            return add(new Block(pos, mechanics, temperatureK, solidFraction, 0.0, true, Expansion.NONE));
         }
 
         private Builder add(Block block) {

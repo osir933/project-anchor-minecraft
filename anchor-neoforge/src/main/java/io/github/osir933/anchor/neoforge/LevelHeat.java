@@ -249,6 +249,7 @@ final class LevelHeat {
     private void step() {
         pacer.beginTick();
         hosted.setThermalShock(AnchorConfig.get(AnchorConfig.THERMAL_SHOCK));
+        hosted.setThermalExpansion(AnchorConfig.get(AnchorConfig.THERMAL_EXPANSION));
         long start = System.nanoTime();
         double spent = 0.0;
         while (pacer.wantsStep(spent)) {

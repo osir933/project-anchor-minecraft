@@ -272,10 +272,37 @@ for concrete and 1.5 K for ice. How finely a block is refined decides how much o
 line always lie on a straight line, and the steep fall in temperature at a quenched face spreads over the cell beside
 it.
 
+**Expansion held back** (`Frame.Expansion`) loads a structure. Heat stretches a block's matter beyond the length it
+has at the temperature where it is free of thermal strain: by its thermal strain at its centre, and more on its warmer
+side, which bends it. For a refined block the cells say how: the straight line that best fits their strain, as for
+thermal stress, gives the gradient that bends the block, and the mean strain of each half of the block along each
+axis says how far that half grows. The two agree where the temperature changes in a straight line; beside lava, where
+it does not, a straight line that bends the block rightly would make its far half shorter than it is. A block that is
+not refined is stretched evenly by the strain of its temperature, and the ground does not stretch at all, held as it
+is by the earth around and below it. Each half-beam of the frame would move its far end, were nothing to hold it, by
+its half's strain along the beam and by the curvature of its gradient across it; held back, those movements s become
+loads K·s, solved with the same factorization as the weight, and the forces at a joint's ends are K(d − s).
+
+Heat moves blocks by hairlines, not lengths, so what it does to a joint depends on whether that movement lets its
+strain go. Brittle matter cracks before it moves, so its side of a joint takes the forces heat adds. Ductile matter
+yields a little and keeps its strength, so its side takes only the weight. A cracked joint or a contact rocks rather
+than bends; where heat alone would make it slip, rock or open, it does so by a hairline and holds as well as it does
+without heat, heat that presses it together lends it friction, and heat that crushes its edge has nowhere to go. A
+joint that cracks stops bending with its blocks, so the analysis solves again. The tests check a bar held at both
+ends against EAε, a free one growing by ε(n − ½), a bar warmer on top bending by gL²/2 when free and held straight by
+EIκ, a span holding its weight that 15 K of cold cracks at both ends and drops, a cracked span that heat pressing it
+holds up, metal that yields the strain away, stone joined to metal pressed by 2ε/(1/E₁ + 1/E₂) and cracking on its
+own side, a block that heat pushes along the ground sliding a hairline and staying, and heat crushing a crack's edge.
+In 14.4 s steps, granite built beside lava cracks from uneven heat in about 115 steps, and with that switched off its
+foot, held straight while the block bends away from the lava, cracks in about 200. A granite bridge two blocks above
+a pool of lava cracks at its ends in about 30 steps as it bows up; cracked through by uneven heat first, it stands
+on the pressing of its expansion held back between its pillars. Walls of concrete, granite, brick and glass in the
+sun through two days take at most a third of what cracks them.
+
 What the model leaves out, so far: yielding steel gives way at once instead of hinging and handing its load on, so
-redundant metal frames fall somewhat early; cracked joints do not wedge into arches; slender columns do not buckle;
-deflections are small; heat softens matter and uneven heat cracks a block from within, but expansion that the blocks
-around hold back does not yet stress a structure; and loads are static, the weight of blocks alone.
+redundant metal frames fall somewhat early; cracked joints do not wedge into arches, though heat held back can press
+them together; slender columns do not buckle, not even when heat pushes on them; the ground neither gives nor
+stretches; deflections are small; and loads are static: the weight of blocks and the strain of heat.
 
 ## Hosting
 
@@ -321,8 +348,10 @@ block keeps whether it is built and which of its joints have cracked (`host.Stru
 snapshots save both.
 
 A change that touches loads marks the built blocks around it to be checked, and so do imports, restores and heat that
-changes a built block's strength or stiffness by more than 2 % since it was last checked, which each section looks
-for once in 8 steps. `nextStructure` takes the next block waiting, in a fixed order, and **surveys** the structure it
+changes a built block's strength or stiffness by more than 2 % since it was last checked, or, for brittle matter,
+stretches it by enough to change its stress by a tenth of its tensile strength, which each section looks for once in
+8 steps. A built block is free of thermal strain at the climate of its section, where it was put in place; one held
+by a heat source, whose temperature the source sets, is not stretched, and the game can switch stretching off. `nextStructure` takes the next block waiting, in a fixed order, and **surveys** the structure it
 belongs to (`host.StructureSurvey`): the survey spreads through the built blocks joined to it, nearest first, up to a
 limit, and takes the natural blocks that carry loads as the ground it stands on. Built blocks beyond the limit, and
 blocks in sections that are not imported, hold still, so a large structure is analysed around the change that
@@ -423,6 +452,10 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   `/anchor structure inspect` say how close uneven heat comes to cracking a block, and `/anchor heat status` how many
   blocks have cracked. The `thermalShock` setting in the structures section switches it off, whether or not
   structures stand or fall.
+- **Expansion.** `LevelHeat` passes the `thermalExpansion` setting of the structures section on each tick, and
+  structures that heat stretches are checked like any other. `/anchor structure inspect` and `/anchor heat inspect`
+  say how far heat has made a built block longer or shorter than at the climate where it stands and on which side it
+  is warmest, where that bends it, and the structure's most loaded joint says how loaded it would be without heat.
 - **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
   snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
   vanilla does, and the result is held between −30 and 45 °C (`Climate`). Its air has a relative humidity of
@@ -586,7 +619,7 @@ operators can pause heat, step it, run it faster or slower, send it ahead, and s
 rewind it to, hot blocks glow in the colours of a black body, and the Laboratory world type gives experiments steady
 surroundings, with ready-made experiments to build there. Phase 2, structure and fracture, has begun: materials
 have mechanical properties that heat softens, what players build stands or falls by the strength of its blocks,
-cracking where it is overloaded, and uneven heat cracks brittle blocks from within. Next, expansion held back by a
-structure, buckling and fracture inside blocks. After
+cracking where it is overloaded, uneven heat cracks brittle blocks from within, and expansion held back by a
+structure loads its joints. Next, buckling and fracture inside blocks. After
 that come rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

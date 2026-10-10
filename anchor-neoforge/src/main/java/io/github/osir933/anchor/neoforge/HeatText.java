@@ -4,6 +4,7 @@ import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
+import io.github.osir933.anchor.core.physics.structure.Frame;
 import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.world.Provenance;
@@ -179,6 +180,10 @@ final class HeatText {
             if (strain != null) {
                 lines.add("  " + strain);
             }
+            String stretched = expansion(i.expansion(), i.environmentK());
+            if (stretched != null) {
+                lines.add("  " + stretched);
+            }
             if (!Double.isNaN(i.surfaceK())) {
                 lines.add("  Its top, open to the sky, is at " + celsius(i.surfaceK()));
             }
@@ -232,6 +237,47 @@ final class HeatText {
             return text + "; it is natural, so it does not crack";
         }
         return enabled ? text : text + "; cracking from heat is switched off in Anchor's settings";
+    }
+
+    /**
+     * Describes how far heat has stretched a built block beyond its length at the climate where it stands, and
+     * which side of it is stretched most, where that bends it.
+     *
+     * @param expansion how heat stretches the block, or {@code null} for a block heat does not stretch
+     * @param unstrainedK the temperature at which its matter is free of thermal strain, in kelvin
+     * @return the line to show, or {@code null} if there is nothing to say
+     */
+    static String expansion(Frame.Expansion expansion, double unstrainedK) {
+        if (expansion == null) {
+            return null;
+        }
+        double strain = expansion.strain();
+        int axis = 0;
+        for (int a = 1; a < 3; a++) {
+            if (Math.abs(expansion.gradient(a)) > Math.abs(expansion.gradient(axis))) {
+                axis = a;
+            }
+        }
+        // How much more the face on the stretched side is strained than the centre.
+        double side = Math.abs(expansion.gradient(axis)) * 0.5;
+        boolean bends = side >= 1e-6 && side >= 0.25 * Math.abs(strain);
+        boolean grows = Math.abs(strain) >= 5e-6;
+        String face = null;
+        if (bends) {
+            boolean positive = expansion.gradient(axis) > 0;
+            face = switch (axis) {
+                case 0 -> positive ? "east" : "west";
+                case 1 -> positive ? "top" : "bottom";
+                default -> positive ? "south" : "north";
+            };
+        }
+        if (!grows) {
+            return bends ? "It is warmest on its " + face + " side, which bends it" : null;
+        }
+        String text = String.format(Locale.ROOT, "%s has made it %.2f mm %s per metre than at %s, the climate here",
+                strain >= 0 ? "Heat" : "Cold", 1000 * Math.abs(strain), strain >= 0 ? "longer" : "shorter",
+                celsius(unstrainedK));
+        return bends ? text + "; it is warmest on its " + face + " side, which bends it" : text;
     }
 
     /**

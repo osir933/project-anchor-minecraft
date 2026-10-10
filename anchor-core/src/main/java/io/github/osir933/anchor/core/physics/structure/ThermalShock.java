@@ -22,6 +22,10 @@ import java.util.Objects;
  * that is quenched spreads over the cell beside it. The stress is checked as an intact joint of brittle matter is:
  * against the tensile strength where a part is pulled and the compressive strength where it is pressed, both at the
  * part's own temperature, as is its stiffness.
+ *
+ * <p>The straight-line field is how the block as a whole bends: {@link #expansion} hands it to the structure the
+ * block belongs to, whose joints take it where the structure holds the block in place, with how much each half of the
+ * block grows, from the mean strain of its parts in that half.
  */
 public final class ThermalShock {
 
@@ -69,6 +73,121 @@ public final class ThermalShock {
      */
     public static Result analyse(Mechanics mechanics, double[] x, double[] y, double[] z, double[] mass,
             double[] temperatureK, int parts) {
+        Fit f = fit(mechanics, x, y, z, mass, temperatureK, parts);
+        if (parts < 2 || f.weights() <= 0) {
+            return NONE;
+        }
+        double best = 0.0;
+        double bestStress = 0.0;
+        int bestPart = -1;
+        double lateral = 1.0 / (1.0 - mechanics.poissonRatio());
+        for (int i = 0; i < parts; i++) {
+            double fit = f.at(x[i], y[i], z[i]);
+            double stress = mechanics.youngsModulus(temperatureK[i]) * lateral * (fit - f.strain()[i]);
+            double strength = stress > 0 ? mechanics.tensileStrength(temperatureK[i])
+                    : mechanics.compressiveStrength(temperatureK[i]);
+            double load;
+            if (stress == 0) {
+                load = 0.0;
+            } else {
+                load = strength > 0 ? Math.abs(stress) / strength : Double.POSITIVE_INFINITY;
+            }
+            if (load > best) {
+                best = load;
+                bestStress = stress;
+                bestPart = i;
+            }
+        }
+        return bestPart < 0 ? NONE : new Result(best, bestStress, bestPart);
+    }
+
+    /**
+     * Works out how far heat stretches a block as a whole beyond the length its matter has where it is free of
+     * thermal strain: the straight-line field that best fits its parts' thermal strain, as {@link #analyse} fits
+     * it, at the block's centre and across it, and the mean strain of each half of the block along each axis, each
+     * part weighted by its mass and stiffness. Where a half holds no part, the straight line says how it is
+     * stretched. A block of one part, or whose parts have no stiffness left to weigh them by, is stretched evenly
+     * by the strain of its mean temperature.
+     *
+     * @param mechanics the block's mechanics
+     * @param unstrainedK the temperature at which its matter is free of thermal strain, in kelvin
+     * @param centreX the x coordinate of the block's centre, in metres
+     * @param centreY the y coordinate of the block's centre, in metres
+     * @param centreZ the z coordinate of the block's centre, in metres
+     * @param x the x coordinate of each part's centre, in metres
+     * @param y the y coordinate of each part's centre, in metres
+     * @param z the z coordinate of each part's centre, in metres
+     * @param mass each part's mass, in kilograms
+     * @param temperatureK each part's temperature, in kelvin
+     * @param parts how many parts there are, from the start of each array; at least one
+     * @return the thermal strain at the block's centre and how it changes across the block
+     * @throws IllegalArgumentException if there are no parts, an array is shorter than {@code parts}, or a mass or
+     *     temperature is not positive and finite
+     */
+    public static Frame.Expansion expansion(Mechanics mechanics, double unstrainedK, double centreX, double centreY,
+            double centreZ, double[] x, double[] y, double[] z, double[] mass, double[] temperatureK, int parts) {
+        if (parts < 1) {
+            throw new IllegalArgumentException("a block has at least one part: " + parts);
+        }
+        if (!(unstrainedK > 0 && Double.isFinite(unstrainedK))) {
+            throw new IllegalArgumentException("the unstrained temperature must be positive: " + unstrainedK);
+        }
+        Fit f = fit(mechanics, x, y, z, mass, temperatureK, parts);
+        double offset = mechanics.thermalStrain(unstrainedK, f.meanK());
+        if (parts < 2 || f.weights() <= 0) {
+            return new Frame.Expansion(offset, 0, 0, 0);
+        }
+        double[] g = f.gradient();
+        return new Frame.Expansion(offset + f.at(centreX, centreY, centreZ), g[0], g[1], g[2],
+                stretch(f, x, centreX, parts, g[0]), stretch(f, y, centreY, parts, g[1]),
+                stretch(f, z, centreZ, parts, g[2]));
+    }
+
+    /**
+     * Returns how the mean strain of a block's half on the positive side of its centre along one axis exceeds that
+     * of its other half, per metre between the middles of the halves, which lie half a metre apart. A part on the
+     * centre counts half to each; if either half holds no stiffness, the gradient serves.
+     */
+    private static double stretch(Fit f, double[] at, double centre, int parts, double gradient) {
+        double lowSum = 0.0;
+        double lowWeight = 0.0;
+        double highSum = 0.0;
+        double highWeight = 0.0;
+        for (int i = 0; i < parts; i++) {
+            double d = at[i] - centre;
+            double high = d > 0 ? 1.0 : d < 0 ? 0.0 : 0.5;
+            double w = f.weight()[i];
+            highSum += high * w * f.strain()[i];
+            highWeight += high * w;
+            lowSum += (1.0 - high) * w * f.strain()[i];
+            lowWeight += (1.0 - high) * w;
+        }
+        if (!(lowWeight > 0 && highWeight > 0)) {
+            return gradient;
+        }
+        return (highSum / highWeight - lowSum / lowWeight) / 0.5;
+    }
+
+    /**
+     * The straight-line field that best fits the thermal strain of a block's parts, each measured from the block's
+     * mean temperature, with each part's weight: the weighted mean strain at the weighted centre, and the gradient
+     * across the block.
+     */
+    private record Fit(double meanK, double[] strain, double[] weight, double weights, double cx, double cy,
+            double cz, double mean, double[] gradient) {
+
+        /** Returns the fitted strain at a point. */
+        double at(double x, double y, double z) {
+            return mean + gradient[0] * (x - cx) + gradient[1] * (y - cy) + gradient[2] * (z - cz);
+        }
+    }
+
+    /**
+     * Fits a straight-line field to the thermal strain of a block's parts by least squares, each part weighted by its
+     * mass and stiffness. With fewer than two parts, or none with stiffness, the field is flat.
+     */
+    private static Fit fit(Mechanics mechanics, double[] x, double[] y, double[] z, double[] mass,
+            double[] temperatureK, int parts) {
         Objects.requireNonNull(mechanics, "mechanics");
         for (double[] a : new double[][] {x, y, z, mass, temperatureK}) {
             if (a.length < parts) {
@@ -86,12 +205,12 @@ public final class ThermalShock {
             total += mass[i];
             mean += mass[i] * temperatureK[i];
         }
-        if (parts < 2) {
-            return NONE;
-        }
-        mean /= total;
         double[] strain = new double[parts];
         double[] weight = new double[parts];
+        if (parts < 1) {
+            return new Fit(Double.NaN, strain, weight, 0.0, 0.0, 0.0, 0.0, 0.0, new double[3]);
+        }
+        mean /= total;
         double weights = 0.0;
         double cx = 0.0;
         double cy = 0.0;
@@ -104,8 +223,8 @@ public final class ThermalShock {
             cy += weight[i] * y[i];
             cz += weight[i] * z[i];
         }
-        if (!(weights > 0)) {
-            return NONE;
+        if (parts < 2 || !(weights > 0)) {
+            return new Fit(mean, strain, weight, parts < 2 ? 0.0 : weights, 0.0, 0.0, 0.0, 0.0, new double[3]);
         }
         cx /= weights;
         cy /= weights;
@@ -125,30 +244,7 @@ public final class ThermalShock {
                 m[r][3] += w * d[r] * strain[i];
             }
         }
-        a /= weights;
-        double[] g = solve(m);
-        double best = 0.0;
-        double bestStress = 0.0;
-        int bestPart = -1;
-        double lateral = 1.0 / (1.0 - mechanics.poissonRatio());
-        for (int i = 0; i < parts; i++) {
-            double fit = a + g[0] * (x[i] - cx) + g[1] * (y[i] - cy) + g[2] * (z[i] - cz);
-            double stress = mechanics.youngsModulus(temperatureK[i]) * lateral * (fit - strain[i]);
-            double strength = stress > 0 ? mechanics.tensileStrength(temperatureK[i])
-                    : mechanics.compressiveStrength(temperatureK[i]);
-            double load;
-            if (stress == 0) {
-                load = 0.0;
-            } else {
-                load = strength > 0 ? Math.abs(stress) / strength : Double.POSITIVE_INFINITY;
-            }
-            if (load > best) {
-                best = load;
-                bestStress = stress;
-                bestPart = i;
-            }
-        }
-        return bestPart < 0 ? NONE : new Result(best, bestStress, bestPart);
+        return new Fit(mean, strain, weight, weights, cx, cy, cz, a / weights, solve(m));
     }
 
     /**

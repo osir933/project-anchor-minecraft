@@ -39,6 +39,7 @@ import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedMap;
@@ -105,6 +106,12 @@ public final class HostedWorld {
 
     /** Each simulated section looks for built blocks that heat has weakened or strengthened once in this many steps. */
     static final int STRENGTH_CHECK_STEPS = 8;
+
+    /**
+     * A built block of brittle matter has its structure checked again once heat has changed its thermal strain by
+     * enough to change the stress it would bear, held fully in place, by this fraction of its tensile strength.
+     */
+    static final double EXPANSION_DRIFT = 0.1;
 
     private static final SortedSet<Long> NOWHERE = Collections.unmodifiableSortedSet(new TreeSet<>());
 
@@ -240,12 +247,15 @@ public final class HostedWorld {
      *     matter; {@code null} for any other block. It cracks a built block once its load reaches one; the world as
      *     it was found does not crack.
      * @param fractured whether thermal stress has cracked the block through
+     * @param expansion how far heat has stretched the block beyond its length at the climate of its section, where
+     *     it was put in place, as its structure takes it, for a built block that carries loads while heat stretches
+     *     built blocks; {@code null} for any other block
      */
     public record Inspection(GridPos pos, String material, String materialName, double massKg, double enthalpyJ,
             ThermalState state, Phase phase, Provenance provenance, boolean refined, double coolestK,
             double hottestK, boolean awake, boolean simulated, double environmentK, HeatSourceModel.Source source,
             BlockAppearance appearance, double surfaceK, double sunlightW, boolean built,
-            ThermalShock.Result thermalStress, boolean fractured) {
+            ThermalShock.Result thermalStress, boolean fractured, Frame.Expansion expansion) {
 
         /**
          * Returns the temperature.
@@ -425,6 +435,7 @@ public final class HostedWorld {
     private long phaseChanges;
     private long fractures;
     private boolean thermalShock = true;
+    private boolean thermalExpansion = true;
     private long reconciled;
     private boolean conserved = true;
 
@@ -895,6 +906,21 @@ public final class HostedWorld {
         return m.phaseFractions(m.stateFor(specificEnthalpy))[Phase.SOLID.ordinal()];
     }
 
+    /** Marks every built block of a section to have its structure checked. */
+    private void uncheckBuilt(long sectionKey, Hosted ids) {
+        if (ids.structure != null) {
+            for (int i = 0; i < SectionPos.BLOCKS; i++) {
+                if ((ids.structure[i] & StructureFlags.BUILT) != 0) {
+                    if (ids.unchecked == null) {
+                        ids.unchecked = new BitSet(SectionPos.BLOCKS);
+                    }
+                    ids.unchecked.set(i);
+                    uncheckedSections.add(sectionKey);
+                }
+            }
+        }
+    }
+
     /** Marks a built block to have its structure checked. */
     private void uncheck(GridPos pos) {
         long key = pos.sectionKey();
@@ -927,17 +953,7 @@ public final class HostedWorld {
      * stand on whatever it held.
      */
     private void uncheckImported(long sectionKey, Hosted ids) {
-        if (ids.structure != null) {
-            for (int i = 0; i < SectionPos.BLOCKS; i++) {
-                if ((ids.structure[i] & StructureFlags.BUILT) != 0) {
-                    if (ids.unchecked == null) {
-                        ids.unchecked = new BitSet(SectionPos.BLOCKS);
-                    }
-                    ids.unchecked.set(i);
-                    uncheckedSections.add(sectionKey);
-                }
-            }
-        }
+        uncheckBuilt(sectionKey, ids);
         for (Direction d : DIRECTIONS) {
             long neighbour = SectionPos.offset(sectionKey, d.dx(), d.dy(), d.dz());
             Hosted other = hosted.get(neighbour);
@@ -1247,6 +1263,33 @@ public final class HostedWorld {
     }
 
     /**
+     * Sets whether heat stretches built blocks, loading the joints that hold them in place; it does unless the host
+     * says otherwise. Every built structure waits to be checked again when this changes.
+     *
+     * @param enabled {@code true} to let heat stretch built blocks
+     */
+    public void setThermalExpansion(boolean enabled) {
+        if (enabled == thermalExpansion) {
+            return;
+        }
+        thermalExpansion = enabled;
+        for (Map.Entry<Long, Hosted> e : hosted.entrySet()) {
+            uncheckBuilt(e.getKey(), e.getValue());
+        }
+    }
+
+    /**
+     * Returns the temperature at which the matter of built blocks at a position is free of thermal strain: the
+     * climate of their section, where they were put in place. Warmer, they are longer; colder, shorter.
+     *
+     * @param pos the position
+     * @return the temperature in kelvin
+     */
+    public double unstrainedTemperature(GridPos pos) {
+        return atmosphere.environment(pos.sectionKey());
+    }
+
+    /**
      * Tells whether thermal stress has cracked a block through.
      *
      * @param pos the block
@@ -1274,7 +1317,8 @@ public final class HostedWorld {
      * Reads the structure a built block belongs to, to analyse it. The survey spreads from the block through the
      * built blocks joined to it, nearest first, up to a limit; built blocks beyond the limit, and blocks in sections
      * that are not imported, are taken to hold still. Natural blocks that carry loads are the ground the structure
-     * stands on.
+     * stands on. Heat stretches each built block beyond its length at its section's climate, unless thermal expansion
+     * is switched off.
      *
      * @param pos the built block
      * @param limit the most built blocks to take in
@@ -1293,7 +1337,8 @@ public final class HostedWorld {
         seen.put(pos, first);
         Frame.Builder frame = Frame.builder();
         first.role = Examined.FREE;
-        frame.block(pos, first.mechanics, first.temperatureK, first.solidFraction, first.massKg);
+        frame.block(pos, first.mechanics, first.temperatureK, first.solidFraction, first.massKg,
+                expansion(pos, first.hostId, first.mechanics, first.temperatureK));
         ArrayDeque<GridPos> queue = new ArrayDeque<>();
         queue.add(pos);
         int free = 1;
@@ -1319,7 +1364,8 @@ public final class HostedWorld {
                 if (there.role == Examined.UNSEEN) {
                     if (there.built && there.flags != StructureSurvey.NOT_SIMULATED && free < limit) {
                         there.role = Examined.FREE;
-                        frame.block(q, there.mechanics, there.temperatureK, there.solidFraction, there.massKg);
+                        frame.block(q, there.mechanics, there.temperatureK, there.solidFraction, there.massKg,
+                                expansion(there.pos, there.hostId, there.mechanics, there.temperatureK));
                         queue.add(q);
                         free++;
                     } else if (there.built || there.flags == StructureSurvey.NOT_SIMULATED) {
@@ -1480,7 +1526,10 @@ public final class HostedWorld {
         }
     }
 
-    /** Tells whether a block's strength or stiffness has changed by more than {@link #STRENGTH_DRIFT}. */
+    /**
+     * Tells whether a block's strength or stiffness has changed by more than {@link #STRENGTH_DRIFT}, or, for brittle
+     * matter heat stretches, its thermal strain by more than {@link #EXPANSION_DRIFT} allows.
+     */
     private boolean drifted(Resolved r, Section s, int i, double checkedK, double checkedSolid) {
         Bearing b = bearing(r, s.material(i), s.mass(i), s.enthalpy(i));
         if (b == null) {
@@ -1489,10 +1538,42 @@ public final class HostedWorld {
         Mechanics mechanics = b.mechanics();
         double t = b.temperatureK();
         double solid = b.solidFraction();
+        if (thermalExpansion && mechanics.failure() == Mechanics.Failure.BRITTLE) {
+            double strength = mechanics.tensileStrength(t);
+            double stress = Math.abs(mechanics.thermalStrain(checkedK, t)) * mechanics.youngsModulus(t);
+            if (strength > 0 && stress > EXPANSION_DRIFT * strength) {
+                return true;
+            }
+        }
         return differs(mechanics.tensileStrength(t) * solid, mechanics.tensileStrength(checkedK) * checkedSolid)
                 || differs(mechanics.compressiveStrength(t) * solid,
                         mechanics.compressiveStrength(checkedK) * checkedSolid)
                 || differs(mechanics.youngsModulus(t) * solid, mechanics.youngsModulus(checkedK) * checkedSolid);
+    }
+
+    /**
+     * Works out how far heat has stretched a built block beyond its length at its section's climate, where it was put
+     * in place: from the temperatures of its cells if it is refined, else from its temperature. A block held at its
+     * temperature by a heat source is left as it is, as the source, not physics, sets how warm it is, and so is every
+     * block while thermal expansion is switched off.
+     */
+    private Frame.Expansion expansion(GridPos pos, int hostId, Mechanics mechanics, double temperatureK) {
+        if (!thermalExpansion || sources.sources().containsKey(pos)) {
+            return Frame.Expansion.NONE;
+        }
+        long key = pos.sectionKey();
+        double unstrained = atmosphere.environment(key);
+        int i = pos.indexInSection();
+        Section s = world.section(key);
+        RefinedBlock block = s.refinedBlock(i);
+        if (block != null && resolve(hostId).frame() < 0) {
+            Parts parts = solidParts(block, s.material(i));
+            if (parts.count() > 0) {
+                return ThermalShock.expansion(mechanics, unstrained, pos.x() + 0.5, pos.y() + 0.5, pos.z() + 0.5,
+                        parts.x(), parts.y(), parts.z(), parts.mass(), parts.temperatureK(), parts.count());
+            }
+        }
+        return new Frame.Expansion(mechanics.thermalStrain(unstrained, temperatureK), 0, 0, 0);
     }
 
     private static boolean differs(double a, double b) {
@@ -1634,11 +1715,19 @@ public final class HostedWorld {
         Resolved r = resolve(ids.get(i));
         ThermalShock.Result stress = block == null || r.frame() >= 0 ? null : thermalStress(block, c.material());
         int flags = ids.flags(i);
+        boolean built = (flags & StructureFlags.BUILT) != 0;
+        Frame.Expansion expansion = null;
+        if (built && thermalExpansion) {
+            Section s = world.section(key);
+            Bearing b = bearing(r, s.material(i), s.mass(i), s.enthalpy(i));
+            if (b != null) {
+                expansion = expansion(pos, ids.get(i), b.mechanics(), b.temperatureK());
+            }
+        }
         return Optional.of(new Inspection(pos, registry.id(c.material()), name, c.mass(), c.enthalpy(), state, phase,
                 c.provenance(), block != null, range[0], range[1], activity.isAwake(key), lastScope.contains(key),
                 atmosphere.environment(key), sources.sources().get(pos), r.appearance(), sky.surfaceTemperature(pos),
-                sky.absorbedSunlight(pos), (flags & StructureFlags.BUILT) != 0, stress,
-                (flags & StructureFlags.FRACTURED) != 0));
+                sky.absorbedSunlight(pos), built, stress, (flags & StructureFlags.FRACTURED) != 0, expansion));
     }
 
     /**
@@ -2130,6 +2219,18 @@ public final class HostedWorld {
                 || Double.isNaN(mechanics.toughness())) {
             return null;
         }
+        Parts parts = solidParts(block, material);
+        return ThermalShock.analyse(mechanics, parts.x(), parts.y(), parts.z(), parts.mass(), parts.temperatureK(),
+                parts.count());
+    }
+
+    /** The cells of a refined block that are mostly solid matter of its material: centres, masses, temperatures. */
+    private record Parts(double[] x, double[] y, double[] z, double[] mass, double[] temperatureK, int count) {
+    }
+
+    /** Collects the cells of a refined block that are mostly solid matter of the block's material. */
+    private Parts solidParts(RefinedBlock block, int material) {
+        Material m = world.materials().get(material);
         int n = block.leafCount();
         double[][] parts = new double[5][n];
         int[] count = {0};
@@ -2150,7 +2251,7 @@ public final class HostedWorld {
             parts[3][k] = leaf.mass();
             parts[4][k] = state.temperatureK();
         });
-        return ThermalShock.analyse(mechanics, parts[0], parts[1], parts[2], parts[3], parts[4], count[0]);
+        return new Parts(parts[0], parts[1], parts[2], parts[3], parts[4], count[0]);
     }
 
     /**

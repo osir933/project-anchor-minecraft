@@ -9,6 +9,7 @@ import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
+import io.github.osir933.anchor.core.physics.structure.Frame;
 import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
@@ -219,6 +220,23 @@ class HeatTextTest {
         assertEquals("3 built blocks cracked through by uneven heat", HeatText.thermalShock(true, 3));
         assertEquals("Built blocks do not crack from uneven heat: switched off in Anchor's settings",
                 HeatText.thermalShock(false, 3));
+    }
+
+    @Test
+    void heatThatStretchesABuiltBlockSaysHowFarAndWhereMost() {
+        double climate = 293.15;
+        assertEquals("Heat has made it 0.12 mm longer per metre than at 20.0 °C, the climate here",
+                HeatText.expansion(new Frame.Expansion(1.2e-4, 0, 0, 0), climate));
+        assertEquals("Cold has made it 0.48 mm shorter per metre than at 20.0 °C, the climate here",
+                HeatText.expansion(new Frame.Expansion(-4.8e-4, 0, 0, 0), climate));
+        assertEquals("Heat has made it 0.10 mm longer per metre than at 20.0 °C, the climate here; it is warmest "
+                + "on its west side, which bends it",
+                HeatText.expansion(new Frame.Expansion(1e-4, -4.7e-4, 1e-5, 0), climate));
+        assertEquals("It is warmest on its top side, which bends it",
+                HeatText.expansion(new Frame.Expansion(0, 0, 1e-4, 0), climate));
+        assertNull(HeatText.expansion(Frame.Expansion.NONE, climate), "not stretched");
+        assertNull(HeatText.expansion(new Frame.Expansion(1e-6, 0, 0, 0), climate), "too little to tell");
+        assertNull(HeatText.expansion(null, climate), "not built, or not stretched by heat");
     }
 
     @Test

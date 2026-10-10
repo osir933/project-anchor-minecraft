@@ -159,7 +159,9 @@ final class AnchorGameTests {
             new Case("built_blocks_stay_built_when_a_chunk_loads_again", 400,
                     AnchorGameTests::builtBlocksStayBuiltWhenAChunkLoadsAgain),
             new Case("stone_and_glass_crack_beside_lava", 1200, AnchorGameTests::stoneAndGlassCrackBesideLava,
-                    THERMAL_SHOCK));
+                    THERMAL_SHOCK),
+            new Case("stone_span_cracks_and_falls_when_cooled", 400,
+                    AnchorGameTests::stoneSpanCracksAndFallsWhenCooled));
 
     private AnchorGameTests() {
     }
@@ -1098,6 +1100,46 @@ final class AnchorGameTests {
             helper.assertTrue(is.temperatureK() > floorK + 10.0, "the cobblestone, at "
                     + HeatText.temperature(is.temperatureK()) + ", should have kept the stone's heat; the floor in "
                     + "the corner is at " + HeatText.temperature(floorK));
+        });
+    }
+
+    /**
+     * A span of three stone blocks between two pillars of the world as it was found stands as built, but cooled by
+     * 60 K it would be half a millimetre shorter: held to its length, it is pulled harder than stone can bear, its
+     * joints crack, and with nothing left to hold it up it falls to the floor.
+     */
+    private static void stoneSpanCracksAndFallsWhenCooled(GameTestHelper helper) {
+        List<BlockPos> west = List.of(new BlockPos(0, 1, 2), new BlockPos(0, 2, 2));
+        List<BlockPos> east = List.of(new BlockPos(4, 1, 2), new BlockPos(4, 2, 2));
+        List<BlockPos> span = List.of(new BlockPos(1, 2, 2), new BlockPos(2, 2, 2), new BlockPos(3, 2, 2));
+        boolean[] cooled = {false};
+        buildThenExpect(helper, heat -> {
+            for (List<BlockPos> pillar : List.of(west, east)) {
+                for (BlockPos p : pillar) {
+                    helper.setBlock(p, Blocks.STONE);
+                }
+                heat.setBuilt(helper.absolutePos(pillar.get(0)), helper.absolutePos(pillar.get(1)), false);
+            }
+            for (BlockPos p : span) {
+                helper.setBlock(p, Blocks.STONE);
+            }
+        }, heat -> {
+            if (!cooled[0]) {
+                LevelStructures.Look look = lookAt(helper, heat, span.get(1));
+                helper.assertTrue(look.built() && !look.falls() && look.blocks() == 3,
+                        "the span should stand as built: " + look);
+                double climate = heat.inspect(helper.absolutePos(span.get(1))).orElseThrow(
+                        () -> helper.assertionException(Component.literal("the span is not simulated"))).environmentK();
+                for (BlockPos p : span) {
+                    helper.assertTrue(heat.setTemperature(helper.absolutePos(p), climate - 60.0),
+                            "the span could not be cooled");
+                }
+                cooled[0] = true;
+            }
+            for (BlockPos p : span) {
+                helper.assertBlockPresent(Blocks.AIR, p);
+                helper.assertBlockPresent(Blocks.STONE, p.below());
+            }
         });
     }
 
