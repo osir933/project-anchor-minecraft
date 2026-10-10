@@ -95,6 +95,13 @@ final class AnchorGameTests {
     private static final String EMPTY = "empty";
 
     /**
+     * The structure of tests that build out to five blocks square without touching the barriers the game walls each
+     * test in, which hold up whatever touches them as the world as it was found does: a floor of stone, seven blocks
+     * square.
+     */
+    private static final String WIDE = "wide";
+
+    /**
      * The structure the tests of ready-made experiments are built in: two layers of stone, fifteen blocks wide and five
      * deep, with room for the widest experiment and its bench on top.
      */
@@ -164,7 +171,7 @@ final class AnchorGameTests {
             new Case("stone_span_cracks_and_falls_when_cooled", 400,
                     AnchorGameTests::stoneSpanCracksAndFallsWhenCooled),
             new Case("fence_post_buckles_under_a_wide_iron_roof", 400,
-                    AnchorGameTests::fencePostBucklesUnderAWideIronRoof));
+                    AnchorGameTests::fencePostBucklesUnderAWideIronRoof, HEAT, WIDE));
 
     private AnchorGameTests() {
     }
@@ -1149,18 +1156,19 @@ final class AnchorGameTests {
     /**
      * An oak fence post two blocks tall holds up a roof of iron three blocks square, bowing a little under its 70
      * tonnes, but buckles under one five blocks square, which it could bear standing straight: it gives way at its
-     * foot, and the roof falls to the floor.
+     * foot, and the roof falls to the floor. The floor is wider than most tests', so that the roof does not reach the
+     * barriers around it.
      */
     private static void fencePostBucklesUnderAWideIronRoof(GameTestHelper helper) {
-        BlockPos centre = new BlockPos(2, 3, 2);
-        List<BlockPos> corners = List.of(new BlockPos(0, 3, 0), new BlockPos(4, 3, 0), new BlockPos(0, 3, 4),
-                new BlockPos(4, 3, 4));
+        BlockPos centre = new BlockPos(3, 3, 3);
+        List<BlockPos> corners = List.of(new BlockPos(1, 3, 1), new BlockPos(5, 3, 1), new BlockPos(1, 3, 5),
+                new BlockPos(5, 3, 5));
         String[] widened = {null};
-        buildThenExpect(helper, heat -> {
+        buildThenExpect(helper, 7, heat -> {
             helper.setBlock(centre.below(2), Blocks.OAK_FENCE);
             helper.setBlock(centre.below(), Blocks.OAK_FENCE);
-            for (int x = 1; x <= 3; x++) {
-                for (int z = 1; z <= 3; z++) {
+            for (int x = 2; x <= 4; x++) {
+                for (int z = 2; z <= 4; z++) {
                     helper.setBlock(new BlockPos(x, 3, z), Blocks.IRON_BLOCK);
                 }
             }
@@ -1170,9 +1178,9 @@ final class AnchorGameTests {
                 helper.assertTrue(look.built() && !look.falls() && look.blocks() == 11 && look.buckling() > 1.5
                         && look.buckling() < 4.0, "the small roof should stand, bowing its post a little: "
                         + summary(look));
-                for (int x = 0; x < 5; x++) {
-                    for (int z = 0; z < 5; z++) {
-                        if (x == 0 || x == 4 || z == 0 || z == 4) {
+                for (int x = 1; x <= 5; x++) {
+                    for (int z = 1; z <= 5; z++) {
+                        if (x == 1 || x == 5 || z == 1 || z == 5) {
                             helper.setBlock(new BlockPos(x, 3, z), Blocks.IRON_BLOCK);
                         }
                     }
@@ -1207,8 +1215,14 @@ final class AnchorGameTests {
      * whatever stands on it, builds on it, and succeeds once the check passes.
      */
     private static void buildThenExpect(GameTestHelper helper, Consumer<LevelHeat> build, Consumer<LevelHeat> check) {
+        buildThenExpect(helper, 5, build, check);
+    }
+
+    /** Builds and checks as {@link #buildThenExpect(GameTestHelper, Consumer, Consumer)} does on a wider floor. */
+    private static void buildThenExpect(GameTestHelper helper, int width, Consumer<LevelHeat> build,
+            Consumer<LevelHeat> check) {
         BlockPos corner = helper.absolutePos(BlockPos.ZERO);
-        BlockPos far = helper.absolutePos(new BlockPos(4, 4, 4));
+        BlockPos far = helper.absolutePos(new BlockPos(width - 1, 4, width - 1));
         int[] stage = {0};
         helper.succeedWhen(() -> {
             LevelHeat heat = heat(helper);
@@ -1220,7 +1234,7 @@ final class AnchorGameTests {
                 if (!heat.simulates(corner, far)) {
                     throw helper.assertionException(Component.literal("waiting for the test's space to be simulated"));
                 }
-                heat.setBuilt(corner, helper.absolutePos(new BlockPos(4, 0, 4)), false);
+                heat.setBuilt(corner, helper.absolutePos(new BlockPos(width - 1, 0, width - 1)), false);
                 build.accept(heat);
                 stage[0] = 2;
             }
