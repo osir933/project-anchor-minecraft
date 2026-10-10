@@ -23,6 +23,8 @@ final class AnchorConfig {
     static final ModConfigSpec.IntValue MAX_REFINED_CELLS;
     static final ModConfigSpec.BooleanValue SHOW_PHASE_CHANGES;
     static final ModConfigSpec.BooleanValue SUN_AND_SKY;
+    static final ModConfigSpec.BooleanValue STRUCTURES_ENABLED;
+    static final ModConfigSpec.IntValue STRUCTURE_BLOCKS;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -77,6 +79,18 @@ final class AnchorConfig {
                         + "ones, rain and storms dim the sun and keep the nights mild, and water evaporates into dry "
                         + "air. Laboratory worlds have neither, whatever this says. Takes effect at once.")
                 .define("sunAndSky", true);
+        b.pop();
+        b.comment("Structures: whether what players build stands or falls by the strength of its blocks, where heat "
+                + "is simulated.").push("structures");
+        STRUCTURES_ENABLED = b.comment("Whether built blocks stand or fall by their strength: a block left with "
+                        + "nothing to hold it up falls, and a joint loaded beyond what it can take cracks. The world "
+                        + "as it was found holds still, as do blocks marked with /anchor structure mark. Takes effect "
+                        + "at once.")
+                .define("enabled", true);
+        STRUCTURE_BLOCKS = b.comment("The most built blocks analysed together. A larger structure is analysed around "
+                        + "the change that called for it, with the rest of it held still; larger values are truer "
+                        + "for big buildings and cost more. Takes effect at once.")
+                .defineInRange("maxBlocks", 4096, 64, 65536);
         b.pop();
         SPEC = b.build();
     }

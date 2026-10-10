@@ -319,7 +319,22 @@ final class HeatText {
                     s.restoredBlocks(), s.restoredSections()));
         }
         lines.add("  Energy and mass " + (w.conserved() ? "balanced" : "NOT balanced") + " at the last audit");
+        lines.add("  " + structures(s.structures()));
         return lines;
+    }
+
+    /** Describes in one line what a level's structures have done. */
+    private static String structures(LevelStructures.Report r) {
+        if (r.failure() != null) {
+            return "Structures stopped after an error: " + r.failure();
+        }
+        if (!r.enabled()) {
+            return "Structures do not stand or fall by their strength: switched off in Anchor's settings";
+        }
+        return String.format(Locale.ROOT, "Structures: %d analysed, %d of them in the background%s; the largest had "
+                + "%d blocks, the last took %.1f ms; %d joints cracked and %d blocks fell; %d built blocks wait to be "
+                + "checked", r.analyses(), r.inBackground(), r.analysing() ? ", one now" : "", r.largest(),
+                r.lastMillis(), r.cracks(), r.fallen(), r.waiting());
     }
 
     private static String provenance(Provenance p) {

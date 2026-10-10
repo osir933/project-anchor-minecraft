@@ -11,8 +11,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.stream.IntStream;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.neoforged.neoforge.attachment.IAttachmentHolder;
@@ -20,8 +22,8 @@ import net.neoforged.neoforge.attachment.IAttachmentSerializer;
 import org.slf4j.Logger;
 
 /**
- * The heat Anchor saves with a chunk: for each of its sections where heat changed something, the
- * {@link SectionSnapshot} of the blocks that differ from what the section's blocks would start as. It is
+ * The heat Anchor saves with a chunk: for each of its sections where heat changed something or blocks were built,
+ * the {@link SectionSnapshot} of the blocks that differ from what the section's blocks would start as. It is
  * attached to the chunk, so it is written and read with it. {@link LevelHeat} hands a section's snapshot to the
  * simulation when it brings the section in, and puts a new one here while the section is simulated.
  *
@@ -51,19 +53,25 @@ final class ChunkHeat {
 
     /**
      * One section as it is written: its height, the palette, each saved block packed with its palette index,
-     * and masses and enthalpies as the raw bits of their doubles, so they come back exactly.
+     * masses and enthalpies as the raw bits of their doubles, so they come back exactly, and, if any block was built
+     * or has a cracked joint, each such block packed with its structural flags.
      */
-    private record Stored(int y, List<SectionSnapshot.Entry> palette, int[] blocks, long[] mass, long[] enthalpy) {
+    private record Stored(int y, List<SectionSnapshot.Entry> palette, int[] blocks, long[] mass, long[] enthalpy,
+            Optional<int[]> structure) {
     }
+
+    /** Reads and writes an array of ints as a compact array. */
+    static final Codec<int[]> INTS = Codec.INT_STREAM.xmap(IntStream::toArray, Arrays::stream);
 
     private static final Codec<Stored> STORED = RecordCodecBuilder.create(i -> i.group(
             Codec.INT.fieldOf("y").forGetter(Stored::y),
             ENTRY.listOf().fieldOf("palette").forGetter(Stored::palette),
             Codec.INT_STREAM.fieldOf("blocks").forGetter(s -> Arrays.stream(s.blocks())),
             Codec.LONG_STREAM.fieldOf("mass").forGetter(s -> Arrays.stream(s.mass())),
-            Codec.LONG_STREAM.fieldOf("enthalpy").forGetter(s -> Arrays.stream(s.enthalpy())))
-            .apply(i, (y, palette, blocks, mass, enthalpy) -> new Stored(y, palette, blocks.toArray(),
-                    mass.toArray(), enthalpy.toArray())));
+            Codec.LONG_STREAM.fieldOf("enthalpy").forGetter(s -> Arrays.stream(s.enthalpy())),
+            INTS.optionalFieldOf("structure").forGetter(Stored::structure))
+            .apply(i, (y, palette, blocks, mass, enthalpy, structure) -> new Stored(y, palette, blocks.toArray(),
+                    mass.toArray(), enthalpy.toArray(), structure)));
 
     /** Reads and writes a chunk's saved heat as a list of sections. */
     static final Codec<ChunkHeat> CODEC = STORED.listOf().comapFlatMap(ChunkHeat::fromStored, ChunkHeat::toStored);
@@ -194,8 +202,15 @@ final class ChunkHeat {
                 mass[k] = Double.longBitsToDouble(s.mass()[k]);
                 enthalpy[k] = Double.longBitsToDouble(s.enthalpy()[k]);
             }
+            int[] structure = s.structure().orElse(new int[0]);
+            int[] built = new int[structure.length];
+            byte[] flags = new byte[structure.length];
+            for (int k = 0; k < structure.length; k++) {
+                built[k] = structure[k] & INDEX_MASK;
+                flags[k] = (byte) (structure[k] >>> INDEX_BITS);
+            }
             try {
-                sections.put(s.y(), new SectionSnapshot(s.palette(), blocks, entries, mass, enthalpy));
+                sections.put(s.y(), new SectionSnapshot(s.palette(), blocks, entries, mass, enthalpy, built, flags));
             } catch (IllegalArgumentException e) {
                 return DataResult.error(() -> "section " + s.y() + ": " + e.getMessage());
             }
@@ -216,7 +231,14 @@ final class ChunkHeat {
                 mass[k] = Double.doubleToRawLongBits(s.mass(k));
                 enthalpy[k] = Double.doubleToRawLongBits(s.enthalpy(k));
             }
-            stored.add(new Stored(e.getKey(), s.palette(), blocks, mass, enthalpy));
+            int[] built = s.structureBlocks();
+            byte[] flags = s.structureFlags();
+            int[] structure = new int[built.length];
+            for (int k = 0; k < structure.length; k++) {
+                structure[k] = built[k] | (flags[k] & 0xFF) << INDEX_BITS;
+            }
+            stored.add(new Stored(e.getKey(), s.palette(), blocks, mass, enthalpy,
+                    structure.length == 0 ? Optional.empty() : Optional.of(structure)));
         }
         return stored;
     }

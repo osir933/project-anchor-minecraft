@@ -31,6 +31,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.IntUnaryOperator;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -84,6 +85,9 @@ final class LevelHeat {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
+    /** How far from where it grows, in blocks, a growing feature such as a tree puts in natural blocks. */
+    private static final int GROWTH_REACH = 16;
+
     /** The most block changes taken in per game tick; the rest wait for the next tick. */
     private static final int CHANGES_PER_TICK = 4096;
 
@@ -125,7 +129,13 @@ final class LevelHeat {
      * its sun and moon, unlike the Nether and the End, and is not a laboratory.
      */
     private final boolean hasSun;
+    private final LevelStructures structures;
     private final TreeSet<Long> changed = new TreeSet<>();
+    /** Changed blocks the game put in itself, as growing things and flowing lava do, which are natural. */
+    private final TreeSet<Long> natural = new TreeSet<>();
+    /** The blocks features are growing from in the game tick {@link #growingTick}. */
+    private final TreeSet<Long> growingFrom = new TreeSet<>();
+    private long growingTick = Long.MIN_VALUE;
     private final TreeMap<Long, Integer> pinned = new TreeMap<>();
     private final ArrayDeque<PhaseChange> toShow = new ArrayDeque<>();
     private final TreeMap<String, Optional<BlockState>> replacements = new TreeMap<>();
@@ -170,6 +180,7 @@ final class LevelHeat {
                 ThermalActivity.DEFAULT_CALM_STEPS, AUDIT_INTERVAL, refinement);
         this.hosted = new HostedWorld(world, mapper::forStateId, settings);
         this.glow = new GlowSender(level, hosted);
+        this.structures = new LevelStructures(level, hosted);
         this.planner = new ImportPlanner(AnchorConfig.get(AnchorConfig.RADIUS),
                 AnchorConfig.get(AnchorConfig.VERTICAL_RADIUS), MARGIN);
         DimensionType type = level.dimensionType();
@@ -214,6 +225,8 @@ final class LevelHeat {
             step();
             drawCharts(pacer.stepsThisTick() > 0);
             followAhead();
+            // Structures stand or fall at the game's pace, paused heat or not.
+            structures.tick();
         } catch (RuntimeException e) {
             stop(e);
         }
@@ -255,6 +268,124 @@ final class LevelHeat {
     void blockChanged(BlockPos pos) {
         if (failure == null && hosted.isImported(sectionKey(pos))) {
             changed.add(pos.asLong());
+            if (growingTick == level.getGameTime() && nearGrowth(pos)) {
+                natural.add(pos.asLong());
+            }
+        }
+    }
+
+    /**
+     * Notes that a feature, such as a tree, grows from a block in this game tick, so that the blocks it puts in are
+     * natural, like the trees the world was made with, rather than built.
+     *
+     * @param origin the block it grows from
+     */
+    void featureGrowing(BlockPos origin) {
+        long now = level.getGameTime();
+        if (growingTick != now) {
+            growingFrom.clear();
+            growingTick = now;
+        }
+        growingFrom.add(origin.asLong());
+    }
+
+    /**
+     * Notes that a plant grew at a block, so that what it grew there or next to it, such as cactus, sugar cane,
+     * bamboo or chorus, is natural.
+     *
+     * @param pos where it grew
+     */
+    void grownAround(BlockPos pos) {
+        grown(pos);
+        grown(pos.above(2));
+        for (Direction d : Direction.values()) {
+            grown(pos.relative(d));
+        }
+    }
+
+    /**
+     * Notes that the game itself puts a block in, as lava meeting water does, so that it is natural.
+     *
+     * @param pos the block
+     */
+    void grown(BlockPos pos) {
+        if (failure == null && hosted.isImported(sectionKey(pos))) {
+            natural.add(pos.asLong());
+        }
+    }
+
+    /** Tells whether a block lies where a feature growing this tick may reach: a tall tree's height above it. */
+    private boolean nearGrowth(BlockPos pos) {
+        for (long from : growingFrom) {
+            BlockPos origin = BlockPos.of(from);
+            int dy = pos.getY() - origin.getY();
+            if (Math.abs(pos.getX() - origin.getX()) <= GROWTH_REACH && Math.abs(pos.getZ() - origin.getZ())
+                    <= GROWTH_REACH && dy >= -GROWTH_REACH / 2 && dy <= 3 * GROWTH_REACH) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Makes the blocks of a box built, so that they stand or fall by their strength, or natural, so that they hold
+     * still whatever happens around them. Blocks of sections that are not simulated are left as they are; they come
+     * in natural.
+     *
+     * @param min the box's lowest corner
+     * @param max the box's highest corner
+     * @param built {@code true} for built, {@code false} for natural
+     * @return how many blocks changed
+     */
+    int setBuilt(BlockPos min, BlockPos max, boolean built) {
+        if (failure != null) {
+            return 0;
+        }
+        try {
+            // The box's blocks are taken in first, so that a block placed this tick is the one marked.
+            for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+                if (changed.remove(pos.asLong())) {
+                    takeIn(pos);
+                }
+            }
+            int count = 0;
+            for (int sx = min.getX() >> 4; sx <= max.getX() >> 4; sx++) {
+                for (int sy = min.getY() >> 4; sy <= max.getY() >> 4; sy++) {
+                    for (int sz = min.getZ() >> 4; sz <= max.getZ() >> 4; sz++) {
+                        if (!hosted.isImported(SectionPos.pack(sx, sy, sz))) {
+                            continue;
+                        }
+                        GridPos from = new GridPos(Math.max(min.getX(), sx << 4), Math.max(min.getY(), sy << 4),
+                                Math.max(min.getZ(), sz << 4));
+                        GridPos to = new GridPos(Math.min(max.getX(), (sx << 4) + 15),
+                                Math.min(max.getY(), (sy << 4) + 15), Math.min(max.getZ(), (sz << 4) + 15));
+                        count += hosted.setBuilt(from, to, built);
+                    }
+                }
+            }
+            return count;
+        } catch (RuntimeException e) {
+            stop(e);
+            return 0;
+        }
+    }
+
+    /**
+     * Looks at the structure of a block, after taking in every change waiting.
+     *
+     * @param pos the block
+     * @return what was found, or empty if the block is not simulated or heat has stopped
+     */
+    Optional<LevelStructures.Look> lookAtStructure(BlockPos pos) {
+        if (failure != null) {
+            return Optional.empty();
+        }
+        try {
+            takeInChanges();
+            return structures.look(pos);
+        } catch (RuntimeException e) {
+            stop(e);
+            return Optional.empty();
         }
     }
 
@@ -533,7 +664,8 @@ final class LevelHeat {
      */
     HeatReport report() {
         return new HeatReport(hosted.status(), hosted.settings().tickSeconds(), lastStepMillis, averageStepMillis,
-                shown, restoredBlocks, restoredSections, failure, pacer.status(), ticksPerStep, laboratory);
+                shown, restoredBlocks, restoredSections, failure, pacer.status(), ticksPerStep, laboratory,
+                structures.report());
     }
 
     /**
@@ -616,9 +748,10 @@ final class LevelHeat {
         return dropped;
     }
 
-    /** Lets go of what the level shows players, for when the level is unloaded. */
+    /** Lets go of what the level shows players and the structures being analysed, for when the level is unloaded. */
     void close() {
         hideAhead(false);
+        structures.drop();
     }
 
     /**
@@ -627,8 +760,18 @@ final class LevelHeat {
      */
     private void takeInNow(BlockPos pos) {
         changed.remove(pos.asLong());
+        takeIn(pos);
+    }
+
+    /** Takes in a block as it is now, natural if the game itself put it in. */
+    private void takeIn(BlockPos pos) {
+        boolean grown = natural.remove(pos.asLong());
         if (hosted.isImported(sectionKey(pos)) && level.isLoaded(pos)) {
-            hosted.reconcile(grid(pos), Block.getId(level.getBlockState(pos)), Double.NaN);
+            GridPos at = grid(pos);
+            hosted.reconcile(at, Block.getId(level.getBlockState(pos)), Double.NaN);
+            if (grown) {
+                hosted.setBuilt(at, at, false);
+            }
             followSkyHeight(pos);
         }
     }
@@ -641,11 +784,11 @@ final class LevelHeat {
     /** Takes in the blocks that changed since the last tick. */
     private void takeInChanges() {
         for (int n = 0; n < CHANGES_PER_TICK && !changed.isEmpty(); n++) {
-            BlockPos pos = BlockPos.of(changed.pollFirst());
-            if (level.isLoaded(pos)) {
-                hosted.reconcile(grid(pos), Block.getId(level.getBlockState(pos)), Double.NaN);
-                followSkyHeight(pos);
-            }
+            takeIn(BlockPos.of(changed.pollFirst()));
+        }
+        // What the game was about to put in, but did not after all, is forgotten.
+        if (!natural.isEmpty()) {
+            natural.retainAll(changed);
         }
     }
 
@@ -953,7 +1096,9 @@ final class LevelHeat {
     private void stop(RuntimeException e) {
         failure = e.toString();
         changed.clear();
+        natural.clear();
         toShow.clear();
+        structures.drop();
         LOGGER.error("Anchor: heat in {} stopped after an error; it starts again when the world is next loaded",
                 level.dimension().identifier(), e);
         hideAhead(false);

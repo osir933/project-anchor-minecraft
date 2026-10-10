@@ -67,7 +67,8 @@ final class MaterialGuess {
 
     private static final List<Rule> RULES = List.of(
             new Rule("anchor:copper", "copper"),
-            new Rule("anchor:iron", "iron", "steel", "anvil", "netherite", "cauldron", "hopper"),
+            new Rule("anchor:iron", "iron", "steel", "anvil", "netherite", "cauldron", "hopper", "chain", "bars",
+                    "lantern"),
             new Rule("anchor:gold", "gold", "golden"),
             new Rule("anchor:aluminium", "aluminum", "aluminium"),
             new Rule("anchor:diamond", "diamond"),

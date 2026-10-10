@@ -481,6 +481,8 @@ final class Experiments {
                     at.getX() + " " + at.getY() + " " + at.getZ()));
         }
         place(level, plan, frame, min, max);
+        // The apparatus holds still as it is laid out, however it is held up: rods standing in lava, blocks in the air.
+        heat.setBuilt(min, max, false);
         List<Component> problems = new ArrayList<>();
         for (Map.Entry<Spot, Double> start : plan.temperatures.entrySet()) {
             Spot s = start.getKey();

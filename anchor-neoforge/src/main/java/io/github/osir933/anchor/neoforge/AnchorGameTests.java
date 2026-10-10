@@ -143,7 +143,12 @@ final class AnchorGameTests {
             Case.experiment("experiment_cooling", 1000, AnchorGameTests::experimentCooling),
             Case.experiment("experiment_conduction", 3500, AnchorGameTests::experimentConduction),
             Case.experiment("experiment_melting", 5000, AnchorGameTests::experimentMelting),
-            Case.experiment("experiment_insulation", 2000, AnchorGameTests::experimentInsulation));
+            Case.experiment("experiment_insulation", 2000, AnchorGameTests::experimentInsulation),
+            new Case("unsupported_block_falls", 400, AnchorGameTests::unsupportedBlockFalls),
+            new Case("fence_holds_up_a_block", 400, AnchorGameTests::fenceHoldsUpABlock),
+            new Case("pillar_falls_when_its_foot_is_taken", 400, AnchorGameTests::pillarFallsWhenItsFootIsTaken),
+            new Case("built_blocks_stay_built_when_a_chunk_loads_again", 400,
+                    AnchorGameTests::builtBlocksStayBuiltWhenAChunkLoadsAgain));
 
     private AnchorGameTests() {
     }
@@ -309,7 +314,8 @@ final class AnchorGameTests {
                 new SectionSnapshot.Entry("anchor:iron", 42L, Provenance.INITIAL));
         ChunkHeat heat = new ChunkHeat();
         heat.put(-4, new SectionSnapshot(palette, new int[] {0, 17, 4095}, new int[] {1, 0, 0},
-                new double[] {7874.0, 1.2041, 0.0}, new double[] {1.0e9 / 3, -12_345.678_9, 0.0}));
+                new double[] {7874.0, 1.2041, 0.0}, new double[] {1.0e9 / 3, -12_345.678_9, 0.0},
+                new int[] {17, 300}, new byte[] {1, 1 | 4}));
         heat.put(5, new SectionSnapshot(palette.subList(0, 1), new int[] {100}, new int[] {0},
                 new double[] {1.1}, new double[] {Math.nextUp(-3000.0)}));
         Tag tag = ChunkHeat.CODEC.encodeStart(NbtOps.INSTANCE, heat).getOrThrow();
@@ -973,6 +979,107 @@ final class AnchorGameTests {
     }
 
     /** Builds a one-block pool of still water in stone and returns where the water is. */
+    /** A stone block put up in the air falls, and lands on the floor. */
+    private static void unsupportedBlockFalls(GameTestHelper helper) {
+        BlockPos floating = new BlockPos(2, 3, 2);
+        BlockPos landing = new BlockPos(2, 1, 2);
+        buildThenExpect(helper, heat -> helper.setBlock(floating, Blocks.STONE), heat -> {
+            helper.assertBlockPresent(Blocks.AIR, floating);
+            helper.assertBlockPresent(Blocks.STONE, landing);
+        });
+    }
+
+    /**
+     * A fence counts as the air around it for heat, but its post holds up a stone put on it, which stays where it is
+     * while its structure is checked again and again.
+     */
+    private static void fenceHoldsUpABlock(GameTestHelper helper) {
+        BlockPos fence = new BlockPos(2, 1, 2);
+        BlockPos top = new BlockPos(2, 2, 2);
+        long[] builtAt = {0};
+        buildThenExpect(helper, heat -> {
+            helper.setBlock(fence, Blocks.OAK_FENCE);
+            helper.setBlock(top, Blocks.STONE);
+            builtAt[0] = helper.getTick();
+        }, heat -> {
+            helper.assertBlockPresent(Blocks.STONE, top);
+            LevelStructures.Look look = lookAt(helper, heat, top);
+            helper.assertTrue(look.built() && !look.falls() && look.blocks() == 2,
+                    "the stone on the fence should be built and stand with it: " + look);
+            if (helper.getTick() - builtAt[0] < 40) {
+                throw helper.assertionException(Component.literal("waiting to see the stone stay up"));
+            }
+        });
+    }
+
+    /** Taking the foot out of a pillar of three built blocks lets the two above fall into its place. */
+    private static void pillarFallsWhenItsFootIsTaken(GameTestHelper helper) {
+        BlockPos foot = new BlockPos(2, 1, 2);
+        BlockPos middle = foot.above();
+        BlockPos top = middle.above();
+        boolean[] taken = {false};
+        buildThenExpect(helper, heat -> {
+            for (BlockPos p : List.of(foot, middle, top)) {
+                helper.setBlock(p, Blocks.COBBLESTONE);
+            }
+        }, heat -> {
+            if (!taken[0]) {
+                LevelStructures.Look look = lookAt(helper, heat, top);
+                helper.assertTrue(look.built() && !look.falls() && look.blocks() == 3,
+                        "the pillar should be built and stand: " + look);
+                helper.setBlock(foot, Blocks.AIR);
+                taken[0] = true;
+            }
+            helper.assertBlockPresent(Blocks.COBBLESTONE, foot);
+            helper.assertBlockPresent(Blocks.COBBLESTONE, middle);
+            helper.assertBlockPresent(Blocks.AIR, top);
+        });
+    }
+
+    /** Which blocks are built is saved with their chunk and comes back with it. */
+    private static void builtBlocksStayBuiltWhenAChunkLoadsAgain(GameTestHelper helper) {
+        BlockPos placed = new BlockPos(2, 1, 2);
+        buildThenExpect(helper, heat -> helper.setBlock(placed, Blocks.STONE), heat -> {
+            helper.assertTrue(lookAt(helper, heat, placed).built(), "the placed stone is not built");
+            helper.assertTrue(heat.reloadSection(helper.absolutePos(placed)), "its section could not be reloaded");
+            helper.assertTrue(lookAt(helper, heat, placed).built(), "the stone came back natural");
+            helper.assertTrue(!lookAt(helper, heat, placed.below()).built(), "the floor came back built");
+        });
+    }
+
+    /**
+     * Keeps a test's space simulated and, once the simulation has it, marks its floor natural so that it holds up
+     * whatever stands on it, builds on it, and succeeds once the check passes.
+     */
+    private static void buildThenExpect(GameTestHelper helper, Consumer<LevelHeat> build, Consumer<LevelHeat> check) {
+        BlockPos corner = helper.absolutePos(BlockPos.ZERO);
+        BlockPos far = helper.absolutePos(new BlockPos(4, 4, 4));
+        int[] stage = {0};
+        helper.succeedWhen(() -> {
+            LevelHeat heat = heat(helper);
+            if (stage[0] == 0) {
+                heat.keepSimulated(corner);
+                stage[0] = 1;
+            }
+            if (stage[0] == 1) {
+                if (!heat.simulates(corner, far)) {
+                    throw helper.assertionException(Component.literal("waiting for the test's space to be simulated"));
+                }
+                heat.setBuilt(corner, helper.absolutePos(new BlockPos(4, 0, 4)), false);
+                build.accept(heat);
+                stage[0] = 2;
+            }
+            check.accept(heat);
+            heat.release(corner);
+        });
+    }
+
+    /** Looks at the structure of a block of a test. */
+    private static LevelStructures.Look lookAt(GameTestHelper helper, LevelHeat heat, BlockPos relative) {
+        return heat.lookAtStructure(helper.absolutePos(relative)).orElseThrow(
+                () -> helper.assertionException(Component.literal(relative + " is not simulated")));
+    }
+
     private static BlockPos pool(GameTestHelper helper) {
         BlockPos water = new BlockPos(2, 1, 2);
         for (BlockPos wall : List.of(water.north(), water.south(), water.east(), water.west())) {

@@ -3,8 +3,10 @@ package io.github.osir933.anchor.neoforge;
 import com.mojang.logging.LogUtils;
 import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.matter.Phase;
+import io.github.osir933.anchor.core.physics.structure.Shape;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.world.MaterialRegistry;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.TreeSet;
 import net.minecraft.core.BlockPos;
@@ -37,6 +39,13 @@ import org.slf4j.Logger;
  * <p>Where a guessed block's look says more about the sunlight it takes in than its material does, its appearance
  * carries an albedo: the grass on a grass block, and the colour of wool, concrete and terracotta, from the colour
  * the block has on maps.
+ *
+ * <p>Every block's {@linkplain Shape shape}, where it touches its neighbours and so passes loads to them, is its
+ * collision shape, with gaps of up to an eighth of a block at its faces closed, so that a chest's lid or soul sand
+ * holds up what stands on it. Blocks without one, such as water, flowers and a single layer of snow, carry nothing.
+ * Thin blocks that count as the air around them carry loads in a frame of their guessed material, as a fence's wood
+ * or a pane's glass does, and blocks the game makes unbreakable, such as bedrock and barriers, hold still wherever
+ * they are put.
  */
 final class BlockMapper {
 
@@ -44,6 +53,15 @@ final class BlockMapper {
 
     /** Blocks filling less than this fraction of their space count as the air or water around them. */
     static final double THIN = 0.2;
+
+    /** Collision boxes this close to a face of their block, as a fraction of a block, count as reaching it. */
+    static final double REACH = 2.0 / 16.0;
+
+    /** How far a collision box's side may be off a sixteenth of a block from rounding. */
+    private static final double ROUNDING = 1e-6;
+
+    /** A collision shape of more boxes than this counts as the box around them all. */
+    private static final int MAX_BOXES = 32;
 
     /** The share of sunlight the grass on a grass block reflects, that of a short green crop. */
     static final double GRASS_ALBEDO = 0.23;
@@ -131,13 +149,11 @@ final class BlockMapper {
             return AIR;
         }
         MaterialEntry entry = state.typeHolder().getData(AnchorDataMaps.MATERIALS);
-        if (entry != null) {
-            BlockAppearance listed = listed(state, entry);
-            if (listed != null) {
-                return listed;
-            }
+        BlockAppearance a = entry == null ? null : listed(state, entry);
+        if (a == null) {
+            a = builtIn(state);
         }
-        return builtIn(state);
+        return unbreakable(state) ? a.asImmovable() : a;
     }
 
     /** Forgets which blocks have been warned about, for when data packs are reloaded. */
@@ -158,7 +174,7 @@ final class BlockMapper {
             if (fill <= 0.0) {
                 return lit(state, AIR, source);
             }
-            BlockAppearance a = BlockAppearance.of(e.material()).withFill(Math.min(1.0, fill));
+            BlockAppearance a = BlockAppearance.of(e.material()).withFill(Math.min(1.0, fill)).withShape(shape(state));
             if (e.phase().isPresent()) {
                 a = a.shownAs(e.phase().get());
             }
@@ -180,50 +196,50 @@ final class BlockMapper {
     }
 
     /** Describes a block the data map does not list. */
-    private static BlockAppearance builtIn(BlockState state) {
+    private BlockAppearance builtIn(BlockState state) {
         Block block = state.getBlock();
         FluidState fluid = state.getFluidState();
+        Shape shape = shape(state);
         if (isFluidBlock(state) && !fluid.isEmpty()) {
-            return fluid(fluid);
+            return fluid(fluid).withShape(shape);
         }
         if (block == Blocks.ICE || block == Blocks.PACKED_ICE || block == Blocks.BLUE_ICE
                 || block == Blocks.FROSTED_ICE) {
             return ICE;
         }
         if (block == Blocks.SNOW) {
-            return SNOW_LAYER.withFill(layers(state));
+            return SNOW_LAYER.withFill(layers(state)).withShape(shape);
         }
         if (block == Blocks.SNOW_BLOCK) {
             return SNOW_BLOCK;
         }
         if (block == Blocks.POWDER_SNOW) {
-            return SNOW_LAYER;
+            return SNOW_LAYER.withShape(shape);
         }
         if (block == Blocks.MAGMA_BLOCK) {
             return MAGMA_LOOK;
         }
         Holder<Block> holder = state.typeHolder();
         if (holder.is(BlockTags.FIRE)) {
-            return AIR.heatedBy(FIRE);
+            return AIR.heatedBy(FIRE).withShape(shape);
         }
         if (holder.is(BlockTags.CAMPFIRES)) {
-            return lit(state, AIR, CAMPFIRE);
+            return lit(state, AIR, CAMPFIRE).withShape(shape);
         }
         if (holder.is(BlockTags.CANDLES)) {
-            return lit(state, AIR, CANDLE);
+            return lit(state, AIR, CANDLE).withShape(shape);
         }
         String path = BuiltInRegistries.BLOCK.getKey(block).getPath();
         List<String> words = List.of(path.split("_"));
         double fill = fill(state);
         if (fill < THIN) {
-            if (!fluid.isEmpty()) {
-                // Kelp, seagrass and waterlogged fences are the water they stand in.
-                return fluid(fluid).withoutReplacements();
-            }
-            return lit(state, AIR, thinSource(words));
+            // Kelp, seagrass and waterlogged fences are the water they stand in, and other thin blocks the air.
+            BlockAppearance around = fluid.isEmpty() ? lit(state, AIR, thinSource(words))
+                    : fluid(fluid).withoutReplacements();
+            return framed(around.withShape(shape), state, path);
         }
         MaterialGuess.Guess guess = MaterialGuess.fromName(path).orElseGet(() -> bySound(state, path));
-        BlockAppearance a = BlockAppearance.of(guess.material()).withFill(fill);
+        BlockAppearance a = BlockAppearance.of(guess.material()).withFill(fill).withShape(shape);
         if (guess.phase() != null) {
             a = a.shownAs(guess.phase());
         }
@@ -236,6 +252,72 @@ final class BlockMapper {
         boolean furnace = words.contains("furnace") || words.contains("smoker") || words.contains("kiln")
                 || words.contains("oven");
         return furnace && state.hasProperty(BlockStateProperties.LIT) ? lit(state, a, FURNACE) : a;
+    }
+
+    /**
+     * Gives a thin block that counts as its surroundings a frame of its guessed material to carry loads in, if it
+     * touches anything and that material has mechanics.
+     */
+    private BlockAppearance framed(BlockAppearance around, BlockState state, String path) {
+        if (!around.shape().reachesAFace()) {
+            return around;
+        }
+        String material = MaterialGuess.fromName(path).orElseGet(() -> bySound(state, path)).material();
+        int index = materials.indexOf(material);
+        return index >= 0 && materials.get(index).mechanics() != null ? around.framedIn(material) : around;
+    }
+
+    /** Tells whether the game lets nobody break a block, as with bedrock and barriers. */
+    private static boolean unbreakable(BlockState state) {
+        try {
+            return state.getDestroySpeed(EmptyBlockGetter.INSTANCE, BlockPos.ZERO) < 0;
+        } catch (RuntimeException needsTheWorld) {
+            return false;
+        }
+    }
+
+    /**
+     * Returns the solid part of a block: its collision shape inside its own space, with gaps of up to {@link #REACH}
+     * at its faces closed, or no shape at all for a block nothing collides with.
+     */
+    static Shape shape(BlockState state) {
+        try {
+            if (state.isCollisionShapeFullBlock(EmptyBlockGetter.INSTANCE, BlockPos.ZERO)) {
+                return Shape.FULL;
+            }
+            VoxelShape shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO);
+            if (shape.isEmpty()) {
+                return Shape.NONE;
+            }
+            List<double[]> boxes = new ArrayList<>();
+            double[] around = {Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE, -Double.MAX_VALUE,
+                -Double.MAX_VALUE, -Double.MAX_VALUE};
+            shape.forAllBoxes((x1, y1, z1, x2, y2, z2) -> {
+                double[] box = {x1, y1, z1, x2, y2, z2};
+                boxes.add(box);
+                for (int a = 0; a < 3; a++) {
+                    around[a] = Math.min(around[a], box[a]);
+                    around[a + 3] = Math.max(around[a + 3], box[a + 3]);
+                }
+            });
+            List<double[]> kept = boxes.size() > MAX_BOXES ? List.of(around) : boxes;
+            double[] packed = new double[6 * kept.size()];
+            for (int b = 0; b < kept.size(); b++) {
+                for (int a = 0; a < 3; a++) {
+                    double low = kept.get(b)[a];
+                    double high = kept.get(b)[a + 3];
+                    packed[6 * b + a] = low <= REACH + ROUNDING ? Math.min(low, 0.0) : low;
+                    packed[6 * b + a + 3] = high >= 1.0 - REACH - ROUNDING ? Math.max(high, 1.0) : high;
+                }
+            }
+            return Shape.of(packed);
+        } catch (IllegalArgumentException outside) {
+            // Every box lies outside the block, as for a block that only reaches into its neighbours.
+            return Shape.NONE;
+        } catch (RuntimeException needsTheWorld) {
+            // Some blocks work out their shape from the blocks around them; count them as whole.
+            return Shape.FULL;
+        }
     }
 
     /**
