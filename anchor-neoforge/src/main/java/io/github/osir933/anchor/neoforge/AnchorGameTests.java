@@ -9,6 +9,7 @@ import io.github.osir933.anchor.core.instrument.ChartImage;
 import io.github.osir933.anchor.core.instrument.ProbeSet;
 import io.github.osir933.anchor.core.instrument.TimeSeries;
 import io.github.osir933.anchor.core.instrument.TimeSeriesCsv;
+import io.github.osir933.anchor.core.physics.structure.StructuralAnalysis;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
 import io.github.osir933.anchor.core.space.CellId;
 import io.github.osir933.anchor.core.space.Direction;
@@ -1154,7 +1155,7 @@ final class AnchorGameTests {
         BlockPos centre = new BlockPos(2, 3, 2);
         List<BlockPos> corners = List.of(new BlockPos(0, 3, 0), new BlockPos(4, 3, 0), new BlockPos(0, 3, 4),
                 new BlockPos(4, 3, 4));
-        boolean[] widened = {false};
+        String[] widened = {null};
         buildThenExpect(helper, heat -> {
             helper.setBlock(centre.below(2), Blocks.OAK_FENCE);
             helper.setBlock(centre.below(), Blocks.OAK_FENCE);
@@ -1164,10 +1165,11 @@ final class AnchorGameTests {
                 }
             }
         }, heat -> {
-            if (!widened[0]) {
+            if (widened[0] == null) {
                 LevelStructures.Look look = lookAt(helper, heat, centre);
                 helper.assertTrue(look.built() && !look.falls() && look.blocks() == 11 && look.buckling() > 1.5
-                        && look.buckling() < 4.0, "the small roof should stand, bowing its post a little: " + look);
+                        && look.buckling() < 4.0, "the small roof should stand, bowing its post a little: "
+                        + summary(look));
                 for (int x = 0; x < 5; x++) {
                     for (int z = 0; z < 5; z++) {
                         if (x == 0 || x == 4 || z == 0 || z == 4) {
@@ -1175,13 +1177,29 @@ final class AnchorGameTests {
                         }
                     }
                 }
-                widened[0] = true;
+                widened[0] = "widened at tick " + helper.getTick() + " from " + summary(look);
             }
             for (BlockPos p : corners) {
-                helper.assertBlockPresent(Blocks.AIR, p);
-                helper.assertBlockPresent(Blocks.IRON_BLOCK, p.below(2));
+                if (!helper.getBlockState(p).isAir() || !helper.getBlockState(p.below(2)).is(Blocks.IRON_BLOCK)) {
+                    LevelStructures.Look now = lookAt(helper, heat, centre);
+                    boolean built = heat.inspect(helper.absolutePos(p)).map(HostedWorld.Inspection::built)
+                            .orElse(false);
+                    throw helper.assertionException(Component.literal("the wide roof should have fallen by tick "
+                            + helper.getTick() + "; " + widened[0] + "; now " + summary(now) + ", its corner "
+                            + (built ? "built" : "not built") + ", " + heat.report().structures()));
+                }
             }
         });
+    }
+
+    /** Sums up a look at a structure for a test's messages. */
+    private static String summary(LevelStructures.Look look) {
+        StructuralAnalysis.BondResult worst = look.worst();
+        return String.format(Locale.ROOT, "%s, %d blocks, %s, %d falling, buckling at %.3f, worst joint %s",
+                look.built() ? "built" : "natural", look.blocks(), look.falls() ? "falls" : "stands",
+                look.falling(), look.buckling(), worst == null ? "none"
+                        : String.format(Locale.ROOT, "%s/%d %s %.3f (straight %.3f)", worst.pos(), worst.axis(),
+                                worst.mode(), worst.load(), worst.unbowed()));
     }
 
     /**
