@@ -24,8 +24,8 @@ import net.minecraft.world.phys.HitResult;
  * The {@code /anchor structure} commands:
  * <ul>
  *   <li>{@code /anchor structure inspect} tells whether the block being looked at is built or natural, which of its
- *   joints have cracked and, for a built block, how loaded its structure is now; operators can name any block with
- *   {@code /anchor structure inspect <pos>};</li>
+ *   joints have cracked, how close uneven heat comes to cracking it through and, for a built block, how loaded its
+ *   structure is now; operators can name any block with {@code /anchor structure inspect <pos>};</li>
  *   <li>{@code /anchor structure mark <from> <to> built|natural} lets operators make a box of blocks built, so that
  *   it stands or falls by its strength, or natural, so that it holds still whatever happens around it.</li>
  * </ul>
@@ -157,6 +157,11 @@ final class StructureCommands {
             if (!look.settled()) {
                 lines.add("  The analysis did not come to rest: more of it may give way");
             }
+        }
+        String strain = HeatText.thermalStress(look.thermalStress(), look.built(), look.fractured(),
+                look.thermalShock());
+        if (strain != null) {
+            lines.add("  " + strain);
         }
         if (!look.crackedToward().isEmpty()) {
             List<String> names = new ArrayList<>();

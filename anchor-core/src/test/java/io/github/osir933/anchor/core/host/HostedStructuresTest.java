@@ -520,7 +520,7 @@ class HostedStructuresTest {
         assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, noBlocks, noBlocks, none,
                 none, new int[] {3}, new byte[] {0}), "no flags");
         assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, noBlocks, noBlocks, none,
-                none, new int[] {3}, new byte[] {16}), "unknown flags");
+                none, new int[] {3}, new byte[] {32}), "unknown flags");
         assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, noBlocks, noBlocks, none,
                 none, new int[] {5, 3}, new byte[] {1, 1}), "out of order");
         assertThrows(IllegalArgumentException.class, () -> new SectionSnapshot(palette, noBlocks, noBlocks, none,

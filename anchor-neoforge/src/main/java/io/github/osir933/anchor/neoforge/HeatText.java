@@ -4,6 +4,7 @@ import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
+import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.world.Provenance;
 import java.math.BigDecimal;
@@ -150,9 +151,10 @@ final class HeatText {
      *
      * @param i the inspection
      * @param blockName the host's name for the block
+     * @param thermalShock whether built blocks crack through when uneven heat strains them past their strength
      * @return the lines to show
      */
-    static List<String> describe(HostedWorld.Inspection i, String blockName) {
+    static List<String> describe(HostedWorld.Inspection i, String blockName, boolean thermalShock) {
         List<String> lines = new ArrayList<>();
         lines.add(String.format(Locale.ROOT, "%s at %d %d %d: %s (%s)", blockName, i.pos().x(), i.pos().y(),
                 i.pos().z(), i.materialName(), i.material()));
@@ -172,6 +174,10 @@ final class HeatText {
             if (i.refined()) {
                 lines.add("  Refined into smaller cells from " + celsius(i.coolestK()) + " to " + celsius(i.hottestK())
                         + "; the figures above are for the whole block");
+            }
+            String strain = thermalStress(i.thermalStress(), i.built(), i.fractured(), thermalShock);
+            if (strain != null) {
+                lines.add("  " + strain);
             }
             if (!Double.isNaN(i.surfaceK())) {
                 lines.add("  Its top, open to the sky, is at " + celsius(i.surfaceK()));
@@ -200,6 +206,32 @@ final class HeatText {
                 + "; surroundings " + celsius(i.environmentK()));
         lines.add("  State " + provenance(i.provenance()));
         return lines;
+    }
+
+    /**
+     * Describes how uneven heat strains a block: how close the thermal stress in its most loaded cell comes to
+     * cracking it, and whether it has cracked through.
+     *
+     * @param stress the thermal stress in its most loaded cell, or {@code null} for a block that is not refined or
+     *     is not of brittle matter
+     * @param built whether the block is built; the world as it was found does not crack
+     * @param fractured whether uneven heat has cracked the block through
+     * @param enabled whether built blocks crack through when uneven heat strains them past their strength
+     * @return the line to show, or {@code null} if there is nothing to say
+     */
+    static String thermalStress(ThermalShock.Result stress, boolean built, boolean fractured, boolean enabled) {
+        if (fractured) {
+            return "Cracked through by uneven heat";
+        }
+        if (stress == null || stress.load() < 0.005) {
+            return null;
+        }
+        String text = String.format(Locale.ROOT, "Uneven heat strains it to %.0f%% of what cracks it, %s",
+                100 * stress.load(), stress.tension() ? "pulling its cooler part apart" : "crushing its hotter part");
+        if (!built) {
+            return text + "; it is natural, so it does not crack";
+        }
+        return enabled ? text : text + "; cracking from heat is switched off in Anchor's settings";
     }
 
     /**
@@ -320,7 +352,23 @@ final class HeatText {
         }
         lines.add("  Energy and mass " + (w.conserved() ? "balanced" : "NOT balanced") + " at the last audit");
         lines.add("  " + structures(s.structures()));
+        lines.add("  " + thermalShock(s.structures().thermalShock(), w.fractures()));
         return lines;
+    }
+
+    /**
+     * Describes in one line how many built blocks uneven heat has cracked through.
+     *
+     * @param enabled whether built blocks crack through when uneven heat strains them past their strength
+     * @param fractures how many have cracked through since the level was loaded
+     * @return the line
+     */
+    static String thermalShock(boolean enabled, long fractures) {
+        if (!enabled) {
+            return "Built blocks do not crack from uneven heat: switched off in Anchor's settings";
+        }
+        return fractures == 0 ? "No built block has cracked from uneven heat yet"
+                : count(fractures, "built block", "built blocks") + " cracked through by uneven heat";
     }
 
     /**

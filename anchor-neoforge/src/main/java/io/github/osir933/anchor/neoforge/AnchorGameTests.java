@@ -81,6 +81,15 @@ final class AnchorGameTests {
     /** The environment of tests that pace heat in the whole dimension, which the game runs apart from the rest. */
     private static final String CLOCK = "clock";
 
+    /**
+     * The environment of the test of uneven heat cracking blocks, which sends heat ahead in the whole dimension, so the
+     * game runs it apart from the rest.
+     */
+    private static final String THERMAL_SHOCK = "thermal_shock";
+
+    /** Steps heat is sent ahead by around lava, as many as glass takes to crack beside it and a half more. */
+    private static final long THERMAL_SHOCK_STEPS = 900;
+
     /** The structure most tests are built in: a floor of stone, five blocks square. */
     private static final String EMPTY = "empty";
 
@@ -148,7 +157,9 @@ final class AnchorGameTests {
             new Case("fence_holds_up_a_block", 400, AnchorGameTests::fenceHoldsUpABlock),
             new Case("pillar_falls_when_its_foot_is_taken", 400, AnchorGameTests::pillarFallsWhenItsFootIsTaken),
             new Case("built_blocks_stay_built_when_a_chunk_loads_again", 400,
-                    AnchorGameTests::builtBlocksStayBuiltWhenAChunkLoadsAgain));
+                    AnchorGameTests::builtBlocksStayBuiltWhenAChunkLoadsAgain),
+            new Case("stone_and_glass_crack_beside_lava", 1200, AnchorGameTests::stoneAndGlassCrackBesideLava,
+                    THERMAL_SHOCK));
 
     private AnchorGameTests() {
     }
@@ -1043,6 +1054,50 @@ final class AnchorGameTests {
             helper.assertTrue(heat.reloadSection(helper.absolutePos(placed)), "its section could not be reloaded");
             helper.assertTrue(lookAt(helper, heat, placed).built(), "the stone came back natural");
             helper.assertTrue(!lookAt(helper, heat, placed.below()).built(), "the floor came back built");
+        });
+    }
+
+    /**
+     * Stone and glass put up around lava crack through once the faces against it have warmed ahead of the rest, which
+     * takes stone about a hundred steps and glass about six hundred: the stone turns to cobblestone, which keeps its
+     * heat and still holds the lava in, and the glass shatters, letting the lava out into a space walled off behind it.
+     * Heat is sent ahead to get there sooner.
+     */
+    private static void stoneAndGlassCrackBesideLava(GameTestHelper helper) {
+        BlockPos lava = new BlockPos(2, 1, 2);
+        BlockPos glass = lava.west();
+        List<BlockPos> walls = List.of(lava.north(), lava.south(), lava.east());
+        List<BlockPos> behindGlass = List.of(glass.west(), glass.north(), glass.south());
+        long[] end = {0L};
+        buildThenExpect(helper, heat -> {
+            for (BlockPos p : walls) {
+                helper.setBlock(p, Blocks.STONE);
+            }
+            for (BlockPos p : behindGlass) {
+                helper.setBlock(p, Blocks.STONE);
+            }
+            helper.setBlock(glass, Blocks.GLASS);
+            helper.setBlock(lava, Blocks.LAVA);
+            end[0] = heat.pace().steps() + THERMAL_SHOCK_STEPS;
+            heat.request(THERMAL_SHOCK_STEPS);
+        }, heat -> {
+            if (heat.pace().steps() < end[0]) {
+                throw helper.assertionException(Component.literal("heating the walls: "
+                        + (end[0] - heat.pace().steps()) + " steps to go"));
+            }
+            for (BlockPos p : walls) {
+                helper.assertBlockPresent(Blocks.COBBLESTONE, p);
+            }
+            helper.assertTrue(!helper.getBlockState(glass).is(Blocks.GLASS), "the glass beside the lava is whole");
+            HostedWorld.Inspection is = heat.inspect(helper.absolutePos(lava.east())).orElseThrow(
+                    () -> helper.assertionException(Component.literal("the cobblestone is not simulated")));
+            helper.assertTrue(is.built() && is.fractured(), "the cobblestone should be built and cracked through: "
+                    + is);
+            double floorK = heat.inspect(helper.absolutePos(BlockPos.ZERO)).orElseThrow(
+                    () -> helper.assertionException(Component.literal("the floor is not simulated"))).temperatureK();
+            helper.assertTrue(is.temperatureK() > floorK + 10.0, "the cobblestone, at "
+                    + HeatText.temperature(is.temperatureK()) + ", should have kept the stone's heat; the floor in "
+                    + "the corner is at " + HeatText.temperature(floorK));
         });
     }
 

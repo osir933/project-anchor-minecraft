@@ -1,6 +1,7 @@
 package io.github.osir933.anchor.neoforge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -8,6 +9,7 @@ import io.github.osir933.anchor.core.host.BlockAppearance;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.Pacer;
 import io.github.osir933.anchor.core.matter.Phase;
+import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
 import io.github.osir933.anchor.core.physics.thermal.Sky;
 import io.github.osir933.anchor.core.space.GridPos;
@@ -24,8 +26,8 @@ class HeatTextTest {
     private static final Pacer.Status NORMAL = new Pacer(4, 20.0).status();
 
     /** Structures that have done nothing yet. */
-    private static final LevelStructures.Report STRUCTURES = new LevelStructures.Report(true, 0L, 0L, 0L, 0L, 0, 0.0,
-            0, false, null);
+    private static final LevelStructures.Report STRUCTURES = new LevelStructures.Report(true, true, 0L, 0L, 0L, 0L, 0,
+            0.0, 0, false, null);
 
     @Test
     void numbersReadNaturally() {
@@ -63,14 +65,16 @@ class HeatTextTest {
         HostedWorld hosted = new HostedWorld(world, id -> looks[id], HostedWorld.Settings.defaults());
         hosted.importSection(SectionPos.pack(0, 0, 0), i -> i == 0 ? 1 : i == 1 ? 2 : 0, 290.0);
 
-        List<String> water = HeatText.describe(hosted.inspect(new GridPos(0, 0, 0)).orElseThrow(), "minecraft:water");
+        List<String> water = HeatText.describe(hosted.inspect(new GridPos(0, 0, 0)).orElseThrow(), "minecraft:water",
+                true);
         assertEquals("minecraft:water at 0 0 0: Water (anchor:water)", water.get(0));
         assertTrue(water.get(1).startsWith("  Temperature " + HeatText.temperature(290.0) + ", liquid"), water.get(1));
         assertTrue(water.stream().anyMatch(l -> l.equals("  Shown as liquid; becomes minecraft:ice as solid")),
                 water.toString());
         assertTrue(water.stream().anyMatch(l -> l.startsWith("  State set from the block")), water.toString());
 
-        List<String> torch = HeatText.describe(hosted.inspect(new GridPos(1, 0, 0)).orElseThrow(), "minecraft:torch");
+        List<String> torch = HeatText.describe(hosted.inspect(new GridPos(1, 0, 0)).orElseThrow(), "minecraft:torch",
+                true);
         assertTrue(torch.stream().anyMatch(l -> l.equals("  Heat source: holds " + HeatText.celsius(1300.0)
                 + " with up to 1.50 kW")), torch.toString());
         assertTrue(torch.stream().anyMatch(l -> l.startsWith("  Section awake")), torch.toString());
@@ -93,7 +97,7 @@ class HeatTextTest {
         }
         HostedWorld.Inspection granite = hosted.inspect(new GridPos(1, 0, 0)).orElseThrow();
         assertTrue(granite.refined(), granite.toString());
-        List<String> lines = HeatText.describe(granite, "minecraft:granite");
+        List<String> lines = HeatText.describe(granite, "minecraft:granite", true);
         assertTrue(lines.contains("  Refined into smaller cells from " + HeatText.celsius(granite.coolestK())
                 + " to " + HeatText.celsius(granite.hottestK()) + "; the figures above are for the whole block"),
                 lines.toString());
@@ -187,13 +191,68 @@ class HeatTextTest {
         assertEquals("Structures: none analysed yet", HeatText.structures(STRUCTURES));
         assertEquals("Structures: 12 structures analysed, 1 in the background, one of them now; the largest had 300 "
                 + "blocks and the last took 2.5 ms; 1 joint cracked and 2 blocks fell; 1 built block waits to be "
-                + "checked", HeatText.structures(new LevelStructures.Report(true, 12L, 1L, 1L, 2L, 1, 2.5, 300, true,
-                        null)));
-        assertTrue(HeatText.structures(new LevelStructures.Report(false, 12L, 1L, 1L, 2L, 1, 2.5, 300, false, null))
-                .contains("switched off"));
+                + "checked", HeatText.structures(new LevelStructures.Report(true, true, 12L, 1L, 1L, 2L, 1, 2.5, 300,
+                        true, null)));
+        assertTrue(HeatText.structures(new LevelStructures.Report(false, true, 12L, 1L, 1L, 2L, 1, 2.5, 300, false,
+                null)).contains("switched off"));
         assertEquals("Structures stopped after an error, while heat carries on: java.lang.IllegalStateException: boom",
-                HeatText.structures(new LevelStructures.Report(true, 0L, 0L, 0L, 0L, 0, 0.0, 0, false,
+                HeatText.structures(new LevelStructures.Report(true, true, 0L, 0L, 0L, 0L, 0, 0.0, 0, false,
                         "java.lang.IllegalStateException: boom")));
+    }
+
+    @Test
+    void unevenHeatSaysHowCloseItComesToCrackingABlock() {
+        ThermalShock.Result pulled = new ThermalShock.Result(0.454, 4.54e6, 3);
+        String strained = "Uneven heat strains it to 45% of what cracks it, pulling its cooler part apart";
+        assertEquals(strained, HeatText.thermalStress(pulled, true, false, true));
+        assertEquals(strained + "; it is natural, so it does not crack",
+                HeatText.thermalStress(pulled, false, false, true));
+        assertEquals(strained + "; cracking from heat is switched off in Anchor's settings",
+                HeatText.thermalStress(pulled, true, false, false));
+        assertEquals("Uneven heat strains it to 120% of what cracks it, crushing its hotter part",
+                HeatText.thermalStress(new ThermalShock.Result(1.2, -1.8e8, 0), true, false, true));
+        assertEquals("Cracked through by uneven heat", HeatText.thermalStress(null, true, true, true));
+        assertNull(HeatText.thermalStress(null, true, false, true), "not refined, or not brittle");
+        assertNull(HeatText.thermalStress(ThermalShock.NONE, true, false, true), "not strained at all");
+        assertEquals("No built block has cracked from uneven heat yet", HeatText.thermalShock(true, 0));
+        assertEquals("1 built block cracked through by uneven heat", HeatText.thermalShock(true, 1));
+        assertEquals("3 built blocks cracked through by uneven heat", HeatText.thermalShock(true, 3));
+        assertEquals("Built blocks do not crack from uneven heat: switched off in Anchor's settings",
+                HeatText.thermalShock(false, 3));
+    }
+
+    @Test
+    void stonePlacedBesideLavaSaysHowUnevenHeatStrainsItUntilItCracks() {
+        BlockAppearance[] looks = {
+            BlockAppearance.of("anchor:air"),
+            BlockAppearance.of("anchor:granite").fracturingInto("minecraft:cobblestone"),
+            BlockAppearance.of("anchor:basalt").shownAs(Phase.LIQUID).startingAt(1450.0)
+                    .heatedBy(new HeatSourceModel.Source(1450.0, 1.5e6)),
+        };
+        PhysicalWorld world = new PhysicalWorld(WorldSettings.airAt20C(1), MaterialRegistry.withLibrary());
+        HostedWorld hosted = new HostedWorld(world, id -> looks[id],
+                HostedWorld.Settings.defaults().withTickSeconds(14.4));
+        hosted.importSection(SectionPos.pack(0, 0, 0), i -> SectionPos.localY(i) < 8 ? 1 : 0, 290.0);
+        GridPos stone = new GridPos(5, 8, 4);
+        hosted.reconcile(new GridPos(4, 8, 4), 2, Double.NaN);
+        hosted.reconcile(stone, 1, Double.NaN);
+        // Halfway to cracking, as lava warms the face against it ahead of the rest.
+        for (int s = 0; s < 60; s++) {
+            hosted.tick();
+        }
+        List<String> strained = HeatText.describe(hosted.inspect(stone).orElseThrow(), "minecraft:stone", true);
+        assertTrue(strained.stream().anyMatch(l -> l.startsWith("  Uneven heat strains it to ")
+                && l.endsWith("% of what cracks it, pulling its cooler part apart")), strained.toString());
+        List<String> off = HeatText.describe(hosted.inspect(stone).orElseThrow(), "minecraft:stone", false);
+        assertTrue(off.stream().anyMatch(l -> l.startsWith("  Uneven heat strains it to ")
+                && l.endsWith("; cracking from heat is switched off in Anchor's settings")), off.toString());
+        for (int s = 0; s < 240 && !hosted.isFractured(stone); s++) {
+            hosted.tick();
+        }
+        List<String> cracked = HeatText.describe(hosted.inspect(stone).orElseThrow(), "minecraft:stone", true);
+        assertTrue(cracked.contains("  Cracked through by uneven heat"), cracked.toString());
+        assertTrue(status(hosted).contains("  1 built block cracked through by uneven heat"),
+                status(hosted).toString());
     }
 
     @Test
@@ -210,12 +269,13 @@ class HeatTextTest {
         hosted.setSky(Sky.clear(90.0));
         hosted.tick();
         HostedWorld.Inspection ground = hosted.inspect(new GridPos(3, 7, 3)).orElseThrow();
-        List<String> lines = HeatText.describe(ground, "minecraft:stone");
+        List<String> lines = HeatText.describe(ground, "minecraft:stone", true);
         assertTrue(lines.contains("  Its top, open to the sky, is at " + HeatText.celsius(ground.surfaceK())),
                 lines.toString());
         assertTrue(lines.contains("  Taking in " + HeatText.power(ground.sunlightW()) + " of sunlight"),
                 lines.toString());
-        List<String> below = HeatText.describe(hosted.inspect(new GridPos(3, 6, 3)).orElseThrow(), "minecraft:stone");
+        List<String> below = HeatText.describe(hosted.inspect(new GridPos(3, 6, 3)).orElseThrow(), "minecraft:stone",
+                true);
         assertTrue(below.stream().noneMatch(l -> l.contains("sky") || l.contains("sunlight")), below.toString());
 
         assertTrue(status(hosted).contains("  Sunlight " + HeatText.power(hosted.status().sunlightW())

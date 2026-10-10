@@ -37,10 +37,13 @@ import java.util.Objects;
  *     carries its loads
  * @param immovable whether the block holds still as the ground does wherever it is put, as blocks the game makes
  *     unbreakable do, so that it is never {@linkplain HostedWorld#isBuilt built} and built blocks can hang from it
+ * @param fractured the id of the host block to show once thermal stress cracks the block through, such as
+ *     cobblestone for stone or the empty block for glass that shatters; {@code null} to go on showing the block as it
+ *     is. Like {@code becomes}, the engine passes it back to the host without interpreting it.
  */
 public record BlockAppearance(String material, double fill, Phase phase, double temperatureK,
         HeatSourceModel.Source source, Map<Phase, String> becomes, double albedo, Shape shape, String frame,
-        boolean immovable) {
+        boolean immovable, String fractured) {
 
     /**
      * Validates the appearance and takes an unmodifiable copy of {@code becomes}.
@@ -55,6 +58,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @param shape the solid part of the block, or {@code null} to fill it from the bottom up to its fill
      * @param frame the material carrying loads in a block whose matter counts as its surroundings, or {@code null}
      * @param immovable whether the block holds still wherever it is put
+     * @param fractured the host block to show once thermal stress cracks the block, or {@code null}
      */
     public BlockAppearance {
         Objects.requireNonNull(material, "material");
@@ -90,6 +94,9 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
         if (frame != null && frame.isBlank()) {
             throw new IllegalArgumentException("the frame's material id is blank");
         }
+        if (fractured != null && fractured.isBlank()) {
+            throw new IllegalArgumentException("the block shown once cracked is blank");
+        }
     }
 
     /**
@@ -104,7 +111,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance(String material, double fill, Phase phase, double temperatureK,
             HeatSourceModel.Source source, Map<Phase, String> becomes) {
-        this(material, fill, phase, temperatureK, source, becomes, Double.NaN, null, null, false);
+        this(material, fill, phase, temperatureK, source, becomes, Double.NaN, null, null, false, null);
     }
 
     /**
@@ -126,7 +133,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
     public BlockAppearance withFill(double newFill) {
         Shape kept = shape.equals(Shape.bottom(fill)) ? null : shape;
         return new BlockAppearance(material, newFill, phase, temperatureK, source, becomes,
-                albedo, kept, frame, immovable);
+                albedo, kept, frame, immovable, fractured);
     }
 
     /**
@@ -137,7 +144,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance shownAs(Phase newPhase) {
         return new BlockAppearance(material, fill, newPhase, temperatureK, source, becomes,
-                albedo, shape, frame, immovable);
+                albedo, shape, frame, immovable, fractured);
     }
 
     /**
@@ -148,7 +155,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance startingAt(double newTemperatureK) {
         return new BlockAppearance(material, fill, phase, newTemperatureK, source, becomes,
-                albedo, shape, frame, immovable);
+                albedo, shape, frame, immovable, fractured);
     }
 
     /**
@@ -159,7 +166,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance heatedBy(HeatSourceModel.Source newSource) {
         return new BlockAppearance(material, fill, phase, temperatureK, newSource, becomes,
-                albedo, shape, frame, immovable);
+                albedo, shape, frame, immovable, fractured);
     }
 
     /**
@@ -173,7 +180,8 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
         EnumMap<Phase, String> map = new EnumMap<>(Phase.class);
         map.putAll(becomes);
         map.put(newPhase, hostBlock);
-        return new BlockAppearance(material, fill, phase, temperatureK, source, map, albedo, shape, frame, immovable);
+        return new BlockAppearance(material, fill, phase, temperatureK, source, map, albedo, shape, frame, immovable,
+                fractured);
     }
 
     /**
@@ -183,7 +191,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance withoutReplacements() {
         return new BlockAppearance(material, fill, phase, temperatureK, source, new EnumMap<>(Phase.class), albedo,
-                shape, frame, immovable);
+                shape, frame, immovable, fractured);
     }
 
     /**
@@ -195,7 +203,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance withAlbedo(double newAlbedo) {
         return new BlockAppearance(material, fill, phase, temperatureK, source, becomes,
-                newAlbedo, shape, frame, immovable);
+                newAlbedo, shape, frame, immovable, fractured);
     }
 
     /**
@@ -206,7 +214,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance withShape(Shape newShape) {
         return new BlockAppearance(material, fill, phase, temperatureK, source, becomes,
-                albedo, newShape, frame, immovable);
+                albedo, newShape, frame, immovable, fractured);
     }
 
     /**
@@ -218,7 +226,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance framedIn(String newFrame) {
         return new BlockAppearance(material, fill, phase, temperatureK, source, becomes,
-                albedo, shape, newFrame, immovable);
+                albedo, shape, newFrame, immovable, fractured);
     }
 
     /**
@@ -228,7 +236,20 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance asImmovable() {
-        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, albedo, shape, frame, true);
+        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, albedo, shape, frame, true,
+                fractured);
+    }
+
+    /**
+     * Returns this appearance with a block to show once thermal stress cracks it through.
+     *
+     * @param hostBlock the id of the host block to show then, such as cobblestone for stone or the empty block for
+     *     glass that shatters, or {@code null} to go on showing the block as it is
+     * @return the new appearance
+     */
+    public BlockAppearance fracturingInto(String hostBlock) {
+        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, albedo, shape, frame,
+                immovable, hostBlock);
     }
 
     /**

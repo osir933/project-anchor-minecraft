@@ -21,7 +21,8 @@ import java.util.Optional;
  *       "material": "anchor:water",
  *       "phase": "liquid",
  *       "becomes": { "solid": "minecraft:ice", "gas": "minecraft:air" }
- *     }
+ *     },
+ *     "minecraft:smooth_stone": { "material": "anchor:granite", "fractured": "minecraft:cobblestone" }
  *   }
  * }
  * }</pre>
@@ -35,9 +36,12 @@ import java.util.Optional;
  * @param source a heat source that holds the block at a temperature with up to a given power in watts; blocks
  *     with a {@code lit} property only heat while lit
  * @param becomes the block to show instead once the material has melted, frozen or boiled into another phase
+ * @param fractured the block to show instead once thermal stress has cracked a built block through, such as
+ *     {@code minecraft:air} for glass that shatters; left out, Anchor picks a cracked form of the block if it knows
+ *     one, and otherwise leaves it as it is
  */
 record MaterialEntry(String material, Optional<Double> fill, Optional<Phase> phase, Optional<Double> temperature,
-        Optional<HeatSourceModel.Source> source, Map<Phase, String> becomes) {
+        Optional<HeatSourceModel.Source> source, Map<Phase, String> becomes, Optional<String> fractured) {
 
     /** Reads a phase from its lower-case name. */
     static final Codec<Phase> PHASE_CODEC = Codec.STRING.comapFlatMap(MaterialEntry::phaseNamed,
@@ -57,7 +61,8 @@ record MaterialEntry(String material, Optional<Double> fill, Optional<Phase> pha
             Codec.doubleRange(1.0, 100_000.0).optionalFieldOf("temperature").forGetter(MaterialEntry::temperature),
             SOURCE_CODEC.optionalFieldOf("source").forGetter(MaterialEntry::source),
             Codec.unboundedMap(PHASE_CODEC, Codec.STRING).optionalFieldOf("becomes", Map.of())
-                    .forGetter(MaterialEntry::becomes))
+                    .forGetter(MaterialEntry::becomes),
+            Codec.STRING.optionalFieldOf("fractured").forGetter(MaterialEntry::fractured))
             .apply(i, MaterialEntry::new));
 
     /**
@@ -69,6 +74,7 @@ record MaterialEntry(String material, Optional<Double> fill, Optional<Phase> pha
      * @param temperature the starting temperature
      * @param source the heat source
      * @param becomes the replacements
+     * @param fractured the block to show once cracked through
      */
     MaterialEntry {
         becomes = Map.copyOf(becomes);

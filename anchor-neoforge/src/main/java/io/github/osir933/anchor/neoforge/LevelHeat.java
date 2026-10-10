@@ -2,6 +2,7 @@ package io.github.osir933.anchor.neoforge;
 
 import com.mojang.logging.LogUtils;
 import io.github.osir933.anchor.core.host.BlockAppearance;
+import io.github.osir933.anchor.core.host.Fracture;
 import io.github.osir933.anchor.core.host.GlowingBlock;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.ImportPlanner;
@@ -24,6 +25,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedSet;
 import java.util.TreeMap;
@@ -32,6 +34,7 @@ import java.util.UUID;
 import java.util.function.IntUnaryOperator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -39,10 +42,12 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -54,7 +59,8 @@ import org.slf4j.Logger;
 /**
  * Heat in one Minecraft level. It keeps the sections around players in a {@link HostedWorld}, follows every
  * block change in them, runs a simulation step every few game ticks and shows melting, freezing and boiling
- * by changing blocks.
+ * by changing blocks, as it shows built blocks that uneven heat cracks through: stone turns to cobblestone with the
+ * sound of it cracking, and glass shatters.
  *
  * <p>Each game tick it takes in the blocks that changed since the last tick. Every
  * {@linkplain AnchorConfig#GAME_TICKS_PER_STEP few ticks} it brings in sections that players have come near
@@ -93,6 +99,9 @@ final class LevelHeat {
 
     /** The most blocks changed per game tick to show melting, freezing or boiling. */
     private static final int SHOWN_PER_TICK = 256;
+
+    /** The most blocks shown cracking through per game tick. */
+    private static final int CRACKED_PER_TICK = 64;
 
     /** Work units the simulation may spend per step. */
     private static final long WORK_PER_STEP = 50_000_000L;
@@ -138,6 +147,7 @@ final class LevelHeat {
     private long growingTick = Long.MIN_VALUE;
     private final TreeMap<Long, Integer> pinned = new TreeMap<>();
     private final ArrayDeque<PhaseChange> toShow = new ArrayDeque<>();
+    private final ArrayDeque<Fracture> toCrack = new ArrayDeque<>();
     private final TreeMap<String, Optional<BlockState>> replacements = new TreeMap<>();
     /** The version of each simulated section when it was last written into its chunk or brought in. */
     private final TreeMap<Long, Long> savedVersions = new TreeMap<>();
@@ -238,6 +248,7 @@ final class LevelHeat {
      */
     private void step() {
         pacer.beginTick();
+        hosted.setThermalShock(AnchorConfig.get(AnchorConfig.THERMAL_SHOCK));
         long start = System.nanoTime();
         double spent = 0.0;
         while (pacer.wantsStep(spent)) {
@@ -248,6 +259,7 @@ final class LevelHeat {
             HostedWorld.TickResult result = hosted.tick();
             record();
             toShow.addAll(result.phaseChanges());
+            toCrack.addAll(result.fractures());
             lastStepMillis = (System.nanoTime() - stepStart) / 1e6;
             averageStepMillis = averageStepMillis == 0.0 ? lastStepMillis
                     : 0.95 * averageStepMillis + 0.05 * lastStepMillis;
@@ -1009,8 +1021,11 @@ final class LevelHeat {
         }
     }
 
-    /** Shows waiting phase changes by changing blocks, a limited number per tick. */
+    /** Shows waiting phase changes and blocks cracked through by changing blocks, a limited number per tick. */
     private void show() {
+        for (int n = 0; n < CRACKED_PER_TICK && !toCrack.isEmpty(); n++) {
+            show(toCrack.poll());
+        }
         if (!AnchorConfig.get(AnchorConfig.SHOW_PHASE_CHANGES)) {
             toShow.clear();
             return;
@@ -1018,6 +1033,44 @@ final class LevelHeat {
         for (int n = 0; n < SHOWN_PER_TICK && !toShow.isEmpty(); n++) {
             show(toShow.poll());
         }
+    }
+
+    /**
+     * Shows a block cracked through: it turns into its cracked or broken form, if it has one, with the sound of it
+     * cracking and a puff of its dust, or breaks if that form is air, as glass shatters. The block keeps its heat.
+     */
+    private void show(Fracture fracture) {
+        BlockPos pos = new BlockPos(fracture.pos().x(), fracture.pos().y(), fracture.pos().z());
+        if (!level.isLoaded(pos) || !hosted.isFractured(fracture.pos())) {
+            return; // new matter has taken its place since the step
+        }
+        BlockState state = level.getBlockState(pos);
+        if (!Objects.equals(mapper.appearance(state).fractured(), fracture.hostBlock())) {
+            return; // another block, changed without the simulation hearing of it yet
+        }
+        Optional<BlockState> replacement = fracture.hostBlock() == null ? Optional.empty()
+                : replacement(fracture.hostBlock());
+        if (replacement.isPresent() && replacement.get().isAir()) {
+            level.destroyBlock(pos, true);
+        } else {
+            replacement.ifPresent(r -> level.setBlock(pos, r, Block.UPDATE_ALL));
+            showCracking(pos, state);
+        }
+        hosted.reconcile(fracture.pos(), Block.getId(level.getBlockState(pos)), fracture.temperatureK());
+        followSkyHeight(pos);
+    }
+
+    /** Plays the sound of a block cracking through, lower than that of it breaking, with a puff of its dust. */
+    // The sound without a position is deprecated for the sound at one; the block's own sound is the one wanted.
+    @SuppressWarnings("deprecation")
+    private void showCracking(BlockPos pos, BlockState state) {
+        SoundType sound = state.getSoundType();
+        double x = pos.getX() + 0.5;
+        double y = pos.getY() + 0.5;
+        double z = pos.getZ() + 0.5;
+        level.playSound(null, x, y, z, sound.getBreakSound(), SoundSource.BLOCKS, sound.getVolume(),
+                sound.getPitch() * 0.6f);
+        level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, state), x, y, z, 24, 0.35, 0.35, 0.35, 0.05);
     }
 
     private void show(PhaseChange change) {

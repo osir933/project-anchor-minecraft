@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.StructureSurvey;
 import io.github.osir933.anchor.core.physics.structure.StructuralAnalysis;
+import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.space.Direction;
 import io.github.osir933.anchor.core.space.GridPos;
 import java.util.ArrayDeque;
@@ -78,6 +79,7 @@ final class LevelStructures {
      * What the structures of a level have done since it was loaded.
      *
      * @param enabled whether structures stand or fall by their strength
+     * @param thermalShock whether built blocks crack through when uneven heat strains them past their strength
      * @param analyses how many structures were analysed
      * @param inBackground how many of them were large enough to be analysed in the background
      * @param cracks how many joints cracked
@@ -88,8 +90,8 @@ final class LevelStructures {
      * @param analysing whether a large structure is being analysed now
      * @param failure the error that stopped structures in this level, or {@code null}
      */
-    record Report(boolean enabled, long analyses, long inBackground, long cracks, long fallen, int waiting,
-            double lastMillis, int largest, boolean analysing, String failure) {
+    record Report(boolean enabled, boolean thermalShock, long analyses, long inBackground, long cracks, long fallen,
+            int waiting, double lastMillis, int largest, boolean analysing, String failure) {
     }
 
     /**
@@ -104,9 +106,14 @@ final class LevelStructures {
      * @param load how loaded the block's most loaded joint is, as a fraction of what it can take
      * @param worst the structure's most loaded joint that holds, or {@code null} if none does
      * @param settled whether the analysis found a state where nothing more gives way
+     * @param thermalStress the thermal stress in the block's most loaded cell, for a refined block of brittle
+     *     matter, or {@code null}
+     * @param fractured whether uneven heat has cracked the block through
+     * @param thermalShock whether built blocks crack through when uneven heat strains them past their strength
      */
     record Look(boolean built, List<Direction> crackedToward, int blocks, int edge, boolean falls, int falling,
-            double load, StructuralAnalysis.BondResult worst, boolean settled) {
+            double load, StructuralAnalysis.BondResult worst, boolean settled, ThermalShock.Result thermalStress,
+            boolean fractured, boolean thermalShock) {
     }
 
     /** An analysis running in the background, and the game tick it is settled at. */
@@ -287,9 +294,12 @@ final class LevelStructures {
                 cracked.add(d);
             }
         }
+        HostedWorld.Inspection seen = hosted.inspect(g).orElseThrow();
+        boolean thermalShock = AnchorConfig.get(AnchorConfig.THERMAL_SHOCK);
         Optional<StructureSurvey> survey = hosted.survey(g, AnchorConfig.get(AnchorConfig.STRUCTURE_BLOCKS));
         if (survey.isEmpty()) {
-            return Optional.of(new Look(false, cracked, 0, 0, false, 0, 0.0, null, true));
+            return Optional.of(new Look(false, cracked, 0, 0, false, 0, 0.0, null, true, seen.thermalStress(),
+                    seen.fractured(), thermalShock));
         }
         StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame());
         StructuralAnalysis.BlockResult block = result.block(g);
@@ -301,7 +311,7 @@ final class LevelStructures {
         }
         return Optional.of(new Look(true, cracked, survey.get().blocks(), survey.get().edge(),
                 block == null || block.fell(), result.falling().size(), block == null ? 0.0 : block.load(), worst,
-                result.settled()));
+                result.settled(), seen.thermalStress(), seen.fractured(), thermalShock));
     }
 
     /**
@@ -310,7 +320,8 @@ final class LevelStructures {
      * @return the report
      */
     Report report() {
-        return new Report(AnchorConfig.get(AnchorConfig.STRUCTURES_ENABLED), analyses, inBackground, cracks, fallen,
+        return new Report(AnchorConfig.get(AnchorConfig.STRUCTURES_ENABLED),
+                AnchorConfig.get(AnchorConfig.THERMAL_SHOCK), analyses, inBackground, cracks, fallen,
                 hosted.uncheckedStructures(), lastMillis, largest, pending != null, failure);
     }
 

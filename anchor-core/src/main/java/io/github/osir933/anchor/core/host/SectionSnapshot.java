@@ -20,7 +20,8 @@ import java.util.Objects;
  * host stores a short palette and, per saved block, its position, palette index, mass and enthalpy.
  *
  * <p>Apart from heat, a snapshot keeps the structural state of the blocks that have one: which were built rather
- * than found in the world, and which of their joints have cracked, as {@linkplain #structureFlags flags} per block.
+ * than found in the world, which of their joints have cracked and which thermal stress has cracked through, as
+ * {@linkplain #structureFlags flags} per block.
  */
 public final class SectionSnapshot {
 
@@ -236,7 +237,8 @@ public final class SectionSnapshot {
 
     /**
      * Returns the structural flags of the blocks {@link #structureBlocks} lists: bit 0 set if the block was
-     * built, and bits 1, 2 and 3 set if its joint with the next block along x, y or z has cracked.
+     * built, bits 1, 2 and 3 set if its joint with the next block along x, y or z has cracked, and bit 4 set if
+     * thermal stress has cracked the block through.
      *
      * @return a copy, in the order of {@link #structureBlocks()}
      */
