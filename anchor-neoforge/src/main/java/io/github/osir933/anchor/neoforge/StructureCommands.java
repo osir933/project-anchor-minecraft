@@ -150,9 +150,11 @@ final class StructureCommands {
             StructuralAnalysis.BondResult worst = look.worst();
             if (worst != null) {
                 Direction toward = StructuralAnalysis.direction(worst.axis());
+                String heat = Math.abs(worst.load() - worst.withoutHeat()) < 0.005 ? ""
+                        : "; without the strain of heat it would take " + percent(worst.withoutHeat());
                 lines.add("  The structure's most loaded joint takes " + percent(worst.load()) + " of what it can, "
                         + mode(worst.mode()) + ", between " + worst.pos().x() + " " + worst.pos().y() + " "
-                        + worst.pos().z() + " and the block " + name(toward) + " of it");
+                        + worst.pos().z() + " and the block " + name(toward) + " of it" + heat);
             }
             if (!look.settled()) {
                 lines.add("  The analysis did not come to rest: more of it may give way");
@@ -162,6 +164,10 @@ final class StructureCommands {
                 look.thermalShock());
         if (strain != null) {
             lines.add("  " + strain);
+        }
+        String stretched = HeatText.expansion(look.expansion(), look.unstrainedK());
+        if (stretched != null) {
+            lines.add("  " + stretched);
         }
         if (!look.crackedToward().isEmpty()) {
             List<String> names = new ArrayList<>();

@@ -23,6 +23,19 @@ class ThermalShockTest {
 
     /** The cells of a block split into 4 along each side, 25 cm apart, with a temperature for each centre. */
     private static ThermalShock.Result grid(Mechanics mechanics, ToDoubleFunction<double[]> temperature) {
+        double[][] c = cells(temperature);
+        return ThermalShock.analyse(mechanics, c[0], c[1], c[2], c[3], c[4], 64);
+    }
+
+    /** How heat stretches the same block as a whole, from the temperature at which its matter is unstrained. */
+    private static Frame.Expansion expansion(Mechanics mechanics, double unstrainedK,
+            ToDoubleFunction<double[]> temperature) {
+        double[][] c = cells(temperature);
+        return ThermalShock.expansion(mechanics, unstrainedK, 10.5, 64.5, -3.5, c[0], c[1], c[2], c[3], c[4], 64);
+    }
+
+    /** Returns the x, y and z of each cell's centre, its mass and its temperature, the block's centre at 0. */
+    private static double[][] cells(ToDoubleFunction<double[]> temperature) {
         int n = 64;
         double[] x = new double[n];
         double[] y = new double[n];
@@ -42,7 +55,7 @@ class ThermalShockTest {
                 }
             }
         }
-        return ThermalShock.analyse(mechanics, x, y, z, mass, t, n);
+        return new double[][] {x, y, z, mass, t};
     }
 
     @Test
@@ -113,6 +126,41 @@ class ThermalShockTest {
         double stretched = 50e9 * 8e-6 * 40 / 0.75;
         assertEquals(stretched, r.stressPa(), stretched * 1e-9);
         assertEquals(stretched / 10e6, r.load(), 1e-9);
+    }
+
+    @Test
+    void aTemperatureThatChangesInAStraightLineStretchesEachHalfAsItBendsTheBlock() {
+        // 40 K per metre along x and 20 K per metre down y, 320 K at the centre, built at 300 K.
+        Frame.Expansion e = expansion(STEADY, 300.0, p -> 320.0 + 40.0 * p[0] - 20.0 * p[1]);
+        assertEquals(8e-6 * 20, e.strain(), 1e-15);
+        assertEquals(8e-6 * 40, e.gradientX(), 1e-15);
+        assertEquals(-8e-6 * 20, e.gradientY(), 1e-15);
+        assertEquals(0.0, e.gradientZ(), 1e-15);
+        for (int axis = 0; axis < 3; axis++) {
+            assertEquals(e.gradient(axis), e.stretch(axis), 1e-15);
+        }
+        // A block at one temperature only grows; one where its matter is unstrained does nothing.
+        Frame.Expansion even = expansion(STEADY, 300.0, p -> 700.0);
+        assertEquals(8e-6 * 400, even.strain(), 1e-15);
+        for (int axis = 0; axis < 3; axis++) {
+            assertEquals(0.0, even.gradient(axis), 0.0);
+            assertEquals(0.0, even.stretch(axis), 0.0);
+        }
+        assertTrue(!expansion(STEADY, 300.0, p -> 300.0).any());
+    }
+
+    @Test
+    void aBlockHeatedHardOnOneFaceStretchesItsFarHalfByThatHalfsOwnStrain() {
+        // Lava beside the face at -x: the cells by it at 340 K, the next at 300 K, the far half still at the 293 K
+        // the block was built at, so the far half has not grown at all. The straight line that bends the block,
+        // -59.2 K per metre, would have it 1.25 K colder than that, and shorter than it was built.
+        double[] layers = {340.0, 300.0, 293.0, 293.0};
+        Frame.Expansion e = expansion(STEADY, 293.0, p -> layers[(int) ((p[0] + 0.5) * 4)]);
+        assertEquals(8e-6 * 13.5, e.strain(), 1e-15);
+        assertEquals(0.0, e.strain() + e.stretchX() / 4, 1e-15);
+        assertEquals(8e-6 * 27, e.strain() - e.stretchX() / 4, 1e-15);
+        assertEquals(-8e-6 * 18.5 / 0.3125, e.gradientX(), 1e-15);
+        assertTrue(e.strain() + e.gradientX() / 4 < 0, "the straight line shortens the far half: " + e);
     }
 
     @Test

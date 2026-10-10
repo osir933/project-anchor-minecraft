@@ -3,6 +3,7 @@ package io.github.osir933.anchor.neoforge;
 import com.mojang.logging.LogUtils;
 import io.github.osir933.anchor.core.host.HostedWorld;
 import io.github.osir933.anchor.core.host.StructureSurvey;
+import io.github.osir933.anchor.core.physics.structure.Frame;
 import io.github.osir933.anchor.core.physics.structure.StructuralAnalysis;
 import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.space.Direction;
@@ -110,10 +111,14 @@ final class LevelStructures {
      *     matter, or {@code null}
      * @param fractured whether uneven heat has cracked the block through
      * @param thermalShock whether built blocks crack through when uneven heat strains them past their strength
+     * @param expansion how far heat has stretched the block, for a built block while heat stretches built blocks,
+     *     or {@code null}
+     * @param unstrainedK the temperature at which the block's matter is free of thermal strain, in kelvin: the
+     *     climate where it stands
      */
     record Look(boolean built, List<Direction> crackedToward, int blocks, int edge, boolean falls, int falling,
             double load, StructuralAnalysis.BondResult worst, boolean settled, ThermalShock.Result thermalStress,
-            boolean fractured, boolean thermalShock) {
+            boolean fractured, boolean thermalShock, Frame.Expansion expansion, double unstrainedK) {
     }
 
     /** An analysis running in the background, and the game tick it is settled at. */
@@ -299,7 +304,7 @@ final class LevelStructures {
         Optional<StructureSurvey> survey = hosted.survey(g, AnchorConfig.get(AnchorConfig.STRUCTURE_BLOCKS));
         if (survey.isEmpty()) {
             return Optional.of(new Look(false, cracked, 0, 0, false, 0, 0.0, null, true, seen.thermalStress(),
-                    seen.fractured(), thermalShock));
+                    seen.fractured(), thermalShock, seen.expansion(), seen.environmentK()));
         }
         StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame());
         StructuralAnalysis.BlockResult block = result.block(g);
@@ -311,7 +316,8 @@ final class LevelStructures {
         }
         return Optional.of(new Look(true, cracked, survey.get().blocks(), survey.get().edge(),
                 block == null || block.fell(), result.falling().size(), block == null ? 0.0 : block.load(), worst,
-                result.settled(), seen.thermalStress(), seen.fractured(), thermalShock));
+                result.settled(), seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(),
+                seen.environmentK()));
     }
 
     /**

@@ -26,6 +26,7 @@ final class AnchorConfig {
     static final ModConfigSpec.BooleanValue STRUCTURES_ENABLED;
     static final ModConfigSpec.IntValue STRUCTURE_BLOCKS;
     static final ModConfigSpec.BooleanValue THERMAL_SHOCK;
+    static final ModConfigSpec.BooleanValue THERMAL_EXPANSION;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -98,6 +99,13 @@ final class AnchorConfig {
                         + "world as it was found does not crack. Works whether or not structures stand or fall by "
                         + "their strength; where they do, what a cracked block held up may fall. Takes effect at once.")
                 .define("thermalShock", true);
+        THERMAL_EXPANSION = b.comment("Whether heat stretches built blocks, loading the joints of a structure that "
+                        + "holds them in place: a span built between walls is pulled by the cold and pressed by heat, "
+                        + "a block heated on one side bends, and a joint strained past its strength cracks. Blocks "
+                        + "are free of strain at the climate where they stand. Metal yields a little instead of "
+                        + "cracking, and a cracked joint lets the strain go. Only matters where structures stand or "
+                        + "fall by their strength. Takes effect at once.")
+                .define("thermalExpansion", true);
         b.pop();
         SPEC = b.build();
     }

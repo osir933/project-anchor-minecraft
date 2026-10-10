@@ -14,14 +14,25 @@ import java.util.Locale;
 import java.util.TreeMap;
 
 /**
- * Works out whether a structure stands under its own weight, and what breaks if it does not.
+ * Works out whether a structure stands under its own weight and the strain of heat, and what breaks if it does
+ * not.
  *
- * <p>The frame's free blocks carry their weight to the ground through their joints. The analysis solves for how
- * far each block moves under that weight, linear and elastic, then checks every joint: an intact joint against
- * the strength of the materials on each side at their temperatures, a cracked or granular one against what
- * pressing and friction can hold. If something is overloaded, the worst joint gives way: an intact joint cracks,
- * a cracked one lets go. Loads then find other paths, so the analysis solves again, until nothing more breaks.
- * Blocks left with no path to the ground fall.
+ * <p>The frame's free blocks carry their weight to the ground through their joints. Heat stretches their matter
+ * too, and where the frame or the ground stops a block growing or bending, its joints are loaded. The analysis
+ * solves for how far each block moves, linear and elastic, then checks every joint: an intact joint against the
+ * strength of the materials on each side at their temperatures, a cracked or granular one against what pressing
+ * and friction can hold. If something is overloaded, the worst joint gives way: an intact joint cracks, a cracked
+ * one lets go. Loads then find other paths, so the analysis solves again, until nothing more breaks. Blocks left
+ * with no path to the ground fall.
+ *
+ * <p>The strain of heat is a matter of hairlines: it moves blocks by fractions of a millimetre, and lets go once
+ * they have moved that far. So it cracks brittle matter, which breaks before it moves, but not matter that yields:
+ * a ductile joint that heat strains past its strength gives a little and so lets the strain go, without losing any
+ * of its strength, so ductile joints are checked against the weight they carry alone. A crack lets the strain go
+ * too: a cracked joint rocks rather than bends, and where heat alone would make it slip, rock or open, it does so
+ * by a hairline and holds as well as it does without heat. That is why a structure cracked by heat can still
+ * stand, and why heat that presses a cracked span together can hold it up. Heat that crushes the edge of a joint
+ * has nowhere to go.
  *
  * <p>Failure is judged at the faces where blocks meet, on each block's side, because that is where the
  * structure's cross-section is narrowest and where a crack can form, and because a straight run of blocks that is
@@ -31,8 +42,9 @@ import java.util.TreeMap;
  *
  * <p>What the analysis leaves out, so far: a ductile joint that yields gives way at once, where a real steel
  * frame would keep its full plastic moment there and hand on the rest, so redundant metal frames fall somewhat
- * early; cracked joints do not wedge into arches; slender columns do not buckle; and deflections are taken to be
- * small. Where they turn out large the result says so.
+ * early; cracked joints do not wedge into arches; slender columns do not buckle, not even when heat pushes on
+ * them; the ground does not give, however soft; and deflections are taken to be small. Where they turn out large
+ * the result says so.
  */
 public final class StructuralAnalysis {
 
@@ -134,8 +146,11 @@ public final class StructuralAnalysis {
      * @param load how loaded it was in the last solution that included it, as a fraction of what it can take:
      *     its utilization if intact, how far beyond friction or contact it was pushed if cracked
      * @param mode what limits it
+     * @param withoutHeat how loaded the weight it carries would leave it in that solution, without the strain of
+     *     heat
      */
-    public record BondResult(GridPos pos, int axis, Frame.Joint state, boolean holds, double load, Mode mode) {
+    public record BondResult(GridPos pos, int axis, Frame.Joint state, boolean holds, double load, Mode mode,
+            double withoutHeat) {
     }
 
     /**
@@ -145,8 +160,9 @@ public final class StructuralAnalysis {
      * @param axis the axis the joint runs along
      * @param mode how it gave way
      * @param load its load when it gave way, as a fraction of what it could take
+     * @param heat whether the strain of heat broke it: the weight it carried alone would have left it whole
      */
-    public record Crack(GridPos pos, int axis, Mode mode, double load) {
+    public record Crack(GridPos pos, int axis, Mode mode, double load, boolean heat) {
     }
 
     /**
@@ -243,9 +259,20 @@ public final class StructuralAnalysis {
         private final Frame.Joint[] state;
         private final boolean[] open;
         private final double[] load;
+        private final double[] withoutHeat;
         private final Mode[] mode;
         private final boolean[] alive;
+        /** How far each block moves under its weight alone. */
         private final double[] displacement;
+        /**
+         * For each joint that heat strains, how far heat would move its end j, end i held, if nothing held it, in
+         * its own axes; {@code null} for a joint heat leaves alone.
+         */
+        private final double[][] heatShift;
+        /** For each joint that heat strains, the forces its ends need to hold it as it was: K times the shift. */
+        private final double[][] heatLoad;
+        /** How far each block moves under the strain of heat alone, or {@code null} if heat strains no joint. */
+        private final double[] heatDisplacement;
         private final double tolerance;
         private final List<Crack> cracks = new ArrayList<>();
         private final List<String> notes = new ArrayList<>();
@@ -280,7 +307,10 @@ public final class StructuralAnalysis {
             state = new Frame.Joint[m];
             open = new boolean[m];
             load = new double[m];
+            withoutHeat = new double[m];
             mode = new Mode[m];
+            heatShift = new double[m][];
+            heatLoad = new double[m][];
             for (int e = 0; e < m; e++) {
                 Frame.Bond b = bonds.get(e);
                 Integer a = nodeAt.get(b.pos());
@@ -311,9 +341,81 @@ public final class StructuralAnalysis {
                     contact[e] = sa.failure() == Failure.GRANULAR || granular(groundAt.get(b.other()));
                 }
             }
+            boolean heated = false;
+            for (int e = 0; e < m; e++) {
+                heatShift[e] = heatShift(e);
+                if (heatShift[e] != null) {
+                    heatLoad[e] = times(stiffness[e], heatShift[e]);
+                    heated = true;
+                }
+            }
             alive = new boolean[n];
             Arrays.fill(alive, true);
             displacement = new double[BlockCholesky.B * n];
+            heatDisplacement = heated ? new double[BlockCholesky.B * n] : null;
+        }
+
+        /**
+         * Works out how far heat would move a joint's end j relative to its end i, held fixed, if nothing held end
+         * j: the strain of each piece's matter stretches the beam, and where it changes across the beam, bends an
+         * intact joint. A contact does not bend that way: its blocks rock on it instead, opening a hairline gap on
+         * one side, so heat only presses it together or pulls it apart. Returns {@code null} if heat does neither.
+         */
+        private double[] heatShift(int e) {
+            Frame.Bond b = bonds.get(e);
+            int axis = b.axis();
+            boolean bends = !contact[e] && state[e] == Frame.Joint.INTACT;
+            double[] shift = new double[BeamElement.DOFS];
+            boolean any = false;
+            // Each piece of the beam lies in one block, from s0 to s1 along the beam, with the block's centre at c.
+            if (kind[e] == FREE) {
+                any |= addHeatShift(shift, free.get(endI[e]).expansion(), axis, 0.0, 0.5, 0.0, 1.0, bends);
+                any |= addHeatShift(shift, free.get(endJ[e]).expansion(), axis, 0.5, 1.0, 1.0, 1.0, bends);
+            } else if (kind[e] == GROUND_BELOW) {
+                any |= addHeatShift(shift, free.get(endJ[e]).expansion(), axis, 0.0, 0.5, 0.5, 0.5, bends);
+            } else {
+                any |= addHeatShift(shift, free.get(endI[e]).expansion(), axis, 0.0, 0.5, 0.0, 0.5, bends);
+            }
+            return any ? shift : null;
+        }
+
+        /**
+         * Adds what one piece of a beam does to the movement of its end j: its matter's strain along the beam,
+         * which changes along it as the block's stretch says, stretches it, and, if it bends, the change of strain
+         * across the beam bends it, the hotter side longer. Returns whether the piece moved the end at all.
+         */
+        private static boolean addHeatShift(double[] shift, Frame.Expansion x, int axis, double s0, double s1,
+                double centre, double length, boolean bends) {
+            double along = x.stretch(axis);
+            double acrossY = bends ? x.gradient((axis + 1) % 3) : 0;
+            double acrossZ = bends ? x.gradient((axis + 2) % 3) : 0;
+            if (x.strain() == 0 && along == 0 && acrossY == 0 && acrossZ == 0) {
+                return false;
+            }
+            double l = s1 - s0;
+            shift[6] += x.strain() * l + along * ((s1 - centre) * (s1 - centre) - (s0 - centre) * (s0 - centre)) / 2;
+            // Curvatures: matter longer toward +y bends the beam toward -y, turning it the negative way about z;
+            // matter longer toward +z bends it toward -z, which turns it the positive way about y.
+            double curveZ = -acrossY;
+            double curveY = acrossZ;
+            double moment = ((length - s0) * (length - s0) - (length - s1) * (length - s1)) / 2;
+            shift[7] += curveZ * moment;
+            shift[8] -= curveY * moment;
+            shift[10] += curveY * l;
+            shift[11] += curveZ * l;
+            return true;
+        }
+
+        private static double[] times(double[] k, double[] v) {
+            double[] out = new double[BeamElement.DOFS];
+            for (int r = 0; r < BeamElement.DOFS; r++) {
+                double sum = 0;
+                for (int c = 0; c < BeamElement.DOFS; c++) {
+                    sum += k[r * BeamElement.DOFS + c] * v[c];
+                }
+                out[r] = sum;
+            }
+            return out;
         }
 
         private static boolean granular(Frame.Block ground) {
@@ -331,8 +433,8 @@ public final class StructuralAnalysis {
                     settled = true;
                     break;
                 }
-                // A joint that only cracked is as stiff as before, so the last solution still stands; one
-                // that let go changes the frame, which must then be solved again.
+                // A joint that only cracked is as stiff as before, so the last solution still stands, unless heat
+                // bent it; one that let go changes the frame, which must then be solved again.
                 if (stale) {
                     if (rounds == settings.maxRounds()) {
                         break;
@@ -415,6 +517,9 @@ public final class StructuralAnalysis {
                     alive[i] = false;
                     falling.add(free.get(i).pos());
                     Arrays.fill(displacement, BlockCholesky.B * i, BlockCholesky.B * i + BlockCholesky.B, 0);
+                    if (heatDisplacement != null) {
+                        Arrays.fill(heatDisplacement, BlockCholesky.B * i, BlockCholesky.B * i + BlockCholesky.B, 0);
+                    }
                 }
             }
         }
@@ -484,6 +589,24 @@ public final class StructuralAnalysis {
                 zs[number[i]] = p.z();
                 rhs[BlockCholesky.B * number[i] + 1] = -free.get(i).massKg() * settings.gravity();
             }
+            // The strain of heat loads the blocks as the forces that would hold each joint as it was.
+            double[] heat = heatDisplacement == null ? null : new double[BlockCholesky.B * count];
+            if (heat != null) {
+                for (int e = 0; e < bonds.size(); e++) {
+                    if (heatLoad[e] == null || !active(e)) {
+                        continue;
+                    }
+                    int[] map = dofMap(bonds.get(e).axis());
+                    for (int l = 0; l < 6; l++) {
+                        if (endI[e] >= 0) {
+                            heat[BlockCholesky.B * number[endI[e]] + map[l]] += heatLoad[e][l];
+                        }
+                        if (endJ[e] >= 0) {
+                            heat[BlockCholesky.B * number[endJ[e]] + map[l]] += heatLoad[e][6 + l];
+                        }
+                    }
+                }
+            }
             BlockCholesky factor;
             try {
                 factor = BlockCholesky.factor(new BlockCholesky.Matrix(diagonal, pairs, off), xs, ys, zs);
@@ -491,10 +614,17 @@ public final class StructuralAnalysis {
                 return false;
             }
             factor.solve(rhs);
+            if (heat != null) {
+                factor.solve(heat);
+            }
             for (int i = 0; i < n; i++) {
                 if (number[i] >= 0) {
                     System.arraycopy(rhs, BlockCholesky.B * number[i], displacement, BlockCholesky.B * i,
                             BlockCholesky.B);
+                    if (heat != null) {
+                        System.arraycopy(heat, BlockCholesky.B * number[i], heatDisplacement, BlockCholesky.B * i,
+                                BlockCholesky.B);
+                    }
                 }
             }
             return true;
@@ -505,33 +635,50 @@ public final class StructuralAnalysis {
          */
         private double evaluate() {
             double worst = 0;
+            double[] weight = new double[BeamElement.DOFS];
             double[] forces = new double[BeamElement.DOFS];
             Mode[] limit = new Mode[1];
+            Mode[] ignored = new Mode[1];
             for (int e = 0; e < bonds.size(); e++) {
                 if (!active(e)) {
                     continue;
                 }
-                endForces(e, forces);
-                double value = check(e, forces, limit);
+                endForces(e, weight, false);
+                double[] f = weight;
+                if (heatDisplacement != null) {
+                    endForces(e, forces, true);
+                    f = forces;
+                }
+                double value = check(e, f, weight, limit);
                 load[e] = value;
                 mode[e] = limit[0];
+                withoutHeat[e] = f == weight ? value : check(e, weight, weight, ignored);
                 worst = Math.max(worst, value);
             }
             return worst;
         }
 
-        /** Computes the forces a joint's ends need, in its own axes: f = K d. */
-        private void endForces(int e, double[] forces) {
+        /**
+         * Computes the forces a joint's ends need, in its own axes: f = K d for the weight alone, and f = K (d - s)
+         * with the strain of heat, where s is how far heat would move the ends if nothing held them.
+         */
+        private void endForces(int e, double[] forces, boolean heat) {
             int[] map = dofMap(bonds.get(e).axis());
             double[] d = new double[BeamElement.DOFS];
             if (endI[e] >= 0) {
                 for (int l = 0; l < 6; l++) {
                     d[l] = displacement[BlockCholesky.B * endI[e] + map[l]];
+                    if (heat) {
+                        d[l] += heatDisplacement[BlockCholesky.B * endI[e] + map[l]];
+                    }
                 }
             }
             if (endJ[e] >= 0) {
                 for (int l = 0; l < 6; l++) {
                     d[6 + l] = displacement[BlockCholesky.B * endJ[e] + map[l]];
+                    if (heat) {
+                        d[6 + l] += heatDisplacement[BlockCholesky.B * endJ[e] + map[l]];
+                    }
                 }
             }
             double[] k = stiffness[e];
@@ -540,7 +687,7 @@ public final class StructuralAnalysis {
                 for (int c = 0; c < BeamElement.DOFS; c++) {
                     sum += k[r * BeamElement.DOFS + c] * d[c];
                 }
-                forces[r] = sum;
+                forces[r] = heat && heatLoad[e] != null ? sum - heatLoad[e][r] : sum;
             }
         }
 
@@ -549,31 +696,69 @@ public final class StructuralAnalysis {
          * where its blocks meet, on each block's side: that is where a crack can form, and in a straight run the
          * bending moment changes little over the half block to the centre, while at a block where runs meet,
          * the centre is no single section at all.
+         *
+         * <p>Heat moves blocks by hairlines, not by lengths, so what it does to a joint depends on whether that
+         * movement lets its strain go. Brittle matter cracks before it moves, so it takes the forces heat adds.
+         * Matter that yields lets the strain of heat go, so its side takes only the forces of the weight. A contact
+         * that heat alone would make slip, rock or open moves that hairline and lets the strain go too, so it holds
+         * if it holds with heat or without, and heat that presses it together lends it friction; heat that presses
+         * hard enough to crush its edge lets nothing go.
+         *
+         * @param f the forces at the joint's ends, heat included
+         * @param weight the forces at its ends from the weight alone
          */
-        private double check(int e, double[] f, Mode[] limit) {
+        private double check(int e, double[] f, double[] weight, Mode[] limit) {
             Contact c = bonds.get(e).contact();
-            // Stress resultants on the section's positive face: at end i, at end j, or halfway, where the blocks
-            // of a free joint meet. Forces are the same all along; moments change linearly.
-            double[] face = switch (kind[e]) {
-                case FREE -> new double[] {f[6], f[7], f[8], f[9], (f[10] - f[4]) * 0.5, (f[11] - f[5]) * 0.5};
-                case GROUND_BELOW -> new double[] {-f[0], -f[1], -f[2], -f[3], -f[4], -f[5]};
-                default -> new double[] {f[6], f[7], f[8], f[9], f[10], f[11]};
-            };
+            double[] face = face(e, f);
             Solid a = endI[e] >= 0 ? solids[endI[e]] : groundSolid(bonds.get(e).pos());
             Solid b = endJ[e] >= 0 ? solids[endJ[e]] : groundSolid(bonds.get(e).other());
             if (contact[e] || state[e] == Frame.Joint.CRACKED) {
                 double friction = Math.min(friction(a), friction(b));
                 double crush = Math.min(compression(a), compression(b));
-                return contactLoad(c, friction, crush, face, limit);
+                double holding = holding(c, friction, face, limit);
+                if (f != weight) {
+                    Mode[] m = new Mode[1];
+                    double cold = holding(c, friction, face(e, weight), m);
+                    if (cold < holding) {
+                        holding = cold;
+                        limit[0] = m[0];
+                    }
+                }
+                if (limit[0] == Mode.PULLED_APART) {
+                    return holding;
+                }
+                double crushing = crushing(c, crush, face);
+                if (crushing > holding) {
+                    limit[0] = Mode.CRUSHING;
+                    return crushing;
+                }
+                return holding;
             }
-            double worst = strength(a, c, face, limit);
+            double[] carried = f == weight ? face : face(e, weight);
+            double worst = strength(a, c, yields(a) ? carried : face, limit);
             Mode[] m = new Mode[1];
-            double v = strength(b, c, face, m);
+            double v = strength(b, c, yields(b) ? carried : face, m);
             if (v > worst) {
                 worst = v;
                 limit[0] = m[0];
             }
             return worst;
+        }
+
+        /**
+         * Returns the stress resultants on a joint's section, on its positive face: at end i, at end j, or halfway,
+         * where the blocks of a free joint meet. Forces are the same all along; moments change linearly.
+         */
+        private double[] face(int e, double[] f) {
+            return switch (kind[e]) {
+                case FREE -> new double[] {f[6], f[7], f[8], f[9], (f[10] - f[4]) * 0.5, (f[11] - f[5]) * 0.5};
+                case GROUND_BELOW -> new double[] {-f[0], -f[1], -f[2], -f[3], -f[4], -f[5]};
+                default -> new double[] {f[6], f[7], f[8], f[9], f[10], f[11]};
+            };
+        }
+
+        private static boolean yields(Solid s) {
+            return s != null && s.failure() == Failure.DUCTILE;
         }
 
         /**
@@ -673,6 +858,23 @@ public final class StructuralAnalysis {
          * stay within friction, and the most pressed edge is not crushed.
          */
         private double contactLoad(Contact c, double friction, double crush, double[] r, Mode[] limit) {
+            double holding = holding(c, friction, r, limit);
+            if (limit[0] == Mode.PULLED_APART) {
+                return holding;
+            }
+            double crushing = crushing(c, crush, r);
+            if (crushing > holding) {
+                limit[0] = Mode.CRUSHING;
+                return crushing;
+            }
+            return holding;
+        }
+
+        /**
+         * Returns how near a contact is to opening, rocking or slipping: pulled apart at all, the resultant beyond the
+         * patch, or the shear and twist beyond friction.
+         */
+        private double holding(Contact c, double friction, double[] r, Mode[] limit) {
             double n = r[0];
             if (n > tolerance) {
                 limit[0] = Mode.PULLED_APART;
@@ -684,30 +886,20 @@ public final class StructuralAnalysis {
             double twist = significant(Math.abs(r[3]));
             double my = significant(Math.abs(r[4]));
             double mz = significant(Math.abs(r[5]));
-            double worst = 0;
-            limit[0] = Mode.TIPPING;
             double tip = Math.max(ratio(my, press * c.halfT()), ratio(mz, press * c.halfS()));
-            if (tip > worst) {
-                worst = tip;
-                limit[0] = Mode.TIPPING;
-            }
             double slide = Math.max(ratio(shear, friction * press), ratio(twist, friction * press * c.frictionRadius()));
-            if (slide > worst) {
-                worst = slide;
-                limit[0] = Mode.SLIDING;
-            }
-            // The most pressed corner, with the pressure spread linearly as if the whole patch bore.
+            limit[0] = slide > tip ? Mode.SLIDING : Mode.TIPPING;
+            return Math.max(tip, slide);
+        }
+
+        /** Returns how near the most pressed corner of a contact is to crushing, the pressure spread linearly. */
+        private static double crushing(Contact c, double crush, double[] r) {
             double edge = 0;
             for (int k = 0; k < c.corners(); k++) {
                 double sigma = r[0] / c.area() + r[4] * c.cornerT(k) / c.inertiaT() - r[5] * c.cornerS(k) / c.inertiaS();
                 edge = Math.max(edge, -sigma);
             }
-            double crushing = ratio(edge, crush);
-            if (crushing > worst) {
-                worst = crushing;
-                limit[0] = Mode.CRUSHING;
-            }
-            return worst;
+            return ratio(edge, crush);
         }
 
         /** Returns a force in newtons, or a moment in newton metres, or zero if it is within the tolerance. */
@@ -733,10 +925,11 @@ public final class StructuralAnalysis {
 
         /**
          * Lets every joint loaded to at least the threshold give way: intact ones crack, cracked ones let go.
-         * Returns whether any let go.
+         * Returns whether the frame must be solved again: a joint let go, or one that cracked was bent by heat,
+         * which it no longer is.
          */
         private boolean giveWay(double threshold) {
-            boolean opened = false;
+            boolean changed = false;
             for (int e = 0; e < bonds.size(); e++) {
                 if (!active(e) || load[e] < threshold || load[e] <= 1.0) {
                     continue;
@@ -744,14 +937,27 @@ public final class StructuralAnalysis {
                 boolean asContact = contact[e] || state[e] == Frame.Joint.CRACKED;
                 if (asContact) {
                     open[e] = true;
-                    opened = true;
+                    changed = true;
                 } else {
                     state[e] = Frame.Joint.CRACKED;
                     Frame.Bond b = bonds.get(e);
-                    cracks.add(new Crack(b.pos(), b.axis(), mode[e], load[e]));
+                    cracks.add(new Crack(b.pos(), b.axis(), mode[e], load[e], withoutHeat[e] <= 1.0));
+                    if (heatShift[e] != null) {
+                        double[] shift = heatShift(e);
+                        if (!Arrays.equals(shift, heatShift[e])) {
+                            heatShift[e] = shift;
+                            heatLoad[e] = shift == null ? null : times(stiffness[e], shift);
+                            changed = true;
+                        }
+                    }
                 }
             }
-            return opened;
+            return changed;
+        }
+
+        /** Returns how far one degree of freedom moved, under weight and heat together. */
+        private double moved(int dof) {
+            return heatDisplacement == null ? displacement[dof] : displacement[dof] + heatDisplacement[dof];
         }
 
         private Result result(int rounds, boolean settled, List<GridPos> falling) {
@@ -761,7 +967,7 @@ public final class StructuralAnalysis {
             for (int e = 0; e < bonds.size(); e++) {
                 Frame.Bond b = bonds.get(e);
                 boolean holds = active(e);
-                bondResults.add(new BondResult(b.pos(), b.axis(), state[e], holds, load[e], mode[e]));
+                bondResults.add(new BondResult(b.pos(), b.axis(), state[e], holds, load[e], mode[e], withoutHeat[e]));
                 if (holds) {
                     if (endI[e] >= 0) {
                         nodeLoad[endI[e]] = Math.max(nodeLoad[endI[e]], load[e]);
@@ -776,8 +982,8 @@ public final class StructuralAnalysis {
             double largestTurn = 0;
             for (int i = 0; i < n; i++) {
                 int o = BlockCholesky.B * i;
-                double[] move = {displacement[o], displacement[o + 1], displacement[o + 2]};
-                double[] turn = {displacement[o + 3], displacement[o + 4], displacement[o + 5]};
+                double[] move = {moved(o), moved(o + 1), moved(o + 2)};
+                double[] turn = {moved(o + 3), moved(o + 4), moved(o + 5)};
                 if (alive[i]) {
                     largestMove = Math.max(largestMove, Math.sqrt(move[0] * move[0] + move[1] * move[1]
                             + move[2] * move[2]));

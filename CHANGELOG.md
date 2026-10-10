@@ -91,6 +91,14 @@ its blocks. Anchor needs Minecraft 26.3 with NeoForge 26.3 and Java 25, on both 
   holds only by pressing and friction and does not crack again, and the world as it was found never cracks.
   `/anchor heat inspect` says how close a block comes to cracking, data packs can name what a block cracks into, and
   the `thermalShock` setting turns it off.
+- **Heat stretches structures.** Built blocks grow as they warm and shrink as they cool, from the climate where they
+  stand, and bend where one side is warmer; where a structure holds them in place, its joints take the strain. A
+  stone span between two walls cooled by 60 K cracks loose and falls, a stone bridge over lava cracks at its ends as
+  it bows, and a span cracked through by heat can stand on the pressing of its expansion held back, then fall as it
+  cools. Brittle matter cracks, metal yields the strain away, and a cracked joint rocks and slips a hairline instead
+  of bearing it, so the sun's warmth cracks nothing. `/anchor structure inspect` says how far heat has stretched a
+  block and how loaded its structure's worst joint would be without heat, and the `thermalExpansion` setting turns it
+  off.
 
 Known limits of this alpha:
 
