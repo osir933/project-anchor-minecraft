@@ -396,12 +396,56 @@ final class BlockCholesky {
      * @param b the right-hand side, six numbers per node in the caller's numbering; replaced by the solution
      */
     void solve(double[] b) {
+        double[] y = permuted(b);
+        forwardInPlace(y);
+        backwardInPlace(y);
+        unpermute(y, b);
+    }
+
+    /**
+     * Applies the first half of a solve: with the matrix factorized as Pᵀ L Lᵀ P, returns L⁻¹ P b. The two halves
+     * turn the generalized eigenproblems of a frame into ordinary symmetric ones.
+     *
+     * @param b six numbers per node in the caller's numbering, left as they are
+     * @return six numbers per elimination step
+     */
+    double[] forward(double[] b) {
+        double[] y = permuted(b);
+        forwardInPlace(y);
+        return y;
+    }
+
+    /**
+     * Applies the second half of a solve: returns Pᵀ L⁻ᵀ z.
+     *
+     * @param z six numbers per elimination step, left as they are
+     * @return six numbers per node in the caller's numbering
+     */
+    double[] backward(double[] z) {
+        double[] y = z.clone();
+        backwardInPlace(y);
+        double[] x = new double[B * n];
+        unpermute(y, x);
+        return x;
+    }
+
+    private double[] permuted(double[] b) {
         double[] y = new double[B * n];
         for (int p = 0; p < n; p++) {
             System.arraycopy(b, B * perm[p], y, B * p, B);
         }
+        return y;
+    }
+
+    private void unpermute(double[] y, double[] x) {
+        for (int p = 0; p < n; p++) {
+            System.arraycopy(y, B * p, x, B * perm[p], B);
+        }
+    }
+
+    /** Solves L z = y in place, front by front: first its own triangle, then pass the result to the steps below. */
+    private void forwardInPlace(double[] y) {
         int fronts = factor.length;
-        // Forward: L z = b, front by front: first its own triangle, then pass the result to the steps below.
         for (int s = 0; s < fronts; s++) {
             double[] l = factor[s];
             int w = stride[s];
@@ -428,8 +472,11 @@ final class BlockCholesky {
                 }
             }
         }
-        // Backward: Lᵀ x = z, fronts in reverse: first take in the steps below, then the front's own triangle.
-        for (int s = fronts - 1; s >= 0; s--) {
+    }
+
+    /** Solves Lᵀ x = z in place, fronts in reverse: first take in the steps below, then the front's own triangle. */
+    private void backwardInPlace(double[] y) {
+        for (int s = factor.length - 1; s >= 0; s--) {
             double[] l = factor[s];
             int w = stride[s];
             int base = B * start[s];
@@ -453,8 +500,40 @@ final class BlockCholesky {
                 y[base + i] = t / l[i * w + i];
             }
         }
-        for (int p = 0; p < n; p++) {
-            System.arraycopy(y, B * p, b, B * perm[p], B);
+    }
+
+    /**
+     * Multiplies a vector by a block matrix.
+     *
+     * @param matrix the matrix
+     * @param x six numbers per node
+     * @return the product, six numbers per node
+     */
+    static double[] multiply(Matrix matrix, double[] x) {
+        double[] y = new double[x.length];
+        double[][] diagonal = matrix.diagonal();
+        for (int a = 0; a < diagonal.length; a++) {
+            addProduct(diagonal[a], false, x, B * a, y, B * a);
+        }
+        int[] pairs = matrix.pairs();
+        double[][] off = matrix.offDiagonal();
+        for (int e = 0; e < off.length; e++) {
+            int a = pairs[2 * e];
+            int b = pairs[2 * e + 1];
+            addProduct(off[e], false, x, B * b, y, B * a);
+            addProduct(off[e], true, x, B * a, y, B * b);
+        }
+        return y;
+    }
+
+    /** Adds a 6 by 6 block, or its transpose, times six numbers of x to six numbers of y. */
+    private static void addProduct(double[] block, boolean transposed, double[] x, int from, double[] y, int to) {
+        for (int r = 0; r < B; r++) {
+            double sum = 0;
+            for (int c = 0; c < B; c++) {
+                sum += (transposed ? block[c * B + r] : block[r * B + c]) * x[from + c];
+            }
+            y[to + r] += sum;
         }
     }
 

@@ -1273,6 +1273,14 @@ public final class HostedWorld {
             return;
         }
         thermalExpansion = enabled;
+        recheckStructures();
+    }
+
+    /**
+     * Makes every built block wait to have its structure checked again, as when the rules structures are judged by
+     * change.
+     */
+    public void recheckStructures() {
         for (Map.Entry<Long, Hosted> e : hosted.entrySet()) {
             uncheckBuilt(e.getKey(), e.getValue());
         }

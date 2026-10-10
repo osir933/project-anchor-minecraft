@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeMap;
+import java.util.function.IntFunction;
 
 /**
  * Works out whether a structure stands under its own weight and the strain of heat, and what breaks if it does
@@ -34,6 +35,16 @@ import java.util.TreeMap;
  * stand, and why heat that presses a cracked span together can hold it up. Heat that crushes the edge of a joint
  * has nowhere to go.
  *
+ * <p>Slender structures bow under what presses them, and bowing loads them more. Forces along the joints soften
+ * the frame where they press and stiffen it where they pull, so under some multiple of its loads, its critical load
+ * factor, it stops resisting some way of bowing and buckles. A structure that could carry ten times its loads or
+ * more bows too little to matter and is judged straight. One that could carry fewer is taken to start bowed in the
+ * shape it buckles into, by a five-hundredth of the length over which it buckles, as no column is quite straight,
+ * and is solved with the softening in: the nearer its loads come to the critical ones, the more it bows, and the
+ * bow bends its joints, which are checked as before. One that cannot carry its loads at all buckles, and the joints
+ * it bends most give way. Heat that presses a structure can buckle it too, unless a side of the joint it presses
+ * through yields: then bowing a little lets the push go, as yielding lets its strain go.
+ *
  * <p>Failure is judged at the faces where blocks meet, on each block's side, because that is where the
  * structure's cross-section is narrowest and where a crack can form, and because a straight run of blocks that is
  * overloaded inside a block is overloaded at the face next to it too: the bending moment changes little over half
@@ -42,9 +53,9 @@ import java.util.TreeMap;
  *
  * <p>What the analysis leaves out, so far: a ductile joint that yields gives way at once, where a real steel
  * frame would keep its full plastic moment there and hand on the rest, so redundant metal frames fall somewhat
- * early; cracked joints do not wedge into arches; slender columns do not buckle, not even when heat pushes on
- * them; the ground does not give, however soft; and deflections are taken to be small. Where they turn out large
- * the result says so.
+ * early; cracked joints do not wedge into arches; only forces along the joints soften the frame, so a beam bent
+ * about its stiff side does not twist aside; the ground does not give, however soft; and deflections are taken to
+ * be small, bowing included. Where they turn out large the result says so.
  */
 public final class StructuralAnalysis {
 
@@ -53,6 +64,20 @@ public final class StructuralAnalysis {
 
     /** Rotations beyond this many radians make small-deflection theory doubtful. */
     static final double LARGE_ROTATION = 0.1;
+
+    /**
+     * A structure that could carry at least this many times its loads before it buckles bows too little under them
+     * to matter, so first-order theory judges it, as Eurocode 3 allows (EN 1993-1-1 5.2.1); one that could carry
+     * fewer is judged in second-order theory.
+     */
+    static final double SECOND_ORDER_BELOW = 10.0;
+
+    /**
+     * No structure is perfectly straight nor perfectly loaded, so a structure judged in second-order theory is taken
+     * to start bowed, in the shape it buckles into, by one part in this many of the length over which it buckles,
+     * about what building codes take for masonry and timber.
+     */
+    static final double IMPERFECTION = 500.0;
 
     private StructuralAnalysis() {
     }
@@ -67,8 +92,10 @@ public final class StructuralAnalysis {
      *     structure breaks symmetrically
      * @param stiffnessFloor the smallest fraction of its cold Young's modulus a material keeps, however hot, so
      *     that the equations stay solvable; its strength is not floored
+     * @param buckling whether slender structures bow under what presses them and buckle; if not, every structure is
+     *     judged in first-order theory
      */
-    public record Settings(double gravity, int maxRounds, double together, double stiffnessFloor) {
+    public record Settings(double gravity, int maxRounds, double together, double stiffnessFloor, boolean buckling) {
 
         /**
          * Validates the settings.
@@ -77,6 +104,7 @@ public final class StructuralAnalysis {
          * @param maxRounds the round limit
          * @param together the tolerance for giving way together
          * @param stiffnessFloor the stiffness floor
+         * @param buckling whether structures buckle
          */
         public Settings {
             if (!(gravity >= 0 && Double.isFinite(gravity))) {
@@ -95,12 +123,22 @@ public final class StructuralAnalysis {
 
         /**
          * Returns the default settings: standard gravity, 64 rounds, joints within 2 percent of the worst give way
-         * together, and materials keep at least one ten-thousandth of their stiffness.
+         * together, materials keep at least one ten-thousandth of their stiffness, and structures buckle.
          *
          * @return the settings
          */
         public static Settings defaults() {
-            return new Settings(PhysicalConstants.STANDARD_GRAVITY, 64, 0.02, 1e-4);
+            return new Settings(PhysicalConstants.STANDARD_GRAVITY, 64, 0.02, 1e-4, true);
+        }
+
+        /**
+         * Returns these settings with buckling switched on or off.
+         *
+         * @param on whether structures buckle
+         * @return the settings
+         */
+        public Settings withBuckling(boolean on) {
+            return new Settings(gravity, maxRounds, together, stiffnessFloor, on);
         }
     }
 
@@ -129,7 +167,8 @@ public final class StructuralAnalysis {
      *
      * @param pos where the block is
      * @param fell whether it was left with no path to the ground and falls
-     * @param displacement how far its centre moved under load, x, y and z in metres; zeros if it fell
+     * @param displacement how far its centre moved under load, x, y and z in metres, including how far a slender
+     *     structure bows one way from its imperfect start; zeros if it fell
      * @param rotation how far it turned, about x, y and z in radians; zeros if it fell
      * @param load the largest load of any joint it keeps, as a fraction of what that joint can take
      */
@@ -148,9 +187,11 @@ public final class StructuralAnalysis {
      * @param mode what limits it
      * @param withoutHeat how loaded the weight it carries would leave it in that solution, without the strain of
      *     heat
+     * @param unbowed how loaded it would be in that solution if the structure did not bow under what presses it:
+     *     its load in first-order theory, the same as its load unless the structure is slender enough to bow
      */
     public record BondResult(GridPos pos, int axis, Frame.Joint state, boolean holds, double load, Mode mode,
-            double withoutHeat) {
+            double withoutHeat, double unbowed) {
     }
 
     /**
@@ -161,8 +202,10 @@ public final class StructuralAnalysis {
      * @param mode how it gave way
      * @param load its load when it gave way, as a fraction of what it could take
      * @param heat whether the strain of heat broke it: the weight it carried alone would have left it whole
+     * @param buckled whether the structure bowing under what pressed it broke it: had it stayed straight, the joint
+     *     would have held
      */
-    public record Crack(GridPos pos, int axis, Mode mode, double load, boolean heat) {
+    public record Crack(GridPos pos, int axis, Mode mode, double load, boolean heat, boolean buckled) {
     }
 
     /**
@@ -174,10 +217,13 @@ public final class StructuralAnalysis {
      * @param falling the free blocks left with no path to the ground, in position order
      * @param rounds how many times the analysis solved the equations
      * @param settled whether it found a state where nothing more gives way within the round limit
+     * @param buckling how many times its loads what is left standing could carry before it buckles, in the last
+     *     solution: the critical load factor; infinite if at least {@link #SECOND_ORDER_BELOW}, which the analysis
+     *     does not work out more closely, or if nothing in it is pressed
      * @param notes where the result is less certain than usual, in plain words
      */
     public record Result(List<BlockResult> blocks, List<BondResult> bonds, List<Crack> cracks, List<GridPos> falling,
-            int rounds, boolean settled, List<String> notes) {
+            int rounds, boolean settled, double buckling, List<String> notes) {
 
         /**
          * Returns how one block ended up.
@@ -273,6 +319,29 @@ public final class StructuralAnalysis {
         private final double[][] heatLoad;
         /** How far each block moves under the strain of heat alone, or {@code null} if heat strains no joint. */
         private final double[] heatDisplacement;
+        /** Each joint's load in first-order theory, as if the structure did not bow. */
+        private final double[] unbowed;
+        /** The force along each joint in the last solution as far as it presses the frame aside, positive pulling. */
+        private final double[] axial;
+        /** The number of each block in the last solution, or -1 if it fell, and how many were numbered. */
+        private int[] number = new int[0];
+        private int count;
+        private int[] xs;
+        private int[] ys;
+        private int[] zs;
+        /** The critical load factor of the last solution, or infinity if first-order theory judged it. */
+        private double buckling = Double.POSITIVE_INFINITY;
+        /**
+         * In second-order theory, how far each block moves under its weight, under the strain of heat (or
+         * {@code null} if heat strains no joint), and as its imperfect start bows; all {@code null} otherwise.
+         */
+        private double[] bowedWeight;
+        private double[] bowedHeat;
+        private double[] bow;
+        /** The shape the frame buckles into if it cannot carry its loads at all, or {@code null}. */
+        private double[] buckled;
+        /** If it cannot, the critical load factor of its weight alone, without what heat presses it with. */
+        private double coldBuckling = Double.POSITIVE_INFINITY;
         private final double tolerance;
         private final List<Crack> cracks = new ArrayList<>();
         private final List<String> notes = new ArrayList<>();
@@ -308,6 +377,8 @@ public final class StructuralAnalysis {
             open = new boolean[m];
             load = new double[m];
             withoutHeat = new double[m];
+            unbowed = new double[m];
+            axial = new double[m];
             mode = new Mode[m];
             heatShift = new double[m][];
             heatLoad = new double[m][];
@@ -430,6 +501,7 @@ public final class StructuralAnalysis {
             while (true) {
                 dropUnsupported(falling);
                 if (!anyAlive()) {
+                    buckling = Double.POSITIVE_INFINITY;
                     settled = true;
                     break;
                 }
@@ -516,9 +588,11 @@ public final class StructuralAnalysis {
                 if (alive[i] && !supported[i]) {
                     alive[i] = false;
                     falling.add(free.get(i).pos());
-                    Arrays.fill(displacement, BlockCholesky.B * i, BlockCholesky.B * i + BlockCholesky.B, 0);
-                    if (heatDisplacement != null) {
-                        Arrays.fill(heatDisplacement, BlockCholesky.B * i, BlockCholesky.B * i + BlockCholesky.B, 0);
+                    for (double[] moves : new double[][] {displacement, heatDisplacement, bowedWeight, bowedHeat, bow,
+                        buckled}) {
+                        if (moves != null) {
+                            Arrays.fill(moves, BlockCholesky.B * i, BlockCholesky.B * i + BlockCholesky.B, 0);
+                        }
                     }
                 }
             }
@@ -527,11 +601,70 @@ public final class StructuralAnalysis {
         /** Solves for the displacements of the blocks still standing; false if the equations are singular. */
         private boolean solve() {
             int n = free.size();
-            int[] number = new int[n];
-            int count = 0;
+            number = new int[n];
+            count = 0;
             for (int i = 0; i < n; i++) {
                 number[i] = alive[i] ? count++ : -1;
             }
+            xs = new int[count];
+            ys = new int[count];
+            zs = new int[count];
+            double[] weight = new double[BlockCholesky.B * count];
+            for (int i = 0; i < n; i++) {
+                if (number[i] < 0) {
+                    continue;
+                }
+                GridPos p = free.get(i).pos();
+                xs[number[i]] = p.x();
+                ys[number[i]] = p.y();
+                zs[number[i]] = p.z();
+                weight[BlockCholesky.B * number[i] + 1] = -free.get(i).massKg() * settings.gravity();
+            }
+            // The strain of heat loads the blocks as the forces that would hold each joint as it was.
+            double[] heat = heatDisplacement == null ? null : new double[BlockCholesky.B * count];
+            if (heat != null) {
+                for (int e = 0; e < bonds.size(); e++) {
+                    if (heatLoad[e] == null || !active(e)) {
+                        continue;
+                    }
+                    int[] map = dofMap(bonds.get(e).axis());
+                    for (int l = 0; l < 6; l++) {
+                        if (endI[e] >= 0) {
+                            heat[BlockCholesky.B * number[endI[e]] + map[l]] += heatLoad[e][l];
+                        }
+                        if (endJ[e] >= 0) {
+                            heat[BlockCholesky.B * number[endJ[e]] + map[l]] += heatLoad[e][6 + l];
+                        }
+                    }
+                }
+            }
+            BlockCholesky factor;
+            try {
+                factor = BlockCholesky.factor(assemble(e -> stiffness[e]), xs, ys, zs);
+            } catch (BlockCholesky.SingularException e) {
+                return false;
+            }
+            toNodes(solved(factor, weight), displacement);
+            if (heat != null) {
+                toNodes(solved(factor, heat), heatDisplacement);
+            }
+            buckling = Double.POSITIVE_INFINITY;
+            bowedWeight = null;
+            bowedHeat = null;
+            bow = null;
+            buckled = null;
+            if (settings.buckling()) {
+                stability(factor, weight, heat);
+            }
+            return true;
+        }
+
+        /**
+         * Assembles a matrix for the blocks still standing from one 12 by 12 matrix per joint, in its own axes.
+         *
+         * @param matrixOf each joint's matrix, or {@code null} to leave the joint out
+         */
+        private BlockCholesky.Matrix assemble(IntFunction<double[]> matrixOf) {
             double[][] diagonal = new double[count][];
             for (int k = 0; k < count; k++) {
                 diagonal[k] = new double[BlockCholesky.B * BlockCholesky.B];
@@ -542,8 +675,11 @@ public final class StructuralAnalysis {
                 if (!active(e)) {
                     continue;
                 }
+                double[] k = matrixOf.apply(e);
+                if (k == null) {
+                    continue;
+                }
                 int[] map = dofMap(bonds.get(e).axis());
-                double[] k = stiffness[e];
                 if (kind[e] == FREE) {
                     int a = number[endI[e]];
                     int b = number[endJ[e]];
@@ -575,110 +711,281 @@ public final class StructuralAnalysis {
                     off[p] = transpose(offList.get(p));
                 }
             }
-            int[] xs = new int[count];
-            int[] ys = new int[count];
-            int[] zs = new int[count];
-            double[] rhs = new double[BlockCholesky.B * count];
-            for (int i = 0; i < n; i++) {
-                if (number[i] < 0) {
-                    continue;
-                }
-                GridPos p = free.get(i).pos();
-                xs[number[i]] = p.x();
-                ys[number[i]] = p.y();
-                zs[number[i]] = p.z();
-                rhs[BlockCholesky.B * number[i] + 1] = -free.get(i).massKg() * settings.gravity();
-            }
-            // The strain of heat loads the blocks as the forces that would hold each joint as it was.
-            double[] heat = heatDisplacement == null ? null : new double[BlockCholesky.B * count];
-            if (heat != null) {
-                for (int e = 0; e < bonds.size(); e++) {
-                    if (heatLoad[e] == null || !active(e)) {
-                        continue;
-                    }
-                    int[] map = dofMap(bonds.get(e).axis());
-                    for (int l = 0; l < 6; l++) {
-                        if (endI[e] >= 0) {
-                            heat[BlockCholesky.B * number[endI[e]] + map[l]] += heatLoad[e][l];
-                        }
-                        if (endJ[e] >= 0) {
-                            heat[BlockCholesky.B * number[endJ[e]] + map[l]] += heatLoad[e][6 + l];
-                        }
-                    }
-                }
-            }
-            BlockCholesky factor;
-            try {
-                factor = BlockCholesky.factor(new BlockCholesky.Matrix(diagonal, pairs, off), xs, ys, zs);
-            } catch (BlockCholesky.SingularException e) {
-                return false;
-            }
-            factor.solve(rhs);
-            if (heat != null) {
-                factor.solve(heat);
-            }
-            for (int i = 0; i < n; i++) {
+            return new BlockCholesky.Matrix(diagonal, pairs, off);
+        }
+
+        /** Returns the solution of the factorized equations for one right-hand side, which is left as it is. */
+        private static double[] solved(BlockCholesky factor, double[] rhs) {
+            double[] x = rhs.clone();
+            factor.solve(x);
+            return x;
+        }
+
+        /** Copies movements of the numbered blocks to every block, zero for those that fell. */
+        private void toNodes(double[] numbered, double[] target) {
+            for (int i = 0; i < number.length; i++) {
                 if (number[i] >= 0) {
-                    System.arraycopy(rhs, BlockCholesky.B * number[i], displacement, BlockCholesky.B * i,
+                    System.arraycopy(numbered, BlockCholesky.B * number[i], target, BlockCholesky.B * i,
                             BlockCholesky.B);
-                    if (heat != null) {
-                        System.arraycopy(heat, BlockCholesky.B * number[i], heatDisplacement, BlockCholesky.B * i,
-                                BlockCholesky.B);
-                    }
+                } else {
+                    Arrays.fill(target, BlockCholesky.B * i, BlockCholesky.B * i + BlockCholesky.B, 0);
                 }
             }
-            return true;
+        }
+
+        private double[] toNodes(double[] numbered) {
+            double[] target = new double[BlockCholesky.B * free.size()];
+            toNodes(numbered, target);
+            return target;
         }
 
         /**
-         * Checks every joint that still holds against what it can take; returns the worst load.
+         * Works out how near the frame is to buckling under what presses it. If near enough to matter, it solves the
+         * frame again in second-order theory, the stiffness lowered by what presses it and the frame bowed a little
+         * to start with, as no real structure is straight; if the frame cannot carry its loads at all, it keeps the
+         * shape the frame buckles into, for {@link #buckle} to break it by.
+         *
+         * <p>Heat that presses matter which yields makes it give a little and so lets the push go, as it lets go
+         * its strain, so it cannot buckle a joint with a ductile side; brittle matter and cracked joints keep it.
+         */
+        private void stability(BlockCholesky factor, double[] weight, double[] heat) {
+            double[] w = new double[BeamElement.DOFS];
+            double[] t = new double[BeamElement.DOFS];
+            double[][] geometric = new double[bonds.size()][];
+            double[] cold = new double[bonds.size()];
+            boolean pressed = false;
+            boolean heated = false;
+            for (int e = 0; e < bonds.size(); e++) {
+                axial[e] = 0;
+                if (!active(e)) {
+                    continue;
+                }
+                elastic(e, displacement, w);
+                double n = w[6];
+                cold[e] = n;
+                if (heatDisplacement != null && !yielding(e)) {
+                    elastic(e, heatDisplacement, t);
+                    double pressing = t[6] - (heatLoad[e] == null ? 0 : heatLoad[e][6]);
+                    n += pressing;
+                    heated |= pressing != 0;
+                }
+                axial[e] = n;
+                if (n != 0) {
+                    geometric[e] = BeamElement.geometric(kind[e] == FREE ? 1.0 : 0.5, n, bonds.get(e).contact());
+                }
+                pressed |= n < -tolerance;
+            }
+            if (!pressed) {
+                return;
+            }
+            BlockCholesky.Matrix kg = assemble(e -> geometric[e]);
+            Buckling.Mode found = Buckling.critical(factor, kg, BlockCholesky.B * count, SECOND_ORDER_BELOW);
+            if (!(found.factor() <= SECOND_ORDER_BELOW)) {
+                return;
+            }
+            buckling = found.factor();
+            double[] shape = toNodes(found.shape());
+            if (buckling > 1) {
+                BlockCholesky bowed = null;
+                try {
+                    bowed = BlockCholesky.factor(assemble(e -> geometric[e] == null ? stiffness[e]
+                            : sum(stiffness[e], geometric[e])), xs, ys, zs);
+                } catch (BlockCholesky.SingularException ex) {
+                    // The estimate came out a little high: the frame cannot carry its loads after all.
+                }
+                if (bowed != null) {
+                    double[] start = found.shape().clone();
+                    double size = imperfection(shape);
+                    for (int i = 0; i < start.length; i++) {
+                        start[i] *= size;
+                    }
+                    // The frame's loads, tilted with its imperfect start, push it as K_G times that start would.
+                    double[] push = BlockCholesky.multiply(kg, start);
+                    for (int i = 0; i < push.length; i++) {
+                        push[i] = -push[i];
+                    }
+                    bowedWeight = toNodes(solved(bowed, weight));
+                    bowedHeat = heat == null ? null : toNodes(solved(bowed, heat));
+                    bow = toNodes(solved(bowed, push));
+                    return;
+                }
+            }
+            buckled = shape;
+            coldBuckling = buckling;
+            if (heated) {
+                double[][] weightOnly = new double[bonds.size()][];
+                for (int e = 0; e < bonds.size(); e++) {
+                    if (active(e) && cold[e] != 0) {
+                        weightOnly[e] = BeamElement.geometric(kind[e] == FREE ? 1.0 : 0.5, cold[e],
+                                bonds.get(e).contact());
+                    }
+                }
+                coldBuckling = Buckling.critical(factor, assemble(e -> weightOnly[e]), BlockCholesky.B * count, 1)
+                        .factor();
+            }
+        }
+
+        /** Returns a joint's stiffness plus its geometric stiffness. */
+        private static double[] sum(double[] a, double[] b) {
+            double[] c = new double[a.length];
+            for (int i = 0; i < a.length; i++) {
+                c[i] = a[i] + b[i];
+            }
+            return c;
+        }
+
+        /** Returns whether either side of a joint yields rather than breaks. */
+        private boolean yielding(int e) {
+            return yields(endI[e] >= 0 ? solids[endI[e]] : groundSolid(bonds.get(e).pos()))
+                    || yields(endJ[e] >= 0 ? solids[endJ[e]] : groundSolid(bonds.get(e).other()));
+        }
+
+        /** Returns the Young's modulus of the softer of the blocks a joint's beam runs through. */
+        private double softer(int e) {
+            if (kind[e] == FREE) {
+                return Math.min(solids[endI[e]].youngs(), solids[endJ[e]].youngs());
+            }
+            return solids[kind[e] == GROUND_BELOW ? endJ[e] : endI[e]].youngs();
+        }
+
+        /**
+         * Returns how far the frame starts bowed, as a multiple of its buckling shape. As Eurocode 3 takes it (EN
+         * 1993-1-1 5.3.2(11)), the shape is scaled so that where it bends a pressed joint most, it bends it as much
+         * as a bow of one {@link #IMPERFECTION}th of its length bends a pinned column that buckles under the force
+         * that buckles that joint.
+         */
+        private double imperfection(double[] shape) {
+            double[] f = new double[BeamElement.DOFS];
+            double sharpest = 0;
+            double moment = 0;
+            double force = 0;
+            for (int e = 0; e < bonds.size(); e++) {
+                if (!active(e) || !(axial[e] < -tolerance)) {
+                    continue;
+                }
+                elastic(e, shape, f);
+                double[] r = face(e, f);
+                Contact c = bonds.get(e).contact();
+                double youngs = softer(e);
+                double bendY = r[4] / (youngs * c.inertiaT());
+                double bendZ = r[5] / (youngs * c.inertiaS());
+                double bend = Math.sqrt(bendY * bendY + bendZ * bendZ);
+                if (bend > sharpest) {
+                    sharpest = bend;
+                    moment = Math.sqrt(r[4] * r[4] + r[5] * r[5]);
+                    force = -axial[e];
+                }
+            }
+            if (!(sharpest > 0)) {
+                // The shape bends nothing pressed, which should not happen: bow it by that part of the frame's size.
+                return extent() / IMPERFECTION;
+            }
+            double critical = buckling * force;
+            double length = Math.PI * Math.sqrt(moment / sharpest / critical);
+            return length / IMPERFECTION * critical / moment;
+        }
+
+        /** Returns the frame's largest size along an axis, in metres, counting the blocks still standing. */
+        private double extent() {
+            int[] lo = {Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE};
+            int[] hi = {Integer.MIN_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE};
+            for (int i = 0; i < free.size(); i++) {
+                if (alive[i]) {
+                    GridPos p = free.get(i).pos();
+                    int[] at = {p.x(), p.y(), p.z()};
+                    for (int a = 0; a < 3; a++) {
+                        lo[a] = Math.min(lo[a], at[a]);
+                        hi[a] = Math.max(hi[a], at[a]);
+                    }
+                }
+            }
+            return Math.max(hi[0] - lo[0], Math.max(hi[1] - lo[1], hi[2] - lo[2])) + 1.0;
+        }
+
+        /**
+         * Checks every joint that still holds against what it can take; returns the worst load. In second-order
+         * theory a joint is judged with the frame bowed from its imperfect start either way, whichever loads it
+         * more; if the frame cannot carry its loads at all, {@link #buckle} decides what breaks.
          */
         private double evaluate() {
             double worst = 0;
             double[] weight = new double[BeamElement.DOFS];
-            double[] forces = new double[BeamElement.DOFS];
+            double[] total = new double[BeamElement.DOFS];
+            double[] bowedW = new double[BeamElement.DOFS];
+            double[] bowedT = new double[BeamElement.DOFS];
+            double[] start = new double[BeamElement.DOFS];
+            double[] w = new double[BeamElement.DOFS];
+            double[] t = new double[BeamElement.DOFS];
             Mode[] limit = new Mode[1];
-            Mode[] ignored = new Mode[1];
+            Mode[] other = new Mode[1];
             for (int e = 0; e < bonds.size(); e++) {
                 if (!active(e)) {
                     continue;
                 }
-                endForces(e, weight, false);
-                double[] f = weight;
-                if (heatDisplacement != null) {
-                    endForces(e, forces, true);
-                    f = forces;
-                }
+                double[] f = forces(e, displacement, heatDisplacement, weight, total);
                 double value = check(e, f, weight, limit);
+                unbowed[e] = value;
+                double cold = f == weight ? value : check(e, weight, weight, other);
+                if (bowedWeight != null) {
+                    double[] g = forces(e, bowedWeight, bowedHeat, bowedW, bowedT);
+                    elastic(e, bow, start);
+                    value = 0;
+                    cold = 0;
+                    for (int sign = 1; sign >= -1; sign -= 2) {
+                        for (int r = 0; r < BeamElement.DOFS; r++) {
+                            w[r] = bowedW[r] + sign * start[r];
+                            t[r] = g[r] + sign * start[r];
+                        }
+                        double[] both = g == bowedW ? w : t;
+                        double v = check(e, both, w, other);
+                        if (v > value) {
+                            value = v;
+                            limit[0] = other[0];
+                        }
+                        cold = Math.max(cold, both == w ? v : check(e, w, w, other));
+                    }
+                }
                 load[e] = value;
                 mode[e] = limit[0];
-                withoutHeat[e] = f == weight ? value : check(e, weight, weight, ignored);
+                withoutHeat[e] = cold;
                 worst = Math.max(worst, value);
+            }
+            if (buckled != null && worst <= 1.0) {
+                worst = buckle(worst);
             }
             return worst;
         }
 
         /**
-         * Computes the forces a joint's ends need, in its own axes: f = K d for the weight alone, and f = K (d - s)
-         * with the strain of heat, where s is how far heat would move the ends if nothing held them.
+         * Computes the forces a joint's ends need for the given movements of the blocks, in its own axes: f = K d
+         * for the weight into {@code weight}, and with the strain of heat f = K (d + d') - K s into {@code total},
+         * where d' is how far heat moves the blocks and s how far it would move the joint's ends if nothing held
+         * them. Returns {@code total}, or {@code weight} itself if heat strains nothing.
          */
-        private void endForces(int e, double[] forces, boolean heat) {
+        private double[] forces(int e, double[] moves, double[] heatMoves, double[] weight, double[] total) {
+            elastic(e, moves, weight);
+            if (heatMoves == null) {
+                return weight;
+            }
+            elastic(e, heatMoves, total);
+            for (int r = 0; r < BeamElement.DOFS; r++) {
+                total[r] += weight[r] - (heatLoad[e] == null ? 0 : heatLoad[e][r]);
+            }
+            return total;
+        }
+
+        /** Computes K d for a joint: the forces its ends need for the given movements of the blocks, in its axes. */
+        private void elastic(int e, double[] moves, double[] forces) {
             int[] map = dofMap(bonds.get(e).axis());
             double[] d = new double[BeamElement.DOFS];
             if (endI[e] >= 0) {
                 for (int l = 0; l < 6; l++) {
-                    d[l] = displacement[BlockCholesky.B * endI[e] + map[l]];
-                    if (heat) {
-                        d[l] += heatDisplacement[BlockCholesky.B * endI[e] + map[l]];
-                    }
+                    d[l] = moves[BlockCholesky.B * endI[e] + map[l]];
                 }
             }
             if (endJ[e] >= 0) {
                 for (int l = 0; l < 6; l++) {
-                    d[6 + l] = displacement[BlockCholesky.B * endJ[e] + map[l]];
-                    if (heat) {
-                        d[6 + l] += heatDisplacement[BlockCholesky.B * endJ[e] + map[l]];
-                    }
+                    d[6 + l] = moves[BlockCholesky.B * endJ[e] + map[l]];
                 }
             }
             double[] k = stiffness[e];
@@ -687,8 +994,119 @@ public final class StructuralAnalysis {
                 for (int c = 0; c < BeamElement.DOFS; c++) {
                     sum += k[r * BeamElement.DOFS + c] * d[c];
                 }
-                forces[r] = heat && heatLoad[e] != null ? sum - heatLoad[e][r] : sum;
+                forces[r] = sum;
             }
+        }
+
+        /**
+         * Breaks a frame that cannot carry its loads: it bows further and further into the shape it buckles into,
+         * one way or the other, until a joint breaks. The joints that break first, and those within the together
+         * tolerance of them, are judged loaded by as many times what buckles the frame as it carries. Returns that,
+         * or the worst load as it was if bowing breaks nothing.
+         */
+        private double buckle(double worst) {
+            int m = bonds.size();
+            double[][] weight = new double[m][];
+            double[][] total = new double[m][];
+            double[][] shape = new double[m][];
+            for (int e = 0; e < m; e++) {
+                if (active(e)) {
+                    weight[e] = new double[BeamElement.DOFS];
+                    total[e] = forces(e, displacement, heatDisplacement, weight[e], new double[BeamElement.DOFS]);
+                    shape[e] = new double[BeamElement.DOFS];
+                    elastic(e, buckled, shape[e]);
+                }
+            }
+            double far = Double.POSITIVE_INFINITY;
+            int way = 1;
+            for (int sign = 1; sign >= -1; sign -= 2) {
+                double a = firstBreak(sign, weight, total, shape);
+                if (a < far) {
+                    far = a;
+                    way = sign;
+                }
+            }
+            if (far == Double.POSITIVE_INFINITY) {
+                notes.add("It is too slender to carry its loads, but bowing breaks none of its joints, so it was left "
+                        + "standing.");
+                return worst;
+            }
+            double[] at = new double[m];
+            Mode[] modes = new Mode[m];
+            Mode[] limit = new Mode[1];
+            double peak = 0;
+            for (int e = 0; e < m; e++) {
+                if (active(e)) {
+                    at[e] = loadAt(e, way * far, weight, total, shape, limit);
+                    modes[e] = limit[0];
+                    peak = Math.max(peak, at[e]);
+                }
+            }
+            double over = 1 / buckling;
+            for (int e = 0; e < m; e++) {
+                if (active(e) && at[e] >= peak * (1 - settings.together())) {
+                    load[e] = over;
+                    mode[e] = modes[e];
+                    // Weight alone breaks it too unless what heat presses the frame with is what buckles it.
+                    if (!(coldBuckling > 1)) {
+                        withoutHeat[e] = over;
+                    }
+                }
+            }
+            return over;
+        }
+
+        /**
+         * Returns how far the frame bows into its buckling shape, one way, before a joint breaks, in metres of the
+         * shape's largest movement; infinity if a bow of kilometres breaks none.
+         */
+        private double firstBreak(int sign, double[][] weight, double[][] total, double[][] shape) {
+            double lo = 0;
+            double hi = 1e-6;
+            while (peak(sign * hi, weight, total, shape) < 1.0) {
+                lo = hi;
+                hi *= 2;
+                if (hi > 1e4) {
+                    return Double.POSITIVE_INFINITY;
+                }
+            }
+            for (int i = 0; i < 40; i++) {
+                double mid = 0.5 * (lo + hi);
+                if (peak(sign * mid, weight, total, shape) < 1.0) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            return hi;
+        }
+
+        /** Returns the largest load of any joint with the frame bowed by a into its buckling shape. */
+        private double peak(double a, double[][] weight, double[][] total, double[][] shape) {
+            Mode[] limit = new Mode[1];
+            double peak = 0;
+            for (int e = 0; e < bonds.size(); e++) {
+                if (active(e)) {
+                    peak = Math.max(peak, loadAt(e, a, weight, total, shape, limit));
+                }
+            }
+            return peak;
+        }
+
+        /** Returns a joint's load with the frame bowed by a into its buckling shape. */
+        private double loadAt(int e, double a, double[][] weight, double[][] total, double[][] shape, Mode[] limit) {
+            double[] w = new double[BeamElement.DOFS];
+            for (int r = 0; r < BeamElement.DOFS; r++) {
+                w[r] = weight[e][r] + a * shape[e][r];
+            }
+            if (total[e] == weight[e]) {
+                return check(e, w, w, limit);
+            }
+            double[] f = new double[BeamElement.DOFS];
+            for (int r = 0; r < BeamElement.DOFS; r++) {
+                f[r] = total[e][r] + a * shape[e][r];
+            }
+            return check(e, f, w, limit);
         }
 
         /**
@@ -941,7 +1359,8 @@ public final class StructuralAnalysis {
                 } else {
                     state[e] = Frame.Joint.CRACKED;
                     Frame.Bond b = bonds.get(e);
-                    cracks.add(new Crack(b.pos(), b.axis(), mode[e], load[e], withoutHeat[e] <= 1.0));
+                    cracks.add(new Crack(b.pos(), b.axis(), mode[e], load[e], withoutHeat[e] <= 1.0,
+                            unbowed[e] <= 1.0));
                     if (heatShift[e] != null) {
                         double[] shift = heatShift(e);
                         if (!Arrays.equals(shift, heatShift[e])) {
@@ -955,8 +1374,14 @@ public final class StructuralAnalysis {
             return changed;
         }
 
-        /** Returns how far one degree of freedom moved, under weight and heat together. */
+        /**
+         * Returns how far one degree of freedom moved under weight and heat together, and as the frame bows from its
+         * imperfect start if it is slender enough to.
+         */
         private double moved(int dof) {
+            if (bowedWeight != null) {
+                return bowedWeight[dof] + bow[dof] + (bowedHeat == null ? 0 : bowedHeat[dof]);
+            }
             return heatDisplacement == null ? displacement[dof] : displacement[dof] + heatDisplacement[dof];
         }
 
@@ -967,7 +1392,8 @@ public final class StructuralAnalysis {
             for (int e = 0; e < bonds.size(); e++) {
                 Frame.Bond b = bonds.get(e);
                 boolean holds = active(e);
-                bondResults.add(new BondResult(b.pos(), b.axis(), state[e], holds, load[e], mode[e], withoutHeat[e]));
+                bondResults.add(new BondResult(b.pos(), b.axis(), state[e], holds, load[e], mode[e], withoutHeat[e],
+                        unbowed[e]));
                 if (holds) {
                     if (endI[e] >= 0) {
                         nodeLoad[endI[e]] = Math.max(nodeLoad[endI[e]], load[e]);
@@ -998,7 +1424,7 @@ public final class StructuralAnalysis {
                         largestMove, largestTurn));
             }
             return new Result(Collections.unmodifiableList(blockResults), Collections.unmodifiableList(bondResults),
-                    List.copyOf(cracks), List.copyOf(falling), rounds, settled, List.copyOf(notes));
+                    List.copyOf(cracks), List.copyOf(falling), rounds, settled, buckling, List.copyOf(notes));
         }
     }
 

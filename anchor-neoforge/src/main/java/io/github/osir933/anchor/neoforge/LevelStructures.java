@@ -107,6 +107,8 @@ final class LevelStructures {
      * @param load how loaded the block's most loaded joint is, as a fraction of what it can take
      * @param worst the structure's most loaded joint that holds, or {@code null} if none does
      * @param settled whether the analysis found a state where nothing more gives way
+     * @param buckling how many times its loads the structure could carry before it buckles; infinite if it is too
+     *     stocky to bow under them, or if slender structures do not buckle
      * @param thermalStress the thermal stress in the block's most loaded cell, for a refined block of brittle
      *     matter, or {@code null}
      * @param fractured whether uneven heat has cracked the block through
@@ -117,8 +119,9 @@ final class LevelStructures {
      *     climate where it stands
      */
     record Look(boolean built, List<Direction> crackedToward, int blocks, int edge, boolean falls, int falling,
-            double load, StructuralAnalysis.BondResult worst, boolean settled, ThermalShock.Result thermalStress,
-            boolean fractured, boolean thermalShock, Frame.Expansion expansion, double unstrainedK) {
+            double load, StructuralAnalysis.BondResult worst, boolean settled, double buckling,
+            ThermalShock.Result thermalStress, boolean fractured, boolean thermalShock, Frame.Expansion expansion,
+            double unstrainedK) {
     }
 
     /** An analysis running in the background, and the game tick it is settled at. */
@@ -141,6 +144,8 @@ final class LevelStructures {
     private volatile double lastMillis;
     private int largest;
     private String failure;
+    /** The buckling setting as last read, so that every structure is checked again when it changes. */
+    private boolean buckling;
 
     /**
      * Starts structures in a level.
@@ -151,6 +156,7 @@ final class LevelStructures {
     LevelStructures(ServerLevel level, HostedWorld hosted) {
         this.level = level;
         this.hosted = hosted;
+        this.buckling = AnchorConfig.get(AnchorConfig.BUCKLING);
     }
 
     /** Runs one game tick: lets blocks fall, settles what is due and analyses what waits, within the tick's time. */
@@ -162,6 +168,11 @@ final class LevelStructures {
             if (!AnchorConfig.get(AnchorConfig.STRUCTURES_ENABLED)) {
                 drop();
                 return;
+            }
+            boolean buckles = AnchorConfig.get(AnchorConfig.BUCKLING);
+            if (buckles != buckling) {
+                buckling = buckles;
+                hosted.recheckStructures();
             }
             fallSome();
             long now = level.getGameTime();
@@ -186,6 +197,7 @@ final class LevelStructures {
     /** Analyses waiting structures in turn, small ones now and the first large one in the background. */
     private void analyseWaiting(long now) {
         int limit = AnchorConfig.get(AnchorConfig.STRUCTURE_BLOCKS);
+        StructuralAnalysis.Settings settings = settings();
         long start = System.nanoTime();
         do {
             Optional<StructureSurvey> next = hosted.nextStructure(limit);
@@ -196,18 +208,23 @@ final class LevelStructures {
             largest = Math.max(largest, survey.blocks());
             if (survey.blocks() > AT_ONCE) {
                 inBackground++;
-                pending = new Pending(survey, CompletableFuture.supplyAsync(() -> timed(survey), WORKER),
+                pending = new Pending(survey, CompletableFuture.supplyAsync(() -> timed(survey, settings), WORKER),
                         now + Math.max(MIN_SETTLE_TICKS, survey.blocks() / BLOCKS_PER_SETTLE_TICK));
                 return;
             }
-            settle(survey, timed(survey));
+            settle(survey, timed(survey, settings));
         } while ((System.nanoTime() - start) / 1e6 < MILLIS_PER_TICK);
     }
 
+    /** Returns how structures are analysed now: by default, with slender ones buckling unless that is off. */
+    private static StructuralAnalysis.Settings settings() {
+        return StructuralAnalysis.Settings.defaults().withBuckling(AnchorConfig.get(AnchorConfig.BUCKLING));
+    }
+
     /** Analyses a structure, noting how long it took. */
-    private StructuralAnalysis.Result timed(StructureSurvey survey) {
+    private StructuralAnalysis.Result timed(StructureSurvey survey, StructuralAnalysis.Settings settings) {
         long start = System.nanoTime();
-        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.frame());
+        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.frame(), settings);
         lastMillis = (System.nanoTime() - start) / 1e6;
         return result;
     }
@@ -303,10 +320,10 @@ final class LevelStructures {
         boolean thermalShock = AnchorConfig.get(AnchorConfig.THERMAL_SHOCK);
         Optional<StructureSurvey> survey = hosted.survey(g, AnchorConfig.get(AnchorConfig.STRUCTURE_BLOCKS));
         if (survey.isEmpty()) {
-            return Optional.of(new Look(false, cracked, 0, 0, false, 0, 0.0, null, true, seen.thermalStress(),
-                    seen.fractured(), thermalShock, seen.expansion(), seen.environmentK()));
+            return Optional.of(new Look(false, cracked, 0, 0, false, 0, 0.0, null, true, Double.POSITIVE_INFINITY,
+                    seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(), seen.environmentK()));
         }
-        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame());
+        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame(), settings());
         StructuralAnalysis.BlockResult block = result.block(g);
         StructuralAnalysis.BondResult worst = null;
         for (StructuralAnalysis.BondResult b : result.bonds()) {
@@ -316,8 +333,8 @@ final class LevelStructures {
         }
         return Optional.of(new Look(true, cracked, survey.get().blocks(), survey.get().edge(),
                 block == null || block.fell(), result.falling().size(), block == null ? 0.0 : block.load(), worst,
-                result.settled(), seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(),
-                seen.environmentK()));
+                result.settled(), result.buckling(), seen.thermalStress(), seen.fractured(), thermalShock,
+                seen.expansion(), seen.environmentK()));
     }
 
     /**

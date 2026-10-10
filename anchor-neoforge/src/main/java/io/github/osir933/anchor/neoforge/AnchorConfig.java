@@ -27,6 +27,7 @@ final class AnchorConfig {
     static final ModConfigSpec.IntValue STRUCTURE_BLOCKS;
     static final ModConfigSpec.BooleanValue THERMAL_SHOCK;
     static final ModConfigSpec.BooleanValue THERMAL_EXPANSION;
+    static final ModConfigSpec.BooleanValue BUCKLING;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -106,6 +107,12 @@ final class AnchorConfig {
                         + "cracking, and a cracked joint lets the strain go. Only matters where structures stand or "
                         + "fall by their strength. Takes effect at once.")
                 .define("thermalExpansion", true);
+        BUCKLING = b.comment("Whether slender structures bow under what presses them and buckle: a tall thin post "
+                        + "bows under a heavy load, which bends it at its foot, and gives way altogether once the load "
+                        + "nears what would buckle it, though it could bear the load standing straight. Heat that "
+                        + "presses a long span can buckle it too, unless it is metal, which yields instead. Only "
+                        + "matters where structures stand or fall by their strength. Takes effect at once.")
+                .define("buckling", true);
         b.pop();
         SPEC = b.build();
     }
