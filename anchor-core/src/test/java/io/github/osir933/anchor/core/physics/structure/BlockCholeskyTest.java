@@ -3,6 +3,7 @@ package io.github.osir933.anchor.core.physics.structure;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.osir933.anchor.core.math.DeterministicRandom;
 import java.util.ArrayList;
@@ -135,6 +136,120 @@ class BlockCholeskyTest {
         assertThrows(BlockCholesky.SingularException.class, () -> BlockCholesky.factor(
                 new BlockCholesky.Matrix(diagonal, new int[0], new double[0][]), new int[] {0, 1}, new int[2],
                 new int[2]));
+    }
+
+    @Test
+    void sharingAmongThreadsChangesNoBit() throws Exception {
+        // A floor-like grid, many branches of fronts, and a solid cube, a few large fronts: both are large enough
+        // to be shared, the factorization and each half of a solve.
+        for (int[] size : new int[][] {{40, 40, 1}, {8, 8, 8}}) {
+            Grid grid = new Grid(size[0], size[1], size[2], 7);
+            BlockCholesky alone = BlockCholesky.factor(grid.matrix(), grid.x, grid.y, grid.z);
+            assertTrue(alone.work() >= BlockCholesky.SHARED_WORK);
+            assertTrue(alone.solveWork() >= BlockCholesky.SHARED_SOLVE);
+            double[] rhs = grid.rhs(8);
+            double[] expected = rhs.clone();
+            alone.solve(expected);
+            for (int threads = 2; threads <= 4; threads++) {
+                BlockCholesky shared = BlockCholesky.factor(grid.matrix(), grid.x, grid.y, grid.z, threads);
+                double[] solution = rhs.clone();
+                shared.solve(solution);
+                assertArrayEquals(expected, solution);
+                assertArrayEquals(alone.forward(rhs), shared.forward(rhs));
+                assertArrayEquals(alone.backward(rhs), shared.backward(rhs));
+            }
+        }
+    }
+
+    @Test
+    void sharedFactorizationReportsTheNodeWorkingAloneWould() {
+        // Two nodes that can move freely, one in each half of the cube: elimination breaks down first at the one
+        // eliminated first, however many threads share it.
+        Grid grid = new Grid(8, 8, 8, 11);
+        for (int node : new int[] {3, 460}) {
+            for (int r = 0; r < 6; r++) {
+                grid.diagonal[node][r * 6 + r] = -1;
+            }
+        }
+        BlockCholesky.SingularException alone = assertThrows(BlockCholesky.SingularException.class,
+                () -> BlockCholesky.factor(grid.matrix(), grid.x, grid.y, grid.z));
+        for (int threads = 2; threads <= 4; threads++) {
+            int sharing = threads;
+            BlockCholesky.SingularException shared = assertThrows(BlockCholesky.SingularException.class,
+                    () -> BlockCholesky.factor(grid.matrix(), grid.x, grid.y, grid.z, sharing));
+            assertEquals(alone.node, shared.node);
+        }
+    }
+
+    /** A grid of nodes joined to their neighbours, with random blocks that make it positive definite. */
+    private static final class Grid {
+        final int[] x;
+        final int[] y;
+        final int[] z;
+        final double[][] diagonal;
+        final int[] pairs;
+        final double[][] off;
+        private final DeterministicRandom random;
+
+        Grid(int nx, int ny, int nz, long seed) {
+            int n = nx * ny * nz;
+            x = new int[n];
+            y = new int[n];
+            z = new int[n];
+            random = new DeterministicRandom(seed);
+            diagonal = new double[n][];
+            List<int[]> joined = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                x[i] = i % nx;
+                y[i] = (i / nx) % ny;
+                z[i] = i / (nx * ny);
+                double[] block = new double[36];
+                for (int r = 0; r < 6; r++) {
+                    for (int c = 0; c < r; c++) {
+                        double v = random.nextDouble() - 0.5;
+                        block[r * 6 + c] = v;
+                        block[c * 6 + r] = v;
+                    }
+                    // Diagonally dominant, so positive definite.
+                    block[r * 6 + r] = 60.0;
+                }
+                diagonal[i] = block;
+                if (x[i] + 1 < nx) {
+                    joined.add(new int[] {i, i + 1});
+                }
+                if (y[i] + 1 < ny) {
+                    joined.add(new int[] {i, i + nx});
+                }
+                if (z[i] + 1 < nz) {
+                    joined.add(new int[] {i, i + nx * ny});
+                }
+            }
+            pairs = new int[2 * joined.size()];
+            off = new double[joined.size()][];
+            for (int e = 0; e < joined.size(); e++) {
+                pairs[2 * e] = joined.get(e)[0];
+                pairs[2 * e + 1] = joined.get(e)[1];
+                double[] block = new double[36];
+                for (int k = 0; k < 36; k++) {
+                    block[k] = random.nextDouble() - 0.5;
+                }
+                off[e] = block;
+            }
+        }
+
+        BlockCholesky.Matrix matrix() {
+            return new BlockCholesky.Matrix(diagonal, pairs, off);
+        }
+
+        /** Returns a right-hand side of random numbers. */
+        double[] rhs(long seed) {
+            DeterministicRandom r = new DeterministicRandom(seed);
+            double[] b = new double[6 * x.length];
+            for (int i = 0; i < b.length; i++) {
+                b[i] = r.nextDouble() * 2 - 1;
+            }
+            return b;
+        }
     }
 
     /** Solves a dense system by Gaussian elimination with partial pivoting. */

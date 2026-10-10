@@ -222,7 +222,7 @@ class ArchingTest {
      * Returns a floor of blocks a block deep, {@code n} blocks square from x = 1 and z = 0, held by ground of the same
      * matter all around it.
      */
-    private static Frame floor(Material material, int n) {
+    static Frame floor(Material material, int n) {
         Frame.Builder b = Frame.builder();
         for (int k = 0; k < n; k++) {
             b.ground(new GridPos(0, 0, k), material.mechanics(), ROOM, 1);

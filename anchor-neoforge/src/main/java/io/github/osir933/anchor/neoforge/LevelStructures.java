@@ -38,8 +38,10 @@ import org.slf4j.Logger;
  * beds. Blocks the game itself would break for want of support, such as torches and bamboo, are left to the game.
  *
  * <p>Small structures are analysed in the tick that asks, up to a few milliseconds of each tick. A larger one is
- * analysed on a thread of its own and settled a fixed number of ticks later, waiting for the analysis if it is late,
- * so a structure falls at the same tick whatever the machine; nothing else is analysed in the meantime.
+ * analysed on a thread of its own, which threads of a pool help with a big one, and settled a fixed number of ticks
+ * later, so a structure falls at the same tick whatever the machine. A machine too slow to finish by then settles
+ * it in the first tick after that it is done, rather than holding up the game; nothing else is analysed in the
+ * meantime.
  */
 final class LevelStructures {
 
@@ -179,7 +181,7 @@ final class LevelStructures {
             fallSome();
             long now = level.getGameTime();
             if (pending != null) {
-                if (now < pending.due()) {
+                if (now < pending.due() || !pending.result().isDone()) {
                     return;
                 }
                 settle(pending.survey(), pending.result().get());
@@ -210,11 +212,15 @@ final class LevelStructures {
             largest = Math.max(largest, survey.blocks());
             if (survey.blocks() > AT_ONCE) {
                 inBackground++;
-                pending = new Pending(survey, CompletableFuture.supplyAsync(() -> timed(survey, settings), WORKER),
+                int threads = threads();
+                pending = new Pending(survey,
+                        CompletableFuture.supplyAsync(() -> timed(survey, settings, threads), WORKER),
                         now + Math.max(MIN_SETTLE_TICKS, survey.blocks() / BLOCKS_PER_SETTLE_TICK));
                 return;
             }
-            settle(survey, timed(survey, settings));
+            // Alone: a small structure gains little from sharing, and the game's own thread must not wait on threads
+            // another level's analysis keeps busy.
+            settle(survey, timed(survey, settings, 1));
         } while ((System.nanoTime() - start) / 1e6 < MILLIS_PER_TICK);
     }
 
@@ -227,10 +233,20 @@ final class LevelStructures {
                 .withArching(AnchorConfig.get(AnchorConfig.ARCHING));
     }
 
+    /**
+     * Returns how many threads may share an analysis: as the setting says, or if it leaves that to Anchor, half the
+     * processors, from 1 up to 4.
+     */
+    private static int threads() {
+        int set = AnchorConfig.get(AnchorConfig.STRUCTURE_THREADS);
+        return set > 0 ? set : Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 1, 4);
+    }
+
     /** Analyses a structure, noting how long it took. */
-    private StructuralAnalysis.Result timed(StructureSurvey survey, StructuralAnalysis.Settings settings) {
+    private StructuralAnalysis.Result timed(StructureSurvey survey, StructuralAnalysis.Settings settings,
+            int threads) {
         long start = System.nanoTime();
-        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.frame(), settings);
+        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.frame(), settings, threads);
         lastMillis = (System.nanoTime() - start) / 1e6;
         return result;
     }
@@ -330,7 +346,7 @@ final class LevelStructures {
                     0, List.of(), seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(),
                     seen.environmentK()));
         }
-        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame(), settings());
+        StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame(), settings(), threads());
         StructuralAnalysis.BlockResult block = result.block(g);
         StructuralAnalysis.BondResult worst = null;
         int hinges = 0;

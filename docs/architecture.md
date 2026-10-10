@@ -250,8 +250,22 @@ ordered by nested dissection of their positions: the structure is cut by a plane
 side, each half is ordered the same way, and the plane comes last, so the order depends only on positions. The
 factorization is multifrontal: the nodes of a cutting plane are eliminated together in one dense front, 48 columns
 at a time, and fronts that differ only by a few zeros merge. A direct solver suits slender structures, where
-iterative ones converge slowly. A wall 1024 blocks long and 16 high (16,384 blocks) solves in about a second; solid
-masses cost more, as they do for any direct solver: a solid cube of 16 blocks a side in about 3 seconds.
+iterative ones converge slowly. A wall 1024 blocks long and 16 high (16,384 blocks) is factorized in about 0.6 s on
+one thread; solid masses cost more, as they do for any direct solver: a solid cube of 16 blocks a side in about
+2.8 s.
+
+A large factorization is shared among the threads of a pool (`StructuralAnalysis.analyse` takes how many): fronts in
+separate branches of the elimination tree are eliminated at once, each taking in its children's updates in the same
+order, and a large front's panel rows and update are split into bands of rows. Solves are shared the same way. In the
+first half each front pulls what the fronts below it pass on, in elimination order, instead of those fronts pushing
+it up, so siblings never write the same numbers; in the second half each front reads the solved fronts above it.
+Every number is worked out by the same operations in the same order however the work is split, and Java never fuses
+a multiply and an add on its own, so the factor and every solution are the same to the bit on any number of threads;
+tests check this down to every load of a cracking floor. On four threads the wall factorizes in 0.26 s and the cube
+in 1.0 s. A whole analysis gains a little less, since the rest of it runs on one thread: a granite floor 44 blocks
+square held on all sides, which cracks over 30 rounds, takes about 1.6 s rather than 3.6 s, and a solid granite cube
+16 blocks a side about 1.5 s rather than 3.7 s. Small factorizations stay on one thread, where sharing would cost
+more than it saves.
 
 The model is checked against beam theory. A cantilever's tip deflection and slope match Timoshenko's closed forms to
 a part in a billion, whichever way it points, and a column shortens by ρgn²/2E. Granite, at 10 MPa in tension,
@@ -488,9 +502,11 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   temperature.
 - **Structures.** Each game tick `LevelStructures` takes the built blocks waiting to be checked and analyses the
   structure each belongs to, up to `maxBlocks` (4096) built blocks at a time. Structures of up to 256 blocks are
-  analysed in the tick, as many as fit into 5 ms; a larger one is analysed on a thread shared by every level and
-  settled exactly max(10, n/64) game ticks after its survey, n being its blocks, waiting for the analysis if it is
-  late, so it falls at the same tick on any machine. Nothing else is analysed meanwhile. A joint that cracks makes
+  analysed in the tick, as many as fit into 5 ms, on the game's thread alone; a larger one is analysed on a thread
+  shared by every level, helped by a pool of `threads` threads (by default half the processors, 1 to 4), and settled
+  max(10, n/64) game ticks after its survey, n being its blocks, so it falls at the same tick on any machine that
+  keeps up. A machine too slow to finish by then settles it in the first tick after that it is done, rather than
+  freezing the game while it waits. Nothing else is analysed meanwhile. A joint that cracks makes
   its block's breaking sound, lower, and a puff of its dust where the two blocks meet. Blocks left with nothing to
   hold them up fall as falling blocks, lowest first and at most 256 a tick, and hurt what they land on as pointed
   dripstone does; blocks that cannot fall whole, such as chests, doors and beds, break where they stand, and blocks

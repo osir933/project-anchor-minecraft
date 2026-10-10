@@ -25,6 +25,7 @@ final class AnchorConfig {
     static final ModConfigSpec.BooleanValue SUN_AND_SKY;
     static final ModConfigSpec.BooleanValue STRUCTURES_ENABLED;
     static final ModConfigSpec.IntValue STRUCTURE_BLOCKS;
+    static final ModConfigSpec.IntValue STRUCTURE_THREADS;
     static final ModConfigSpec.BooleanValue THERMAL_SHOCK;
     static final ModConfigSpec.BooleanValue THERMAL_EXPANSION;
     static final ModConfigSpec.BooleanValue BUCKLING;
@@ -95,6 +96,11 @@ final class AnchorConfig {
                         + "the change that called for it, with the rest of it held still; larger values are truer "
                         + "for big buildings and cost more. Takes effect at once.")
                 .defineInRange("maxBlocks", 4096, 64, 65536);
+        STRUCTURE_THREADS = b.comment("How many threads may share the analysis of a big structure. 0 lets Anchor "
+                        + "choose: half this machine's processors, from 1 up to 4. More threads finish big buildings "
+                        + "sooner; what stands and what falls is the same to the bit however many share the work. "
+                        + "Takes effect at once.")
+                .defineInRange("threads", 0, 0, 64);
         THERMAL_SHOCK = b.comment("Whether built blocks of brittle matter, such as stone and glass, crack through "
                         + "when uneven heat strains them past their strength, as stone and glass put beside lava do: "
                         + "stone turns to cobblestone, stone bricks to cracked stone bricks, and glass shatters. The "
