@@ -213,6 +213,230 @@ final class BeamElement {
         return out;
     }
 
+    /**
+     * Returns the stiffness of a beam whose one end rests on springs at a face, as a block rests on soft ground: the
+     * springs stand for the ground, which gives a little under the face. The beam and the springs carry the same
+     * forces one after the other, so their flexibilities add at the beam's free end, K' = (F + R S⁻¹ Rᵀ)⁻¹, where F
+     * is the beam's flexibility there with the face held, S the springs' stiffness and R carries a movement of the
+     * face to the free end. The result is a beam between the free end and the springs' far side, which holds still;
+     * the force at that side is the force through the face.
+     *
+     * @param stiffness the beam's stiffness, 12 by 12, row-major
+     * @param springs the springs' stiffness against moving along and turning about the beam's local axes at the face,
+     *     six positive numbers in the order of the degrees of freedom
+     * @param faceAtI whether the face is at end i; otherwise it is at end j
+     * @param length the beam's length in metres
+     * @return the 12 by 12 matrix in row-major order
+     */
+    static double[] onSprings(double[] stiffness, double[] springs, boolean faceAtI, double length) {
+        int f = faceAtI ? 6 : 0;
+        int b = faceAtI ? 0 : 6;
+        double[] carry = carry(faceAtI ? length : -length);
+        double[] flex = invert6(block(stiffness, f, f));
+        for (int p = 0; p < 6; p++) {
+            for (int q = 0; q < 6; q++) {
+                double sum = 0;
+                for (int m = 0; m < 6; m++) {
+                    sum += carry[p * 6 + m] * carry[q * 6 + m] / springs[m];
+                }
+                flex[p * 6 + q] += sum;
+            }
+        }
+        double[] kff = invert6(flex);
+        // The ends are held by equal and opposite forces, carried along the beam: K' = Aᵀ K'ff A with A = [-R, I].
+        double[] kr = multiply6(kff, carry);
+        double[] rtk = multiply6(transpose6(carry), kff);
+        double[] rtkr = multiply6(rtk, carry);
+        double[] k = new double[DOFS * DOFS];
+        for (int p = 0; p < 6; p++) {
+            for (int q = 0; q < 6; q++) {
+                k[(f + p) * DOFS + f + q] = kff[p * 6 + q];
+                k[(f + p) * DOFS + b + q] = -kr[p * 6 + q];
+                k[(b + p) * DOFS + f + q] = -rtk[p * 6 + q];
+                k[(b + p) * DOFS + b + q] = rtkr[p * 6 + q];
+            }
+        }
+        return k;
+    }
+
+    /**
+     * Returns the geometric stiffness of a beam that rests on springs at a face, from {@link #onSprings}, with a
+     * hinge at the face if it pivots there. The face moves with the springs, and the beam beyond it with the hinge's
+     * turn; both follow from how far the free end moves, as the springs and the hinge leave it, so the beam's
+     * geometric stiffness, taken over the movements of both its ends, is carried to the free end alone: Pᵀ G P, where
+     * P gives both ends' movements from the free end's. That is the first-order part of condensing the face out of
+     * the stiffness and the geometric stiffness together, and exact where the force along the beam is small next to
+     * what the beam and springs resist, as it is short of buckling a single block.
+     *
+     * @param geometric the beam's geometric stiffness, from {@link #geometric}
+     * @param onSprings its stiffness on the springs without the hinge, from {@link #onSprings}
+     * @param springs the springs' stiffness, as for {@link #onSprings}
+     * @param faceAtI whether the face is at end i
+     * @param length the beam's length in metres
+     * @param hinge if the beam pivots at the face, a point on its hinge line, y and z in metres from the beam's axis,
+     *     and the line's direction, y and z; {@code null} if it does not
+     * @param softness the fraction of its stiffness against turning a hinge keeps, as for {@link #released}
+     * @return the 12 by 12 matrix in row-major order, nonzero only for the free end
+     */
+    static double[] onSpringsGeometric(double[] geometric, double[] onSprings, double[] springs, boolean faceAtI,
+            double length, double[] hinge, double softness) {
+        int f = faceAtI ? 6 : 0;
+        int b = faceAtI ? 0 : 6;
+        double[] carry = carry(faceAtI ? length : -length);
+        double[] kff = block(onSprings, f, f);
+        // The face moves as the springs give under the force through it: S⁻¹ Rᵀ K'ff times the free end's movement.
+        double[] face = multiply6(transpose6(carry), kff);
+        for (int p = 0; p < 6; p++) {
+            for (int q = 0; q < 6; q++) {
+                face[p * 6 + q] /= springs[p];
+            }
+        }
+        if (hinge != null) {
+            double y = hinge[0];
+            double z = hinge[1];
+            double ay = hinge[2];
+            double az = hinge[3];
+            // How the face's section moves as the hinge turns, and how that carries to the free end.
+            double[] h = {az * y - ay * z, 0, 0, 0, ay, az};
+            double[] g = new double[6];
+            for (int p = 0; p < 6; p++) {
+                for (int m = 0; m < 6; m++) {
+                    g[p] += carry[p * 6 + m] * h[m];
+                }
+            }
+            double[] kg = new double[6];
+            double turn = 0;
+            for (int p = 0; p < 6; p++) {
+                for (int m = 0; m < 6; m++) {
+                    kg[p] += kff[p * 6 + m] * g[m];
+                }
+                turn += g[p] * kg[p];
+            }
+            turn *= 1 + softness;
+            // The hinge turns by kg · d / turn; the springs then take the free end's movement less the turn's.
+            double[] fg = new double[6];
+            for (int p = 0; p < 6; p++) {
+                for (int m = 0; m < 6; m++) {
+                    fg[p] += face[p * 6 + m] * g[m];
+                }
+            }
+            for (int p = 0; p < 6; p++) {
+                for (int q = 0; q < 6; q++) {
+                    face[p * 6 + q] -= (fg[p] - h[p]) * kg[q] / turn;
+                }
+            }
+        }
+        double[] gbb = block(geometric, b, b);
+        double[] gbf = block(geometric, b, f);
+        double[] gff = block(geometric, f, f);
+        double[] cross = multiply6(transpose6(face), gbf);
+        double[] inner = multiply6(transpose6(face), multiply6(gbb, face));
+        double[] k = new double[DOFS * DOFS];
+        for (int p = 0; p < 6; p++) {
+            for (int q = 0; q < 6; q++) {
+                k[(f + p) * DOFS + f + q] = gff[p * 6 + q] + cross[p * 6 + q] + cross[q * 6 + p]
+                        + inner[p * 6 + q];
+            }
+        }
+        return k;
+    }
+
+    /**
+     * Returns the 6 by 6 matrix that carries a rigid movement of a beam's section to another section a distance
+     * along the beam's axis: the turn about y and z moves the other section across the beam.
+     */
+    private static double[] carry(double lever) {
+        double[] r = new double[36];
+        for (int p = 0; p < 6; p++) {
+            r[p * 6 + p] = 1;
+        }
+        // A turn about z moves a section farther along +x toward +y; one about y moves it toward -z.
+        r[1 * 6 + 5] = lever;
+        r[2 * 6 + 4] = -lever;
+        return r;
+    }
+
+    /** Returns the 6 by 6 block of a 12 by 12 matrix at (row, col). */
+    private static double[] block(double[] k, int row, int col) {
+        double[] out = new double[36];
+        for (int p = 0; p < 6; p++) {
+            for (int q = 0; q < 6; q++) {
+                out[p * 6 + q] = k[(row + p) * DOFS + col + q];
+            }
+        }
+        return out;
+    }
+
+    private static double[] multiply6(double[] a, double[] b) {
+        double[] out = new double[36];
+        for (int p = 0; p < 6; p++) {
+            for (int q = 0; q < 6; q++) {
+                double sum = 0;
+                for (int m = 0; m < 6; m++) {
+                    sum += a[p * 6 + m] * b[m * 6 + q];
+                }
+                out[p * 6 + q] = sum;
+            }
+        }
+        return out;
+    }
+
+    private static double[] transpose6(double[] a) {
+        double[] out = new double[36];
+        for (int p = 0; p < 6; p++) {
+            for (int q = 0; q < 6; q++) {
+                out[q * 6 + p] = a[p * 6 + q];
+            }
+        }
+        return out;
+    }
+
+    /** Inverts a symmetric positive definite 6 by 6 matrix by Gauss-Jordan elimination with partial pivoting. */
+    private static double[] invert6(double[] m) {
+        double[] a = m.clone();
+        double[] inv = new double[36];
+        for (int p = 0; p < 6; p++) {
+            inv[p * 6 + p] = 1;
+        }
+        for (int c = 0; c < 6; c++) {
+            int pivot = c;
+            for (int r = c + 1; r < 6; r++) {
+                if (Math.abs(a[r * 6 + c]) > Math.abs(a[pivot * 6 + c])) {
+                    pivot = r;
+                }
+            }
+            if (pivot != c) {
+                for (int q = 0; q < 6; q++) {
+                    double t = a[c * 6 + q];
+                    a[c * 6 + q] = a[pivot * 6 + q];
+                    a[pivot * 6 + q] = t;
+                    t = inv[c * 6 + q];
+                    inv[c * 6 + q] = inv[pivot * 6 + q];
+                    inv[pivot * 6 + q] = t;
+                }
+            }
+            double d = a[c * 6 + c];
+            for (int q = 0; q < 6; q++) {
+                a[c * 6 + q] /= d;
+                inv[c * 6 + q] /= d;
+            }
+            for (int r = 0; r < 6; r++) {
+                if (r == c) {
+                    continue;
+                }
+                double factor = a[r * 6 + c];
+                if (factor == 0) {
+                    continue;
+                }
+                for (int q = 0; q < 6; q++) {
+                    a[r * 6 + q] -= factor * a[c * 6 + q];
+                    inv[r * 6 + q] -= factor * inv[c * 6 + q];
+                }
+            }
+        }
+        return inv;
+    }
+
     /** Returns a 12 by 12 matrix times a vector. */
     private static double[] times(double[] m, double[] v) {
         double[] out = new double[DOFS];

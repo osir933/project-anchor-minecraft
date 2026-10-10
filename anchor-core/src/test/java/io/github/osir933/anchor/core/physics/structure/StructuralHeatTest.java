@@ -37,7 +37,7 @@ class StructuralHeatTest {
             PropertyCurve.constant(250e6, TEST), 0.6, PropertyCurve.constant(12e-6, TEST), Double.NaN, TEST);
 
     private static final StructuralAnalysis.Settings WEIGHTLESS =
-            new StructuralAnalysis.Settings(0, 64, 0.02, 1e-4, true, true);
+            new StructuralAnalysis.Settings(0, 64, 0.02, 1e-4, true, true, false);
 
     @Test
     void aBarHeldAtBothEndsPushesOnThemByItsStiffnessTimesItsStrain() {

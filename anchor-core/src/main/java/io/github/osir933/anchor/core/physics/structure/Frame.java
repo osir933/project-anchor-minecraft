@@ -19,7 +19,8 @@ import java.util.TreeMap;
  * clamped at the face. A joint is either intact, joining the blocks as if they were one piece of material, or
  * cracked: then it only carries what pressing and friction can, as do all joints of granular materials such as
  * sand. Heat makes a free block's matter longer, and cold shorter, by its {@linkplain Expansion thermal strain};
- * where the frame stops it moving, its joints are loaded. The ground holds still and does not expand.
+ * where the frame stops it moving, its joints are loaded. The ground holds still and does not expand, though the
+ * analysis may let soft ground give a little under the joints that press on it.
  *
  * <p>Blocks and joints are kept in position order, so a frame built from the same blocks in any order is the
  * same frame.
@@ -43,7 +44,8 @@ public final class Frame {
      * @param temperatureK its temperature, which decides its stiffness and strength
      * @param solidFraction the fraction of its matter that is solid, from above 0 to 1; partly molten blocks are
      *     proportionally weaker
-     * @param massKg the mass of its matter in kilograms; zero for ground
+     * @param massKg the mass of its matter in kilograms; for ground, which holds still, it only presses on the
+     *     ground below it, which bears a footing beside it better the more it is pressed; zero if not known
      * @param ground whether it is part of the ground
      * @param expansion how far heat has stretched its matter; {@link Expansion#NONE} for ground, which does not
      *     expand
@@ -316,7 +318,25 @@ public final class Frame {
          * @throws IllegalArgumentException if a block is already there
          */
         public Builder ground(GridPos pos, Mechanics mechanics, double temperatureK, double solidFraction) {
-            return add(new Block(pos, mechanics, temperatureK, solidFraction, 0.0, true, Expansion.NONE));
+            return ground(pos, mechanics, temperatureK, solidFraction, 0.0);
+        }
+
+        /**
+         * Adds a block of ground whose weight is known, which holds still and holds up what is joined to it, and
+         * presses on the ground below it, so that the ground there bears a footing beside it better.
+         *
+         * @param pos where it is
+         * @param mechanics how its matter carries loads, so that joints to it can break on its side and soft ground
+         *     can give; {@code null} for ground that cannot break
+         * @param temperatureK its temperature in kelvin
+         * @param solidFraction the solid fraction of its matter
+         * @param massKg the mass of its matter in kilograms
+         * @return this builder
+         * @throws IllegalArgumentException if a block is already there
+         */
+        public Builder ground(GridPos pos, Mechanics mechanics, double temperatureK, double solidFraction,
+                double massKg) {
+            return add(new Block(pos, mechanics, temperatureK, solidFraction, massKg, true, Expansion.NONE));
         }
 
         private Builder add(Block block) {

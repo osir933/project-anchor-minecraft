@@ -180,6 +180,144 @@ class BeamElementTest {
         }
     }
 
+    @Test
+    void aBeamOnSpringsGivesAsTheBeamAndTheSpringsDoOneAfterTheOther() {
+        // Half a block from a face to its centre, the face on springs. Pushed at the centre, the beam bends as if
+        // clamped at the face, and the face moves and turns besides as the springs let it, the turn carried half a
+        // metre to the centre.
+        double length = 0.5;
+        double e = 5e10;
+        double g = 2e10;
+        double[] k = BeamElement.stiffness(new double[] {length}, new double[] {e}, new double[] {g}, Contact.FULL);
+        double[] springs = {3e8, 1e8, 2e8, 4e7, 5e7, 6e7};
+        double inertia = 1 / 12.0;
+        double bend = length * length * length / (3 * e * inertia) + length / (g * 5.0 / 6.0);
+        for (boolean faceAtI : new boolean[] {true, false}) {
+            double[] soft = BeamElement.onSprings(k, springs, faceAtI, length);
+            symmetricAndRigid(soft, length);
+            int f = faceAtI ? 6 : 0;
+            double[] flex = invert6(block(soft, f));
+            double[] clamped = invert6(block(k, f));
+            assertEquals(length / e + 1 / springs[0], flex[0], 1e-9 * flex[0]);
+            assertEquals(bend + 1 / springs[1] + length * length / springs[5], flex[7], 1e-9 * flex[7]);
+            assertEquals(bend + 1 / springs[2] + length * length / springs[4], flex[14], 1e-9 * flex[14]);
+            assertEquals(clamped[21] + 1 / springs[3], flex[21], 1e-9 * flex[21]);
+            assertEquals(length / (e * inertia) + 1 / springs[4], flex[28], 1e-9 * flex[28]);
+            assertEquals(length / (e * inertia) + 1 / springs[5], flex[35], 1e-9 * flex[35]);
+        }
+    }
+
+    @Test
+    void onStiffSpringsABeamIsClampedAtTheFace() {
+        double length = 0.5;
+        double axial = -2e6;
+        double softness = 1e-6;
+        double[] k = BeamElement.stiffness(new double[] {length}, new double[] {5e10}, new double[] {2e10},
+                Contact.FULL);
+        double[] springs = {1e25, 1e25, 1e25, 1e25, 1e25, 1e25};
+        double[] kg = BeamElement.geometric(length, axial, Contact.FULL);
+        double[] hinge = {-0.45, 0.02, 0.1, Math.sqrt(0.99)};
+        for (boolean faceAtI : new boolean[] {true, false}) {
+            int f = faceAtI ? 6 : 0;
+            double[] soft = BeamElement.onSprings(k, springs, faceAtI, length);
+            double scale = Math.abs(k[N + 1]);
+            for (int i = 0; i < N * N; i++) {
+                assertEquals(k[i], soft[i], 1e-9 * scale);
+            }
+            // The geometric stiffness is the beam's own at its free end, and with a hinge at the face, a hinged
+            // beam's.
+            double[] plain = BeamElement.onSpringsGeometric(kg, soft, springs, faceAtI, length, null, softness);
+            double[] at = BeamElement.hingeMode(length, faceAtI ? 0 : length, hinge[0], hinge[1], hinge[2],
+                    hinge[3]);
+            double[] released = BeamElement.releasedGeometric(kg, k, at, softness, length, faceAtI ? 0 : length,
+                    axial, hinge[2], hinge[3]);
+            double[] hinged = BeamElement.onSpringsGeometric(kg, soft, springs, faceAtI, length, hinge, softness);
+            double gscale = Math.abs(axial / length);
+            for (int r = 0; r < N; r++) {
+                for (int c = 0; c < N; c++) {
+                    boolean free = r >= f && r < f + 6 && c >= f && c < f + 6;
+                    assertEquals(free ? kg[r * N + c] : 0, plain[r * N + c], 1e-9 * gscale);
+                    assertEquals(free ? released[r * N + c] : 0, hinged[r * N + c], 1e-6 * gscale, r + ", " + c);
+                }
+            }
+        }
+    }
+
+    /** Checks that a beam's matrix is symmetric and that moving it rigidly needs no force. */
+    private static void symmetricAndRigid(double[] k, double length) {
+        double scale = Math.abs(k[N + 1]);
+        for (int r = 0; r < N; r++) {
+            for (int c = 0; c < N; c++) {
+                assertEquals(k[r * N + c], k[c * N + r], 1e-9 * scale);
+            }
+        }
+        double[][] modes = new double[6][N];
+        for (int a = 0; a < 3; a++) {
+            modes[a][a] = 1;
+            modes[a][6 + a] = 1;
+            modes[3 + a][3 + a] = 1;
+            modes[3 + a][9 + a] = 1;
+        }
+        modes[4][8] = -length;
+        modes[5][7] = length;
+        for (double[] mode : modes) {
+            for (double f : times(k, mode)) {
+                assertEquals(0.0, f, 1e-9 * scale);
+            }
+        }
+    }
+
+    /** Returns the 6 by 6 block of a beam's matrix for one end. */
+    private static double[] block(double[] k, int at) {
+        double[] b = new double[36];
+        for (int r = 0; r < 6; r++) {
+            for (int c = 0; c < 6; c++) {
+                b[r * 6 + c] = k[(at + r) * N + at + c];
+            }
+        }
+        return b;
+    }
+
+    /** Inverts a 6 by 6 matrix by Gauss-Jordan elimination. */
+    private static double[] invert6(double[] m) {
+        double[] a = m.clone();
+        double[] inv = new double[36];
+        for (int i = 0; i < 6; i++) {
+            inv[i * 6 + i] = 1;
+        }
+        for (int c = 0; c < 6; c++) {
+            int p = c;
+            for (int r = c + 1; r < 6; r++) {
+                if (Math.abs(a[r * 6 + c]) > Math.abs(a[p * 6 + c])) {
+                    p = r;
+                }
+            }
+            for (int j = 0; j < 6; j++) {
+                double t = a[c * 6 + j];
+                a[c * 6 + j] = a[p * 6 + j];
+                a[p * 6 + j] = t;
+                t = inv[c * 6 + j];
+                inv[c * 6 + j] = inv[p * 6 + j];
+                inv[p * 6 + j] = t;
+            }
+            double d = a[c * 6 + c];
+            for (int j = 0; j < 6; j++) {
+                a[c * 6 + j] /= d;
+                inv[c * 6 + j] /= d;
+            }
+            for (int r = 0; r < 6; r++) {
+                if (r != c) {
+                    double x = a[r * 6 + c];
+                    for (int j = 0; j < 6; j++) {
+                        a[r * 6 + j] -= x * a[c * 6 + j];
+                        inv[r * 6 + j] -= x * inv[c * 6 + j];
+                    }
+                }
+            }
+        }
+        return inv;
+    }
+
     private static double[] times(double[] m, double[] v) {
         double[] out = new double[N];
         for (int r = 0; r < N; r++) {

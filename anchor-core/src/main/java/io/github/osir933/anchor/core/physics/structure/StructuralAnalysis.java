@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.function.IntFunction;
 
 /**
@@ -60,14 +61,27 @@ import java.util.function.IntFunction;
  * <p>Failure is judged at the faces where blocks meet, on each block's side, because that is where the
  * structure's cross-section is narrowest and where a crack can form, and because a straight run of blocks that is
  * overloaded inside a block is overloaded at the face next to it too: the bending moment changes little over half
- * a block. The ground is hemmed in by the earth around and below it, so pressing does not crush it, but a joint
- * to it can still crack on its side: stone cannot hang from soil.
+ * a block. The ground is hemmed in by the earth around and below it, so pressing does not crush a block of it, but
+ * a joint to it can still crack on its side: stone cannot hang from soil.
+ *
+ * <p>The ground gives a little under what stands on it, and soft ground gives a lot. The blocks of a structure that
+ * stand side by side on one level of the ground press on it as one footing, and the ground holds a footing as an
+ * elastic half-space holds a rigid one: it sinks under the footing's weight, and slides, rocks and twists under what
+ * pushes, tips or turns it, the more so the softer the ground and the smaller the footing. So a tower on soft ground
+ * leans further than on rock, and one tall enough leans over as its weight tips it further than the ground can right
+ * it, which the analysis finds as it finds buckling; and an arch on soft ground spreads its feet and sags. A footing
+ * on ground below it presses the ground no harder than the ground bears, which Eurocode 7 sets from the soil's
+ * strength and friction, the weight of the ground beside the footing, how wide and long the footing is, where the
+ * load presses it and how far the load leans. A footing pressed harder sinks: the ground gives way under the part of
+ * the footing the load presses, is pressed aside, and the blocks there let go of it. Ground that cannot break holds
+ * still.
  *
  * <p>What the analysis leaves out, so far: a ductile joint that yields gives way at once, where a real steel
  * frame would keep its full plastic moment there and hand on the rest, so redundant metal frames fall somewhat
  * early; only forces along the joints soften the frame, so a beam bent about its stiff side does not twist aside;
- * the ground does not give, however soft, so it holds an arch's ends however hard they push; and deflections are
- * taken to be small, bowing included. Where they turn out large the result says so.
+ * the ground under a footing is taken to be the same all the way down as where the footing touches it, and ground
+ * beside a structure holds whatever pushes on it; and deflections are taken to be small, bowing included. Where they
+ * turn out large the result says so.
  */
 public final class StructuralAnalysis {
 
@@ -119,6 +133,13 @@ public final class StructuralAnalysis {
     /** A hinge that turns back, closing, by more than this many radians closes. */
     static final double HINGE_CLOSING = 1e-12;
 
+    /**
+     * Each face of a footing turns against the ground with at least this fraction of its share of the footing's
+     * resistance to rocking and twisting, even where its joints pressing in step already rock it as stiffly as the
+     * ground would, so that every face's springs stay solvable.
+     */
+    static final double SPRING_FLOOR = 1e-6;
+
     private StructuralAnalysis() {
     }
 
@@ -136,9 +157,11 @@ public final class StructuralAnalysis {
      *     judged in first-order theory
      * @param arching whether a cracked joint that would tip pivots on the edge it presses, still carrying the thrust
      *     an arch needs, rather than letting go
+     * @param softGround whether the ground gives under what stands on it, as the soil's stiffness says, and footings
+     *     that press it harder than it bears sink into it; if not, the ground holds still however soft it is
      */
     public record Settings(double gravity, int maxRounds, double together, double stiffnessFloor, boolean buckling,
-            boolean arching) {
+            boolean arching, boolean softGround) {
 
         /**
          * Validates the settings.
@@ -149,6 +172,7 @@ public final class StructuralAnalysis {
          * @param stiffnessFloor the stiffness floor
          * @param buckling whether structures buckle
          * @param arching whether cracked joints pivot on their edges
+         * @param softGround whether the ground gives
          */
         public Settings {
             if (!(gravity >= 0 && Double.isFinite(gravity))) {
@@ -167,13 +191,13 @@ public final class StructuralAnalysis {
 
         /**
          * Returns the default settings: standard gravity, 64 rounds, joints within 2 percent of the worst give way
-         * together, materials keep at least one ten-thousandth of their stiffness, structures buckle and cracked
-         * joints pivot on their edges.
+         * together, materials keep at least one ten-thousandth of their stiffness, structures buckle, cracked
+         * joints pivot on their edges and the ground gives.
          *
          * @return the settings
          */
         public static Settings defaults() {
-            return new Settings(PhysicalConstants.STANDARD_GRAVITY, 64, 0.02, 1e-4, true, true);
+            return new Settings(PhysicalConstants.STANDARD_GRAVITY, 64, 0.02, 1e-4, true, true, true);
         }
 
         /**
@@ -183,7 +207,7 @@ public final class StructuralAnalysis {
          * @return the settings
          */
         public Settings withBuckling(boolean on) {
-            return new Settings(gravity, maxRounds, together, stiffnessFloor, on, arching);
+            return new Settings(gravity, maxRounds, together, stiffnessFloor, on, arching, softGround);
         }
 
         /**
@@ -193,7 +217,17 @@ public final class StructuralAnalysis {
          * @return the settings
          */
         public Settings withArching(boolean on) {
-            return new Settings(gravity, maxRounds, together, stiffnessFloor, buckling, on);
+            return new Settings(gravity, maxRounds, together, stiffnessFloor, buckling, on, softGround);
+        }
+
+        /**
+         * Returns these settings with soft ground switched on or off.
+         *
+         * @param on whether the ground gives under what stands on it
+         * @return the settings
+         */
+        public Settings withSoftGround(boolean on) {
+            return new Settings(gravity, maxRounds, together, stiffnessFloor, buckling, arching, on);
         }
     }
 
@@ -214,7 +248,9 @@ public final class StructuralAnalysis {
         /** A cracked or granular joint slides or twists further than friction allows. */
         SLIDING,
         /** A cracked or granular joint is pressed harder than the material can take. */
-        CRUSHING
+        CRUSHING,
+        /** The ground under a footing is pressed harder than it can bear, and the footing sinks into it. */
+        SINKING
     }
 
     /**
@@ -267,6 +303,21 @@ public final class StructuralAnalysis {
     }
 
     /**
+     * How the ground held up one footing: blocks of the structure that stand side by side on one level of soft
+     * ground below them, which the ground holds as one.
+     *
+     * @param ground the blocks of ground the footing stands on, in position order
+     * @param load how hard it pressed the ground in the last solution that included it, as a fraction of what the
+     *     ground bears there; zero if nothing pressed it
+     * @param settlement how far the ground squeezed under it in that solution, in metres: the mean over its area of
+     *     how far the ground gave under each block
+     * @param sunk the blocks of ground it pressed aside as it sank into them, in position order; empty if the ground
+     *     held it
+     */
+    public record Footing(List<GridPos> ground, double load, double settlement, List<GridPos> sunk) {
+    }
+
+    /**
      * The outcome of an analysis.
      *
      * @param blocks every free block, in position order
@@ -279,9 +330,25 @@ public final class StructuralAnalysis {
      *     solution: the critical load factor; infinite if at least {@link #SECOND_ORDER_BELOW}, which the analysis
      *     does not work out more closely, or if nothing in it is pressed
      * @param notes where the result is less certain than usual, in plain words
+     * @param footings how the soft ground held up each footing, in the order of their first joint; empty if the
+     *     ground holds still
      */
     public record Result(List<BlockResult> blocks, List<BondResult> bonds, List<Crack> cracks, List<GridPos> falling,
-            int rounds, boolean settled, double buckling, List<String> notes) {
+            int rounds, boolean settled, double buckling, List<String> notes, List<Footing> footings) {
+
+        /**
+         * Returns the blocks of ground that footings pressed aside as they sank.
+         *
+         * @return the blocks, in position order
+         */
+        public List<GridPos> sunk() {
+            List<GridPos> all = new ArrayList<>();
+            for (Footing f : footings) {
+                all.addAll(f.sunk());
+            }
+            all.sort(null);
+            return List.copyOf(all);
+        }
 
         /**
          * Returns how one block ended up.
@@ -442,6 +509,20 @@ public final class StructuralAnalysis {
          * it would only let the frame bow further.
          */
         private final boolean[] snapped;
+        /** For each joint to soft ground, its half beam before the ground's give is added; {@code null} otherwise. */
+        private final double[][] beam;
+        /**
+         * For each joint to soft ground, the springs that stand for the ground's give at its face, along and about
+         * its axes; {@code null} for any other joint.
+         */
+        private final double[][] soil;
+        /** How far the ground squeezed under each joint to soft ground in the last solution that included it, in m. */
+        private final double[] squeeze;
+        /** The footing each joint to soft ground belongs to, or -1, and which of its joints it is. */
+        private final int[] bedOf;
+        private final int[] slotOf;
+        /** The footings: the joints of one level that touch soft ground side by side, which it holds as one. */
+        private final List<Bed> beds = new ArrayList<>();
 
         Run(Frame frame, Settings settings, int threads) {
             this.settings = settings;
@@ -517,6 +598,15 @@ public final class StructuralAnalysis {
                             new double[] {sa.shear()}, b.contact());
                     contact[e] = sa.failure() == Failure.GRANULAR || granular(groundAt.get(b.other()));
                 }
+            }
+            beam = new double[m][];
+            soil = new double[m][];
+            squeeze = new double[m];
+            bedOf = new int[m];
+            slotOf = new int[m];
+            Arrays.fill(bedOf, -1);
+            if (settings.softGround()) {
+                findBeds();
             }
             System.arraycopy(stiffness, 0, base, 0, m);
             boolean heated = false;
@@ -598,6 +688,401 @@ public final class StructuralAnalysis {
 
         private static boolean granular(Frame.Block ground) {
             return ground != null && ground.mechanics() != null && ground.mechanics().failure() == Failure.GRANULAR;
+        }
+
+        /** Returns where a joint to the ground meets it. */
+        private GridPos groundPos(int e) {
+            return kind[e] == GROUND_BELOW ? bonds.get(e).pos() : bonds.get(e).other();
+        }
+
+        /** Returns a position's coordinate along an axis. */
+        private static int coord(GridPos p, int axis) {
+            return switch (axis) {
+                case 0 -> p.x();
+                case 1 -> p.y();
+                default -> p.z();
+            };
+        }
+
+        /**
+         * Gathers the joints to ground that can give, ground that can break, into footings: joints along the same axis
+         * with the ground on the same side, whose ground lies side by side on one level.
+         */
+        private void findBeds() {
+            int m = bonds.size();
+            int[] root = new int[m];
+            List<TreeMap<GridPos, Integer>> where = new ArrayList<>(6);
+            for (int i = 0; i < 6; i++) {
+                where.add(new TreeMap<>());
+            }
+            for (int e = 0; e < m; e++) {
+                root[e] = e;
+                if (kind[e] == FREE) {
+                    continue;
+                }
+                Frame.Block g = groundAt.get(groundPos(e));
+                if (g == null || g.mechanics() == null) {
+                    continue;
+                }
+                beam[e] = stiffness[e];
+                where.get(2 * bonds.get(e).axis() + (kind[e] == GROUND_BELOW ? 0 : 1)).put(groundPos(e), e);
+            }
+            for (int side = 0; side < 6; side++) {
+                int axis = side / 2;
+                TreeMap<GridPos, Integer> level = where.get(side);
+                for (GridPos g : level.keySet()) {
+                    for (int d = 1; d <= 2; d++) {
+                        Integer next = level.get(g.offset(Direction.POSITIVE.get((axis + d) % 3)));
+                        if (next != null) {
+                            root[find(root, level.get(g))] = find(root, next);
+                        }
+                    }
+                }
+            }
+            int[] bedOfRoot = new int[m];
+            Arrays.fill(bedOfRoot, -1);
+            List<List<Integer>> groups = new ArrayList<>();
+            for (int e = 0; e < m; e++) {
+                if (beam[e] == null) {
+                    continue;
+                }
+                int r = find(root, e);
+                if (bedOfRoot[r] < 0) {
+                    bedOfRoot[r] = groups.size();
+                    groups.add(new ArrayList<>());
+                }
+                bedOf[e] = bedOfRoot[r];
+                slotOf[e] = groups.get(bedOfRoot[r]).size();
+                groups.get(bedOfRoot[r]).add(e);
+            }
+            for (List<Integer> group : groups) {
+                beds.add(bed(group));
+            }
+        }
+
+        /** Makes a footing of joints to soft ground, in frame order, with each one's soil. */
+        private Bed bed(List<Integer> group) {
+            int n = group.size();
+            int first = group.get(0);
+            int axis = bonds.get(first).axis();
+            GridPos origin = groundPos(first);
+            Bed bed = new Bed(n, axis == 1 && kind[first] == GROUND_BELOW);
+            for (int k = 0; k < n; k++) {
+                int e = group.get(k);
+                GridPos g = groundPos(e);
+                bed.joints[k] = e;
+                bed.cellS[k] = coord(g, (axis + 1) % 3) - coord(origin, (axis + 1) % 3);
+                bed.cellT[k] = coord(g, (axis + 2) % 3) - coord(origin, (axis + 2) % 3);
+                bed.patch[k] = bonds.get(e).contact().rectangles();
+                Frame.Block ground = groundAt.get(g);
+                Mechanics mech = ground.mechanics();
+                Solid s = Solid.of(mech, ground.temperatureK(), ground.solidFraction(), settings.stiffnessFloor());
+                bed.shear[k] = s.shear();
+                bed.poisson[k] = mech.poissonRatio();
+                bed.tanPhi[k] = s.friction();
+                bed.cohesion[k] = s.failure() == Failure.GRANULAR ? 0 : Soil.cohesion(s.compression(), s.friction());
+                bed.unitWeight[k] = ground.massKg() * settings.gravity();
+            }
+            if (bed.bears) {
+                bed.surcharge = surcharge(group);
+            }
+            return bed;
+        }
+
+        /**
+         * Returns how hard the ground beside a footing on the ground presses at the level of its base: the weight of
+         * the ground stacked beside the footing's blocks, from that level up, on each square metre, the mean all
+         * around the footing. Ground the survey did not take in, or whose weight it does not know, counts for nothing.
+         */
+        private double surcharge(List<Integer> group) {
+            TreeSet<GridPos> on = new TreeSet<>();
+            for (int e : group) {
+                on.add(bonds.get(e).other());
+            }
+            TreeSet<GridPos> around = new TreeSet<>();
+            for (GridPos p : on) {
+                for (GridPos q : new GridPos[] {p.offset(1, 0, 0), p.offset(-1, 0, 0), p.offset(0, 0, 1),
+                    p.offset(0, 0, -1)}) {
+                    if (!on.contains(q)) {
+                        around.add(q);
+                    }
+                }
+            }
+            double total = 0;
+            for (GridPos p : around) {
+                for (GridPos q = p;; q = q.offset(0, 1, 0)) {
+                    Frame.Block g = groundAt.get(q);
+                    if (g == null || !(g.massKg() > 0)) {
+                        break;
+                    }
+                    total += g.massKg() * settings.gravity();
+                }
+            }
+            return total / around.size();
+        }
+
+        /**
+         * Works out the ground's give under each footing whose joints have changed since it was last worked out, from
+         * the joints that still hold, and rests those joints on it. The ground holds the footing as a whole as an
+         * elastic half-space holds a rigid footing of its shape; each joint rests on its share of that by area,
+         * springs at its face, which stand for the footing pressing, sliding and twisting together and so for the
+         * part of its rocking that its joints pressing in step make. The rest of the footing's rocking and twisting,
+         * the part that the ground's pressure gathering toward a rigid footing's edges adds, is shared by area among
+         * springs that turn each joint's face.
+         */
+        private void soften() {
+            for (Bed bed : beds) {
+                int active = 0;
+                for (int e : bed.joints) {
+                    if (active(e)) {
+                        active++;
+                    }
+                }
+                if (active == bed.active) {
+                    continue;
+                }
+                bed.active = active;
+                bed.covered = new int[active];
+                bed.footprint = null;
+                if (active == 0) {
+                    continue;
+                }
+                int[] cellS = new int[active];
+                int[] cellT = new int[active];
+                double[][] patches = new double[active][];
+                int n = 0;
+                for (int k = 0; k < bed.joints.length; k++) {
+                    if (active(bed.joints[k])) {
+                        bed.covered[n] = k;
+                        cellS[n] = bed.cellS[k];
+                        cellT[n] = bed.cellT[k];
+                        patches[n] = bed.patch[k];
+                        n++;
+                    }
+                }
+                Footprint print = new Footprint(cellS, cellT, patches);
+                bed.footprint = print;
+                double area = print.area();
+                boolean longS = print.widthS() >= print.widthT();
+                double halfLong = Math.max(print.widthS(), print.widthT()) / 2;
+                double halfShort = Math.min(print.widthS(), print.widthT()) / 2;
+                double polar = print.spreadS() + print.spreadT();
+                double[][] springs = new double[active][6];
+                double[] aboutS = new double[active];
+                double[] aboutT = new double[active];
+                double[] twist = new double[active];
+                double pressing = 0;
+                double pressingS = 0;
+                double pressingT = 0;
+                double slidingS = 0;
+                double slidingT = 0;
+                double slidingSt = 0;
+                double slidingTs = 0;
+                for (int k = 0; k < active; k++) {
+                    int slot = bed.covered[k];
+                    double share = bonds.get(bed.joints[slot]).contact().area() / area;
+                    double g = bed.shear[slot];
+                    double nu = bed.poisson[slot];
+                    double along = share * Soil.sliding(g, nu, area, halfLong, halfShort, true);
+                    double across = share * Soil.sliding(g, nu, area, halfLong, halfShort, false);
+                    springs[k][0] = share * Soil.pressing(g, nu, area, halfLong);
+                    springs[k][1] = longS ? along : across;
+                    springs[k][2] = longS ? across : along;
+                    // Rocking about the s axis lifts the face along t, and about the t axis along s.
+                    aboutS[k] = share * Soil.rocking(g, nu, print.spreadT(), halfLong, halfShort);
+                    aboutT[k] = share * Soil.rocking(g, nu, print.spreadS(), halfLong, halfShort);
+                    twist[k] = share * Soil.twisting(g, polar, halfLong, halfShort);
+                    double s = cellS[k] + 0.5;
+                    double t = cellT[k] + 0.5;
+                    pressing += springs[k][0];
+                    pressingS += springs[k][0] * s;
+                    pressingT += springs[k][0] * t;
+                    slidingS += springs[k][1];
+                    slidingT += springs[k][2];
+                    slidingSt += springs[k][1] * t;
+                    slidingTs += springs[k][2] * s;
+                }
+                // How much the springs at the faces already rock and twist the footing, about where they centre.
+                double cs = pressingS / pressing;
+                double ct = pressingT / pressing;
+                double ts = slidingTs / slidingT;
+                double st = slidingSt / slidingS;
+                double rockS = 0;
+                double rockT = 0;
+                double turn = 0;
+                double wantS = 0;
+                double wantT = 0;
+                double wantTurn = 0;
+                for (int k = 0; k < active; k++) {
+                    double s = cellS[k] + 0.5;
+                    double t = cellT[k] + 0.5;
+                    rockS += springs[k][0] * (t - ct) * (t - ct);
+                    rockT += springs[k][0] * (s - cs) * (s - cs);
+                    turn += springs[k][1] * (t - st) * (t - st) + springs[k][2] * (s - ts) * (s - ts);
+                    wantS += aboutS[k];
+                    wantT += aboutT[k];
+                    wantTurn += twist[k];
+                }
+                double moreS = Math.max(0, wantS - rockS) / wantS;
+                double moreT = Math.max(0, wantT - rockT) / wantT;
+                double moreTurn = Math.max(0, wantTurn - turn) / wantTurn;
+                for (int k = 0; k < active; k++) {
+                    // A face turns at least a little against the ground, so that its springs stay solvable.
+                    springs[k][3] = Math.max(moreTurn, SPRING_FLOOR) * twist[k];
+                    springs[k][4] = Math.max(moreS, SPRING_FLOOR) * aboutS[k];
+                    springs[k][5] = Math.max(moreT, SPRING_FLOOR) * aboutT[k];
+                    int e = bed.joints[bed.covered[k]];
+                    soil[e] = springs[k];
+                    base[e] = BeamElement.onSprings(beam[e], soil[e], kind[e] == GROUND_BELOW, 0.5);
+                    stiffness[e] = pivot[e] == null ? base[e] : BeamElement.released(base[e], mode(e), HINGE_SOFTNESS);
+                    heatLoad[e] = heatShift[e] == null ? null : times(stiffness[e], heatShift[e]);
+                }
+            }
+        }
+
+        /**
+         * Adds what a joint presses its footing's ground with to the footing's sums from {@code at}: the force pressing
+         * the ground, its moments about the plane's axes, which say where it acts, and the forces along the ground. A
+         * cracked or granular joint presses with all its force, where that acts, or not at all if it is pulled; an
+         * intact joint presses with the part of its stress that presses, where that acts, as its bond holds the rest.
+         *
+         * @param r the stress resultants on the joint's face
+         */
+        private void press(int e, double[] r, double[] sums, int at) {
+            Bed bed = beds.get(bedOf[e]);
+            int k = slotOf[e];
+            double p;
+            double y;
+            double z;
+            if (!contact[e] && state[e] == Frame.Joint.INTACT) {
+                double[] pressing = bonds.get(e).contact().pressing(r[0], r[4], r[5]);
+                p = pressing[0];
+                y = pressing[1];
+                z = pressing[2];
+            } else {
+                p = significant(-r[0]);
+                y = p > 0 ? r[5] / p : 0;
+                z = p > 0 ? -r[4] / p : 0;
+            }
+            sums[at] += p;
+            sums[at + 1] += p * (bed.cellS[k] + 0.5 + y);
+            sums[at + 2] += p * (bed.cellT[k] + 0.5 + z);
+            sums[at + 3] += r[1];
+            sums[at + 4] += r[2];
+        }
+
+        /**
+         * Returns how loaded the ground under a footing is: the force pressing the footing into the ground over the
+         * force the ground bears, from Eurocode 7, under the part of the footing centred where the force acts. Each
+         * joint's ground bears its share of that part as its own soil does. Puts where the force acts into
+         * {@code point}, or NaN if nothing presses. A footing pressed by nothing loads its ground not at all, and so
+         * does one pressed beyond its edge, which tips rather than sinks, as its joints judge.
+         *
+         * @param sums the sums from {@link #press}, from {@code at}
+         */
+        private double bearing(Bed bed, double[] sums, int at, double[] point) {
+            double v = sums[at];
+            point[0] = Double.NaN;
+            point[1] = Double.NaN;
+            if (!(v > tolerance) || bed.footprint == null) {
+                return 0;
+            }
+            point[0] = sums[at + 1] / v;
+            point[1] = sums[at + 2] / v;
+            Footprint.Effective part = bed.footprint.effective(point[0], point[1]);
+            if (!(part.area() > 0)) {
+                return 0;
+            }
+            double h = length(sums[at + 3], sums[at + 4]);
+            double toLength = part.toLength(sums[at + 3], sums[at + 4]);
+            double[] overlap = part.overlap();
+            double bears = 0;
+            for (int k = 0; k < overlap.length; k++) {
+                if (overlap[k] > 0) {
+                    int slot = bed.covered[k];
+                    bears += overlap[k] * Soil.bearing(bed.cohesion[slot], bed.tanPhi[slot], bed.unitWeight[slot],
+                            bed.surcharge, part.width(), part.length(), part.area(), v, h, toLength);
+                }
+            }
+            return ratio(v, bears);
+        }
+
+        /**
+         * Lets the ground under a footing give way where the force acts: under each joint most of whose patch the part
+         * of the footing centred on the force covers, or if none, under the one it covers most. Those joints let go,
+         * and the ground under them is pressed aside.
+         */
+        private void sink(Bed bed) {
+            double[] overlap = bed.footprint.effective(bed.pointS, bed.pointT).overlap();
+            int most = 0;
+            boolean any = false;
+            for (int k = 0; k < overlap.length; k++) {
+                int e = bed.joints[bed.covered[k]];
+                if (overlap[k] > 0.5 * bonds.get(e).contact().area()) {
+                    sink(bed, e);
+                    any = true;
+                }
+                if (overlap[k] > overlap[most]) {
+                    most = k;
+                }
+            }
+            if (!any) {
+                sink(bed, bed.joints[bed.covered[most]]);
+            }
+        }
+
+        private void sink(Bed bed, int e) {
+            open[e] = true;
+            load[e] = bed.load;
+            mode[e] = Mode.SINKING;
+            bed.sunk.add(groundPos(e));
+        }
+
+        /** A footing: the joints of one level that touch soft ground side by side, which the ground holds as one. */
+        private static final class Bed {
+            /** The joints, in frame order. */
+            final int[] joints;
+            /** The cell of each joint's ground on the plane of its face, along s and t, from the first joint's. */
+            final int[] cellS;
+            final int[] cellT;
+            /** Each joint's patch, four numbers per rectangle as {@link Contact#rectangles} gives them. */
+            final double[][] patch;
+            /** Whether the ground lies below the footing, so that it bears what presses down on it. */
+            final boolean bears;
+            /** For each joint, its ground's shear modulus and Poisson's ratio, for how it gives. */
+            final double[] shear;
+            final double[] poisson;
+            /** For each joint, its ground's cohesion, tangent of its angle of friction and unit weight, for bearing. */
+            final double[] cohesion;
+            final double[] tanPhi;
+            final double[] unitWeight;
+            /** How hard the ground beside the footing presses at the level of its base, in pascals. */
+            double surcharge;
+            /** How many of its joints still held when its springs were last worked out, or -1 before. */
+            int active = -1;
+            /** Which joints the footprint covers, and the footprint of those that still hold. */
+            int[] covered = new int[0];
+            Footprint footprint;
+            /** How loaded its ground is, as a fraction of what it bears, in the last solution. */
+            double load;
+            /** Where the force pressed it in the case that loaded it most, in its plane's coordinates, or NaN. */
+            double pointS = Double.NaN;
+            double pointT = Double.NaN;
+            /** The ground it pressed aside as it sank. */
+            final List<GridPos> sunk = new ArrayList<>();
+
+            Bed(int n, boolean bears) {
+                joints = new int[n];
+                cellS = new int[n];
+                cellT = new int[n];
+                patch = new double[n][];
+                this.bears = bears;
+                shear = new double[n];
+                poisson = new double[n];
+                cohesion = new double[n];
+                tanPhi = new double[n];
+                unitWeight = new double[n];
+            }
         }
 
         Result run() {
@@ -711,6 +1196,7 @@ public final class StructuralAnalysis {
 
         /** Solves for the displacements of the blocks still standing; false if the equations are singular. */
         private boolean solve() {
+            soften();
             int n = free.size();
             number = new int[n];
             count = 0;
@@ -935,10 +1421,17 @@ public final class StructuralAnalysis {
             }
         }
 
-        /** Returns a joint's geometric stiffness under a force along it, with its hinge if it pivots on an edge. */
+        /**
+         * Returns a joint's geometric stiffness under a force along it, with its hinge if it pivots on an edge, and
+         * with the ground's give if it rests on soft ground.
+         */
         private double[] geometric(int e, double axial) {
             double length = kind[e] == FREE ? 1.0 : 0.5;
             double[] kg = BeamElement.geometric(length, axial, bonds.get(e).contact());
+            if (soil[e] != null) {
+                return BeamElement.onSpringsGeometric(kg, base[e], soil[e], kind[e] == GROUND_BELOW, length, pivot[e],
+                        HINGE_SOFTNESS);
+            }
             if (pivot[e] == null) {
                 return kg;
             }
@@ -973,13 +1466,16 @@ public final class StructuralAnalysis {
          * Returns how far the frame starts bowed, as a multiple of its buckling shape. As Eurocode 3 takes it (EN
          * 1993-1-1 5.3.2(11)), the shape is scaled so that where it bends a pressed joint most, it bends it as much
          * as a bow of one {@link #IMPERFECTION}th of its length bends a pinned column that buckles under the force
-         * that buckles that joint.
+         * that buckles that joint. A frame that leans over on soft ground as a whole barely bends as it does, which
+         * would make that bow far too large, so it starts leaning on the ground by at most one part in
+         * {@link #IMPERFECTION}, as out of plumb as a tower that starts bowed over its height.
          */
         private double imperfection(double[] shape) {
             double[] f = new double[BeamElement.DOFS];
             double sharpest = 0;
             double moment = 0;
             double force = 0;
+            double tilt = 0;
             for (int e = 0; e < bonds.size(); e++) {
                 if (!active(e) || !(axial[e] < -tolerance)) {
                     continue;
@@ -996,14 +1492,22 @@ public final class StructuralAnalysis {
                     moment = Math.sqrt(r[4] * r[4] + r[5] * r[5]);
                     force = -axial[e];
                 }
+                if (soil[e] != null) {
+                    // The ground's springs turn under the force the joint presses them with.
+                    int at = kind[e] == GROUND_BELOW ? 0 : BeamElement.DOFS / 2;
+                    double turnY = f[at + 4] / soil[e][4];
+                    double turnZ = f[at + 5] / soil[e][5];
+                    tilt = Math.max(tilt, Math.sqrt(turnY * turnY + turnZ * turnZ));
+                }
             }
+            double leaning = tilt > 0 ? 1 / (IMPERFECTION * tilt) : Double.POSITIVE_INFINITY;
             if (!(sharpest > 0)) {
                 // The shape bends nothing pressed, which should not happen: bow it by that part of the frame's size.
-                return extent() / IMPERFECTION;
+                return Math.min(extent() / IMPERFECTION, leaning);
             }
             double critical = buckling * force;
             double length = Math.PI * Math.sqrt(moment / sharpest / critical);
-            return length / IMPERFECTION * critical / moment;
+            return Math.min(length / IMPERFECTION * critical / moment, leaning);
         }
 
         /** Returns the frame's largest size along an axis, in metres, counting the blocks still standing. */
@@ -1024,9 +1528,11 @@ public final class StructuralAnalysis {
         }
 
         /**
-         * Checks every joint that still holds against what it can take; returns the worst load. In second-order
-         * theory a joint is judged with the frame bowed from its imperfect start either way, whichever loads it
-         * more; if the frame cannot carry its loads at all, {@link #buckle} decides what breaks.
+         * Checks every joint that still holds against what it can take, and the ground under every footing against
+         * what it bears; returns the worst load. In second-order theory a joint or footing is judged with the frame
+         * bowed from its imperfect start either way, whichever loads it more; if the frame cannot carry its loads at
+         * all, {@link #buckle} decides what breaks. The ground gives way as it yields, which lets the strain of heat
+         * go, so a footing is judged by the weight it carries alone.
          */
         private double evaluate() {
             double worst = 0;
@@ -1041,12 +1547,25 @@ public final class StructuralAnalysis {
             Mode[] other = new Mode[1];
             double[] seen = new double[7];
             double[] most = new double[7];
+            // For each footing on the ground, what its joints press it with: straight, and bowed one way and the other.
+            double[][] pressed = new double[beds.size()][];
+            for (int i = 0; i < beds.size(); i++) {
+                pressed[i] = beds.get(i).bears ? new double[15] : null;
+            }
             for (int e = 0; e < bonds.size(); e++) {
                 if (!active(e)) {
                     continue;
                 }
                 double[] f = forces(e, displacement, heatDisplacement, weight, total);
-                force[e] = face(e, f)[0];
+                double[] r = face(e, f);
+                force[e] = r[0];
+                if (soil[e] != null) {
+                    squeeze[e] = -r[0] / soil[e][0];
+                }
+                double[] sums = bedOf[e] < 0 ? null : pressed[bedOf[e]];
+                if (sums != null) {
+                    press(e, face(e, weight), sums, 0);
+                }
                 double value = check(e, f, weight, limit, most);
                 unbowed[e] = value;
                 double cold = f == weight ? value : check(e, weight, weight, other, null);
@@ -1056,9 +1575,12 @@ public final class StructuralAnalysis {
                     value = 0;
                     cold = 0;
                     for (int sign = 1; sign >= -1; sign -= 2) {
-                        for (int r = 0; r < BeamElement.DOFS; r++) {
-                            w[r] = bowedW[r] + sign * start[r];
-                            t[r] = g[r] + sign * start[r];
+                        for (int k = 0; k < BeamElement.DOFS; k++) {
+                            w[k] = bowedW[k] + sign * start[k];
+                            t[k] = g[k] + sign * start[k];
+                        }
+                        if (sums != null) {
+                            press(e, face(e, w), sums, sign == 1 ? 5 : 10);
                         }
                         double[] both = g == bowedW ? w : t;
                         double v = check(e, both, w, other, seen);
@@ -1076,6 +1598,27 @@ public final class StructuralAnalysis {
                 governing[e] = Arrays.copyOf(most, 6);
                 escaped[e] = most[6] != 0;
                 snapped[e] = false;
+                worst = Math.max(worst, value);
+            }
+            double[] point = new double[2];
+            double[] downPoint = new double[2];
+            for (int i = 0; i < beds.size(); i++) {
+                Bed bed = beds.get(i);
+                if (pressed[i] == null) {
+                    continue;
+                }
+                double value = bearing(bed, pressed[i], 0, point);
+                if (bowedWeight != null) {
+                    value = bearing(bed, pressed[i], 5, point);
+                    double down = bearing(bed, pressed[i], 10, downPoint);
+                    if (down > value) {
+                        value = down;
+                        System.arraycopy(downPoint, 0, point, 0, 2);
+                    }
+                }
+                bed.load = value;
+                bed.pointS = point[0];
+                bed.pointT = point[1];
                 worst = Math.max(worst, value);
             }
             if (buckled != null && worst <= 1.0) {
@@ -1127,9 +1670,9 @@ public final class StructuralAnalysis {
 
         /**
          * Breaks a frame that cannot carry its loads: it bows further and further into the shape it buckles into,
-         * one way or the other, until a joint breaks. The joints that break first, and those within the together
-         * tolerance of them, are judged loaded by as many times what buckles the frame as it carries. Returns that,
-         * or the worst load as it was if bowing breaks nothing.
+         * one way or the other, until a joint breaks or the ground under a footing gives way. The joints and footings
+         * that give way first, and those within the together tolerance of them, are judged loaded by as many times
+         * what buckles the frame as it carries. Returns that, or the worst load as it was if bowing breaks nothing.
          */
         private double buckle(double worst) {
             int m = bonds.size();
@@ -1169,6 +1712,11 @@ public final class StructuralAnalysis {
                     peak = Math.max(peak, at[e]);
                 }
             }
+            double[][] points = new double[beds.size()][2];
+            double[] grounds = bedsAt(way * far, weight, shape, points);
+            for (double g : grounds) {
+                peak = Math.max(peak, g);
+            }
             double over = 1 / buckling;
             for (int e = 0; e < m; e++) {
                 if (active(e) && at[e] >= peak * (1 - settings.together())) {
@@ -1181,7 +1729,47 @@ public final class StructuralAnalysis {
                     }
                 }
             }
+            for (int i = 0; i < beds.size(); i++) {
+                if (grounds[i] >= peak * (1 - settings.together()) && grounds[i] > 0) {
+                    Bed bed = beds.get(i);
+                    bed.load = over;
+                    bed.pointS = points[i][0];
+                    bed.pointT = points[i][1];
+                }
+            }
             return over;
+        }
+
+        /**
+         * Returns how loaded the ground under each footing on the ground is with the frame bowed by a into its
+         * buckling shape, by the weight alone, as {@link #evaluate} judges it, and puts where the force acts on each
+         * into {@code points}; zero for a footing that does not bear.
+         */
+        private double[] bedsAt(double a, double[][] weight, double[][] shape, double[][] points) {
+            double[] out = new double[beds.size()];
+            if (beds.isEmpty()) {
+                return out;
+            }
+            double[][] sums = new double[beds.size()][];
+            double[] w = new double[BeamElement.DOFS];
+            for (int e = 0; e < bonds.size(); e++) {
+                if (!active(e) || bedOf[e] < 0 || !beds.get(bedOf[e]).bears) {
+                    continue;
+                }
+                for (int r = 0; r < BeamElement.DOFS; r++) {
+                    w[r] = weight[e][r] + a * shape[e][r];
+                }
+                if (sums[bedOf[e]] == null) {
+                    sums[bedOf[e]] = new double[5];
+                }
+                press(e, face(e, w), sums[bedOf[e]], 0);
+            }
+            for (int i = 0; i < beds.size(); i++) {
+                if (sums[i] != null) {
+                    out[i] = bearing(beds.get(i), sums[i], 0, points[i]);
+                }
+            }
+            return out;
         }
 
         /**
@@ -1209,7 +1797,10 @@ public final class StructuralAnalysis {
             return hi;
         }
 
-        /** Returns the largest load of any joint with the frame bowed by a into its buckling shape. */
+        /**
+         * Returns the largest load of any joint, or of the ground under any footing, with the frame bowed by a into its
+         * buckling shape.
+         */
         private double peak(double a, double[][] weight, double[][] total, double[][] shape) {
             Mode[] limit = new Mode[1];
             double peak = 0;
@@ -1217,6 +1808,9 @@ public final class StructuralAnalysis {
                 if (active(e)) {
                     peak = Math.max(peak, loadAt(e, a, weight, total, shape, limit));
                 }
+            }
+            for (double g : bedsAt(a, weight, shape, new double[beds.size()][2])) {
+                peak = Math.max(peak, g);
             }
             return peak;
         }
@@ -1602,9 +2196,10 @@ public final class StructuralAnalysis {
         }
 
         /**
-         * Lets every joint loaded to at least the threshold give way: intact ones crack, cracked ones pivot on the
-         * edge they press if they tip and can, and let go otherwise. Returns whether the frame must be solved again:
-         * a joint let go or pivots, or one that cracked was bent by heat, which it no longer is.
+         * Lets every joint and footing loaded to at least the threshold give way: the ground under a footing gives
+         * way where the load presses it, and the joints there let go; then intact joints crack, cracked ones pivot on
+         * the edge they press if they tip and can, and let go otherwise. Returns whether the frame must be solved
+         * again: a footing sank, a joint let go or pivots, or one that cracked was bent by heat, which it no longer is.
          *
          * <p>Of a run of neighbouring joints that would start to pivot, joints that share blocks, only the most loaded
          * does, and the rest wait for the next solution: a block that starts to pivot eases the joints beside it, and
@@ -1612,6 +2207,12 @@ public final class StructuralAnalysis {
          */
         private boolean giveWay(double threshold) {
             boolean changed = false;
+            for (Bed bed : beds) {
+                if (bed.bears && bed.footprint != null && bed.load >= threshold && bed.load > 1.0) {
+                    sink(bed);
+                    changed = true;
+                }
+            }
             boolean[] bridge = settings.arching() ? bridges() : null;
             List<Integer> over = new ArrayList<>();
             for (int e = 0; e < bonds.size(); e++) {
@@ -1956,8 +2557,28 @@ public final class StructuralAnalysis {
                         + "%.2f rad; real material would sag visibly, and small-deflection theory may misjudge it.",
                         largestMove, largestTurn));
             }
+            List<Footing> footings = new ArrayList<>();
+            for (Bed bed : beds) {
+                if (!bed.bears) {
+                    continue;
+                }
+                List<GridPos> ground = new ArrayList<>(bed.joints.length);
+                double area = 0;
+                double squeezed = 0;
+                for (int e : bed.joints) {
+                    ground.add(groundPos(e));
+                    double a = bonds.get(e).contact().area();
+                    area += a;
+                    squeezed += a * squeeze[e];
+                }
+                ground.sort(null);
+                List<GridPos> sunk = new ArrayList<>(bed.sunk);
+                sunk.sort(null);
+                footings.add(new Footing(List.copyOf(ground), bed.load, squeezed / area, List.copyOf(sunk)));
+            }
             return new Result(Collections.unmodifiableList(blockResults), Collections.unmodifiableList(bondResults),
-                    List.copyOf(cracks), List.copyOf(falling), rounds, settled, buckling, List.copyOf(notes));
+                    List.copyOf(cracks), List.copyOf(falling), rounds, settled, buckling, List.copyOf(notes),
+                    List.copyOf(footings));
         }
     }
 
