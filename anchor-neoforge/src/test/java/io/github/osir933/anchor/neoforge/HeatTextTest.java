@@ -210,18 +210,18 @@ class HeatTextTest {
     void inspectingAStructureSaysHowItsGroundHoldsItUp() {
         GridPos ground = new GridPos(0, 0, 0);
         assertEquals("Its most loaded footing presses the ground with 32% of what the ground bears there, and has "
-                + "settled 2.1 mm into it", StructureCommands.ground(new StructuralAnalysis.Footing(List.of(ground),
+                + "settled 2.1 mm into it", HeatText.ground(new StructuralAnalysis.Footing(List.of(ground),
                         0.317, 0.00207, List.of())));
         assertEquals("Its most loaded footing presses the ground with 5% of what the ground bears there, and has "
-                + "settled 25 mm into it", StructureCommands.ground(new StructuralAnalysis.Footing(List.of(ground),
+                + "settled 25 mm into it", HeatText.ground(new StructuralAnalysis.Footing(List.of(ground),
                         0.05, 0.025, List.of())));
         assertEquals("Its most loaded footing presses the ground with 0% of what the ground bears there, and has "
-                + "settled less than 0.1 mm into it", StructureCommands.ground(new StructuralAnalysis.Footing(
+                + "settled less than 0.1 mm into it", HeatText.ground(new StructuralAnalysis.Footing(
                         List.of(ground), 1e-4, 4e-6, List.of())));
         assertEquals("Its most loaded footing presses the ground with 106% of what the ground bears there, so the "
-                + "ground gives way: 1 block of it would be pushed aside", StructureCommands.ground(
+                + "ground gives way: 1 block of it would be pushed aside", HeatText.ground(
                         new StructuralAnalysis.Footing(List.of(ground), 1.06, 0.004, List.of(ground))));
-        assertNull(StructureCommands.ground(null));
+        assertNull(HeatText.ground(null));
     }
 
     @Test

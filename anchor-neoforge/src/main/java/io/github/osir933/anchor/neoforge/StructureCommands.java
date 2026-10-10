@@ -158,7 +158,7 @@ final class StructureCommands {
                 lines.add("  " + look.hinges() + (look.hinges() == 1 ? " cracked joint of the structure pivots"
                         : " cracked joints of the structure pivot") + " on an edge, pressing on as an arch's do");
             }
-            String ground = ground(look.footing());
+            String ground = HeatText.ground(look.footing());
             if (ground != null) {
                 lines.add("  " + ground);
             }
@@ -203,29 +203,6 @@ final class StructureCommands {
                     + (names.size() == 1 ? " pivots" : " pivot") + " on an edge, carrying the push of an arch");
         }
         return lines;
-    }
-
-    /**
-     * Describes how the ground holds up a structure's most loaded footing: how hard it is pressed against what it
-     * bears, how far it has settled, and whether it gives way.
-     *
-     * @param footing the footing, or {@code null} if the structure stands on no ground that gives
-     * @return the line, or {@code null} if there is nothing to say
-     */
-    static String ground(StructuralAnalysis.Footing footing) {
-        if (footing == null) {
-            return null;
-        }
-        String pressed = "Its most loaded footing presses the ground with " + percent(footing.load()) + " of what the "
-                + "ground bears there";
-        int sunk = footing.sunk().size();
-        if (sunk > 0) {
-            return pressed + ", so the ground gives way: " + sunk + (sunk == 1 ? " block" : " blocks") + " of it would "
-                    + "be pushed aside";
-        }
-        double mm = 1000 * footing.settlement();
-        return pressed + ", and has settled " + (mm < 0.05 ? "less than 0.1 mm"
-                : String.format(Locale.ROOT, mm < 10 ? "%.1f mm" : "%.0f mm", mm)) + " into it";
     }
 
     /** Names the way a joint is loaded, as its share of what it can take does not say. */

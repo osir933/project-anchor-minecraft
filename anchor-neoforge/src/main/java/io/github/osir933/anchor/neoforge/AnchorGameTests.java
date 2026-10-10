@@ -1281,9 +1281,9 @@ final class AnchorGameTests {
                 helper.assertTrue(look.built() && !look.falls() && footing != null && footing.sunk().isEmpty()
                         && footing.load() > 0.3 && footing.load() < 0.7 && footing.settlement() > 1e-4
                         && footing.settlement() < 1e-2, "the iron should stand on the sand, settling a little into "
-                        + "it: " + summary(look) + "; " + StructureCommands.ground(footing));
+                        + "it: " + summary(look) + "; " + HeatText.ground(footing));
                 helper.setBlock(gold, Blocks.GOLD_BLOCK);
-                loaded[0] = "the gold went on at tick " + helper.getTick() + ", when " + StructureCommands.ground(
+                loaded[0] = "the gold went on at tick " + helper.getTick() + ", when " + HeatText.ground(
                         footing).toLowerCase(Locale.ROOT);
             }
             helper.assertBlockPresent(Blocks.IRON_BLOCK, iron.below());
