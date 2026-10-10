@@ -2,6 +2,7 @@ package io.github.osir933.anchor.neoforge;
 
 import com.mojang.logging.LogUtils;
 import io.github.osir933.anchor.core.host.BlockAppearance;
+import io.github.osir933.anchor.core.matter.Mechanics;
 import io.github.osir933.anchor.core.matter.Phase;
 import io.github.osir933.anchor.core.physics.structure.Shape;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
@@ -12,6 +13,7 @@ import java.util.TreeSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.EmptyBlockGetter;
@@ -46,6 +48,10 @@ import org.slf4j.Logger;
  * Thin blocks that count as the air around them carry loads in a frame of their guessed material, as a fence's wood
  * or a pane's glass does, and blocks the game makes unbreakable, such as bedrock and barriers, hold still wherever
  * they are put.
+ *
+ * <p>A built block of brittle matter that thermal stress cracks through turns into a cracked or broken form of
+ * itself where there is one: cobblestone for stone, cobbled deepslate for deepslate and cracked stone bricks for stone
+ * bricks, and glass shatters. Other blocks stay as they are, with every joint cracked.
  */
 final class BlockMapper {
 
@@ -151,7 +157,7 @@ final class BlockMapper {
         MaterialEntry entry = state.typeHolder().getData(AnchorDataMaps.MATERIALS);
         BlockAppearance a = entry == null ? null : listed(state, entry);
         if (a == null) {
-            a = builtIn(state);
+            a = fracturing(builtIn(state), state);
         }
         return unbreakable(state) ? a.asImmovable() : a;
     }
@@ -187,6 +193,7 @@ final class BlockMapper {
                     a = a.becoming(p, replacement);
                 }
             }
+            a = e.fractured().isPresent() ? a.fracturingInto(e.fractured().get()) : fracturing(a, state);
             return lit(state, a, source);
         } catch (IllegalArgumentException mistake) {
             warnOnce(state, "has a material entry Anchor cannot use (" + mistake.getMessage() + "); Anchor "
@@ -265,6 +272,55 @@ final class BlockMapper {
         String material = MaterialGuess.fromName(path).orElseGet(() -> bySound(state, path)).material();
         int index = materials.indexOf(material);
         return index >= 0 && materials.get(index).mechanics() != null ? around.framedIn(material) : around;
+    }
+
+    /**
+     * Gives a block that thermal stress can crack the block to show once it has cracked through: a cracked or broken
+     * form of it if there is one, or air for glass, which shatters. Thin blocks count as the air around them and do
+     * not crack, and blocks that only sound like glass, such as glowstone and beacons, stay whole.
+     */
+    private BlockAppearance fracturing(BlockAppearance a, BlockState state) {
+        if (a.frame() != null || !cracks(a.material())) {
+            return a;
+        }
+        Identifier id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        String into = fracturedForm(id);
+        if (into == null && a.material().equals(GLASS.material())
+                && List.of(id.getPath().split("_")).contains("glass")) {
+            into = "minecraft:air";
+        }
+        return into == null ? a : a.fracturingInto(into);
+    }
+
+    /** Tells whether thermal stress can crack a material through: brittle matter with a fracture toughness. */
+    private boolean cracks(String material) {
+        int index = materials.indexOf(material);
+        Mechanics m = index < 0 ? null : materials.get(index).mechanics();
+        return m != null && m.failure() == Mechanics.Failure.BRITTLE && !Double.isNaN(m.toughness());
+    }
+
+    /**
+     * Returns the cracked or broken form of a block: the vanilla rubble of stone and deepslate, or the block named
+     * {@code cracked_} and the block's own name, as cracked stone bricks are.
+     *
+     * @param id the block's registry name
+     * @return the form's registry name, or {@code null} if the block has none
+     */
+    static String fracturedForm(Identifier id) {
+        if (id.getNamespace().equals("minecraft")) {
+            String vanilla = switch (id.getPath()) {
+                case "stone" -> "minecraft:cobblestone";
+                case "deepslate" -> "minecraft:cobbled_deepslate";
+                case "infested_stone" -> "minecraft:infested_cobblestone";
+                case "infested_stone_bricks" -> "minecraft:infested_cracked_stone_bricks";
+                default -> null;
+            };
+            if (vanilla != null) {
+                return vanilla;
+            }
+        }
+        Identifier cracked = Identifier.fromNamespaceAndPath(id.getNamespace(), "cracked_" + id.getPath());
+        return BuiltInRegistries.BLOCK.getOptional(cracked).isPresent() ? cracked.toString() : null;
     }
 
     /** Tells whether the game lets nobody break a block, as with bedrock and barriers. */

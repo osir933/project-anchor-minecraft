@@ -11,6 +11,7 @@ import io.github.osir933.anchor.core.physics.structure.Contact;
 import io.github.osir933.anchor.core.physics.structure.Frame;
 import io.github.osir933.anchor.core.physics.structure.Shape;
 import io.github.osir933.anchor.core.physics.structure.StructuralAnalysis;
+import io.github.osir933.anchor.core.physics.structure.ThermalShock;
 import io.github.osir933.anchor.core.physics.thermal.AtmosphereModel;
 import io.github.osir933.anchor.core.physics.thermal.ConductionModel;
 import io.github.osir933.anchor.core.physics.thermal.HeatSourceModel;
@@ -188,22 +189,25 @@ public final class HostedWorld {
      *
      * @param report the scheduler's report
      * @param phaseChanges blocks the host should now show differently, in block order
+     * @param fractures built blocks that thermal stress cracked through in the tick, in block order
      * @param simulatedSections how many sections heat ran in
      * @param awakeSections how many sections are awake after the tick
      */
-    public record TickResult(TickReport report, List<PhaseChange> phaseChanges, int simulatedSections,
-            int awakeSections) {
+    public record TickResult(TickReport report, List<PhaseChange> phaseChanges, List<Fracture> fractures,
+            int simulatedSections, int awakeSections) {
 
         /**
-         * Takes an unmodifiable copy of the phase changes.
+         * Takes unmodifiable copies of the lists.
          *
          * @param report the report
          * @param phaseChanges the changes
+         * @param fractures the fractures
          * @param simulatedSections the simulated sections
          * @param awakeSections the awake sections
          */
         public TickResult {
             phaseChanges = List.copyOf(phaseChanges);
+            fractures = List.copyOf(fractures);
         }
     }
 
@@ -231,11 +235,17 @@ public final class HostedWorld {
      *     warm and cool faster than the block as a whole, in kelvin; {@link Double#NaN} for a block that is not
      *     such a surface
      * @param sunlightW the sunlight the block takes in now, in watts per square metre of its top
+     * @param built whether the block is {@linkplain #isBuilt built}, so that it stands or falls by its strength
+     * @param thermalStress the thermal stress in the block's most loaded cell, for a refined block of brittle
+     *     matter; {@code null} for any other block. It cracks a built block once its load reaches one; the world as
+     *     it was found does not crack.
+     * @param fractured whether thermal stress has cracked the block through
      */
     public record Inspection(GridPos pos, String material, String materialName, double massKg, double enthalpyJ,
             ThermalState state, Phase phase, Provenance provenance, boolean refined, double coolestK,
             double hottestK, boolean awake, boolean simulated, double environmentK, HeatSourceModel.Source source,
-            BlockAppearance appearance, double surfaceK, double sunlightW) {
+            BlockAppearance appearance, double surfaceK, double sunlightW, boolean built,
+            ThermalShock.Result thermalStress, boolean fractured) {
 
         /**
          * Returns the temperature.
@@ -260,6 +270,7 @@ public final class HostedWorld {
      * @param tick ticks simulated
      * @param simulatedSeconds simulated time in seconds
      * @param phaseChanges phase changes handed to the host so far
+     * @param fractures built blocks thermal stress has cracked through so far
      * @param reconciled block changes from the host that changed something
      * @param conserved whether the last conservation audit balanced
      * @param skySurfaces surfaces open to the sky whose exchange with it the sky balances
@@ -268,7 +279,7 @@ public final class HostedWorld {
      */
     public record Status(int sections, int awakeSections, int simulatedSections, int sources, int radiatingFaces,
             int refinedBlocks, int refinedCells, long tick, double simulatedSeconds, long phaseChanges,
-            long reconciled, boolean conserved, int skySurfaces, double sunlightW) {
+            long fractures, long reconciled, boolean conserved, int skySurfaces, double sunlightW) {
     }
 
     /**
@@ -412,6 +423,8 @@ public final class HostedWorld {
     /** For each material's registry index, its specific enthalpy where things begin to glow, or NaN if not known. */
     private double[] glowEnthalpies = new double[0];
     private long phaseChanges;
+    private long fractures;
+    private boolean thermalShock = true;
     private long reconciled;
     private boolean conserved = true;
 
@@ -1225,6 +1238,26 @@ public final class HostedWorld {
     }
 
     /**
+     * Sets whether thermal stress cracks built blocks through; it does unless the host says otherwise.
+     *
+     * @param enabled {@code true} to let thermal stress crack blocks
+     */
+    public void setThermalShock(boolean enabled) {
+        thermalShock = enabled;
+    }
+
+    /**
+     * Tells whether thermal stress has cracked a block through.
+     *
+     * @param pos the block
+     * @return {@code true} if it has; {@code false} if not, or if the block is not imported
+     */
+    public boolean isFractured(GridPos pos) {
+        Hosted ids = hosted.get(pos.sectionKey());
+        return ids != null && (ids.flags(pos.indexInSection()) & StructureFlags.FRACTURED) != 0;
+    }
+
+    /**
      * Returns how many built blocks wait to have their structure checked.
      *
      * @return the number of blocks
@@ -1525,8 +1558,8 @@ public final class HostedWorld {
 
     /**
      * Simulates one step: blocks are split or merged as the last step found them to need, heat runs in the
-     * awake sections and their neighbours, sections fall asleep or wake up, and blocks whose shown phase has
-     * gone are reported.
+     * awake sections and their neighbours, sections fall asleep or wake up, built blocks that thermal stress cracks
+     * through are cracked, and blocks whose shown phase has gone are reported.
      *
      * @return what happened
      */
@@ -1540,9 +1573,14 @@ public final class HostedWorld {
             ran &= run.status() != TickReport.Status.DEFERRED;
         }
         refinement.endStep(ran);
+        List<Fracture> cracked = List.of();
         if (ran) {
             activity.endStep(world, settings.tickSeconds());
             checkStrength(scope);
+            if (thermalShock) {
+                cracked = thermalShock(scope, held);
+                fractures += cracked.size();
+            }
         }
         if (report.audit() != null) {
             conserved = report.audit().balanced();
@@ -1550,7 +1588,7 @@ public final class HostedWorld {
         List<PhaseChange> changes = phaseChanges(scope);
         phaseChanges += changes.size();
         lastScope = scope;
-        return new TickResult(report, changes, scope.size(), activity.awakeSections().size());
+        return new TickResult(report, changes, cracked, scope.size(), activity.awakeSections().size());
     }
 
     /**
@@ -1592,10 +1630,15 @@ public final class HostedWorld {
                 }
             });
         }
+        int i = pos.indexInSection();
+        Resolved r = resolve(ids.get(i));
+        ThermalShock.Result stress = block == null || r.frame() >= 0 ? null : thermalStress(block, c.material());
+        int flags = ids.flags(i);
         return Optional.of(new Inspection(pos, registry.id(c.material()), name, c.mass(), c.enthalpy(), state, phase,
                 c.provenance(), block != null, range[0], range[1], activity.isAwake(key), lastScope.contains(key),
-                atmosphere.environment(key), sources.sources().get(pos), resolve(ids.get(pos.indexInSection()))
-                        .appearance(), sky.surfaceTemperature(pos), sky.absorbedSunlight(pos)));
+                atmosphere.environment(key), sources.sources().get(pos), r.appearance(), sky.surfaceTemperature(pos),
+                sky.absorbedSunlight(pos), (flags & StructureFlags.BUILT) != 0, stress,
+                (flags & StructureFlags.FRACTURED) != 0));
     }
 
     /**
@@ -1776,7 +1819,7 @@ public final class HostedWorld {
         Sky now = sky.sky();
         return new Status(hosted.size(), activity.awakeSections().size(), lastScope.size(), sources.sources().size(),
                 radiation.lastRadiatingFaces(), refinedBlocks, world.leafCount(), world.tick(),
-                world.tick() * settings.tickSeconds(), phaseChanges, reconciled, conserved,
+                world.tick() * settings.tickSeconds(), phaseChanges, fractures, reconciled, conserved,
                 sky.lastStep().surfaces(), now == null ? Double.NaN : SkyPhysics.sunlightOnLevelGround(now));
     }
 
@@ -2033,6 +2076,103 @@ public final class HostedWorld {
             return Double.NaN;
         }
         return world.materials().get(c.material()).temperatureFor(c.specificEnthalpy());
+    }
+
+    /**
+     * Finds the refined built blocks in the scope that thermal stress cracks through, cracks them and returns them.
+     * Blocks held at their temperature by a heat source are left out, as the source, not physics, sets how warm they
+     * are inside, and so are the world as it was found, whose temperatures only start when it is first simulated, and
+     * blocks that have cracked already.
+     */
+    private List<Fracture> thermalShock(SortedSet<Long> scope, SortedMap<GridPos, HeatSourceModel.Source> held) {
+        List<Fracture> cracked = new ArrayList<>();
+        for (long key : scope) {
+            Hosted ids = hosted.get(key);
+            Section s = world.section(key);
+            if (ids == null || s == null || ids.structure == null || s.refinedBlocks().isEmpty()) {
+                continue;
+            }
+            List<GridPos> fractured = new ArrayList<>();
+            List<ThermalShock.Result> results = new ArrayList<>();
+            for (RefinedBlock block : s.refinedBlocks()) {
+                GridPos pos = block.pos();
+                int i = pos.indexInSection();
+                int flags = ids.flags(i);
+                if ((flags & StructureFlags.BUILT) == 0 || (flags & StructureFlags.FRACTURED) != 0
+                        || held.containsKey(pos) || resolve(ids.get(i)).frame() >= 0) {
+                    continue;
+                }
+                ThermalShock.Result result = thermalStress(block, s.material(i));
+                if (result != null && result.load() >= 1.0) {
+                    fractured.add(pos);
+                    results.add(result);
+                }
+            }
+            for (int k = 0; k < fractured.size(); k++) {
+                cracked.add(fracture(fractured.get(k), results.get(k)));
+            }
+        }
+        return cracked;
+    }
+
+    /**
+     * Works out the thermal stress in a refined block of brittle matter from the temperatures of its cells, or
+     * returns {@code null} if its matter does not crack that way: matter that yields, crumbles or has no fracture
+     * toughness to speak of. Cells that are mostly liquid or gas take no part.
+     */
+    private ThermalShock.Result thermalStress(RefinedBlock block, int material) {
+        if (material == MaterialRegistry.VACUUM) {
+            return null;
+        }
+        Material m = world.materials().get(material);
+        Mechanics mechanics = m.mechanics();
+        if (mechanics == null || mechanics.failure() != Mechanics.Failure.BRITTLE
+                || Double.isNaN(mechanics.toughness())) {
+            return null;
+        }
+        int n = block.leafCount();
+        double[][] parts = new double[5][n];
+        int[] count = {0};
+        block.forEachLeaf((cell, leaf) -> {
+            if (leaf.material() != material || !(leaf.mass() > 0)) {
+                return;
+            }
+            double h = leaf.specificEnthalpy();
+            ThermalState state = m.stateFor(h);
+            if (m.phaseFractions(state)[Phase.SOLID.ordinal()] < 0.5) {
+                return;
+            }
+            double half = cell.edgeLength() / 2;
+            int k = count[0]++;
+            parts[0][k] = cell.minX() + half;
+            parts[1][k] = cell.minY() + half;
+            parts[2][k] = cell.minZ() + half;
+            parts[3][k] = leaf.mass();
+            parts[4][k] = state.temperatureK();
+        });
+        return ThermalShock.analyse(mechanics, parts[0], parts[1], parts[2], parts[3], parts[4], count[0]);
+    }
+
+    /**
+     * Cracks a block through: it and every joint it has, so it holds only by pressing and friction, and the
+     * structures around it wait to be checked again.
+     */
+    private Fracture fracture(GridPos pos, ThermalShock.Result result) {
+        Hosted ids = hosted.get(pos.sectionKey());
+        int i = pos.indexInSection();
+        ids.setFlags(i, ids.flags(i) | StructureFlags.FRACTURED | StructureFlags.cracked(0) | StructureFlags.cracked(1)
+                | StructureFlags.cracked(2));
+        for (int axis = 0; axis < 3; axis++) {
+            GridPos negative = pos.offset(Direction.POSITIVE.get(axis).opposite());
+            Hosted other = hosted.get(negative.sectionKey());
+            if (other != null) {
+                int j = negative.indexInSection();
+                other.setFlags(j, other.flags(j) | StructureFlags.cracked(axis));
+            }
+        }
+        uncheckAround(pos);
+        return new Fracture(pos, resolve(ids.get(i)).appearance().fractured(), temperature(pos), result.load(),
+                result.tension());
     }
 
     /** Finds the blocks in the scope whose shown phase has gone and that have a replacement for the new one. */

@@ -256,10 +256,26 @@ clamped at both ends holds 27 blocks and cracks at both ends at once at 28, as w
 but falls from a wall, a long arm breaks off a tower while the short arm holds, and partly molten granite holds
 less.
 
+**Thermal stress** (`ThermalShock`) cracks a block from within. A body that warms evenly, or whose temperature
+changes in a straight line across it, expands freely and is not stressed: the straight-line part only bends it. Only
+what departs from a straight line is held back by the rest of the body. So the thermal strain of each cell of a
+refined block, the expansion its temperature gives it from the block's mean temperature, is fitted by least squares
+with a field that changes in a straight line across the block, each cell weighted by its mass and stiffness so that
+the stresses left over balance as they must in a free body. A cell colder than the field is pulled and a hotter one
+pressed, at E/(1 − ν) times its departure from it, as a thin layer of a large body held along it in both directions
+is. That is exact for a slab heated or cooled on its faces, and errs high at the corners of a cube: a block of four
+cells a side whose temperature falls along a parabola by ΔT from its middle to two opposite faces has its outer cells
+pulled by EαΔT/4(1 − ν), which the tests check to a part in a billion. Each cell is checked at its own temperature,
+against the tensile strength where it is pulled and the compressive strength where it is pressed, so a block cracks
+once a cell departs from the field by σ<sub>t</sub>(1 − ν)/Eα: 19 K for granite, 27 K for brick, 57 K for glass, 7 K
+for concrete and 1.5 K for ice. How finely a block is refined decides how much of its stress shows: two cells along a
+line always lie on a straight line, and the steep fall in temperature at a quenched face spreads over the cell beside
+it.
+
 What the model leaves out, so far: yielding steel gives way at once instead of hinging and handing its load on, so
 redundant metal frames fall somewhat early; cracked joints do not wedge into arches; slender columns do not buckle;
-deflections are small; heat softens matter but its expansion does not yet stress it; and loads are static, the
-weight of blocks alone.
+deflections are small; heat softens matter and uneven heat cracks a block from within, but expansion that the blocks
+around hold back does not yet stress a structure; and loads are static, the weight of blocks alone.
 
 ## Hosting
 
@@ -314,6 +330,16 @@ called for it. The game analyses the survey's frame when and where it likes, the
 cracked or let go stay cracked, and the blocks left with nothing to hold them up are handed back for the game to let
 fall. If a block the survey looked at changed meanwhile, nothing is settled and the structure waits to be checked
 again, as it does when the game drops an analysis (`checkLater`).
+
+Each step, once heat has run, the hosted world works out the thermal stress in every refined built block of brittle
+matter in the sections heat ran in, from its cells that are mostly solid. A block whose most loaded cell reaches its
+strength **cracks through**: it and every joint it has crack, so it holds only by pressing and friction, and its flags
+say so, saved with them, so that it is not checked again until new matter replaces it. The built blocks around it
+wait to be checked, and the step returns it (`host.Fracture`) with the block its appearance names to show instead
+(`fractured`), if any, and its temperature. The world as it was found does not crack, since importing a section starts
+its blocks at temperatures of their own, all at once, which would crack the lining of every lava pool brought in, and
+neither do blocks held by a heat source, whose inside the source sets, nor thin blocks carried in a frame. The game can
+switch cracking off.
 
 When a hosted world steps is up to `host.Pacer`. At normal speed it steps every few ticks of the game's clock;
 it can also be paused, take steps asked for by hand, run at a speed given in hundredths of normal, or work
@@ -385,6 +411,18 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   its joints have cracked, and `/anchor structure mark`, with which operators make a box of blocks built or natural.
   The structures section of the config switches structures off or bounds one analysis. An error stops structures in
   that dimension, logs it and shows it in `/anchor heat status`, and heat carries on.
+- **Thermal shock.** `BlockMapper` gives each block of brittle matter the block it turns into once uneven heat cracks
+  it through: cobblestone for stone, cobbled deepslate for deepslate, the infested forms of cobblestone and cracked
+  stone bricks for infested stone and stone bricks, the block named `cracked_` and its own name wherever the registry
+  has one, as for stone, deepslate and nether bricks and deepslate tiles, and air for blocks named glass, which
+  shatter. Other blocks stay as they are, and a data pack can name the block in the material entry's `fractured`.
+  After each step `LevelHeat` shows up to 64 cracked blocks a tick: it checks that the block is still cracked and
+  still the same kind of block, places its cracked form with the block's breaking sound pitched low and a puff of its
+  dust, or breaks it, dropping what it drops, when the form is air, and takes the change in at the block's
+  temperature, so cobblestone keeps the stone's heat and its cracks. `/anchor heat inspect` and
+  `/anchor structure inspect` say how close uneven heat comes to cracking a block, and `/anchor heat status` how many
+  blocks have cracked. The `thermalShock` setting in the structures section switches it off, whether or not
+  structures stand or fall.
 - **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
   snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
   vanilla does, and the result is held between −30 and 45 °C (`Climate`). Its air has a relative humidity of
@@ -502,18 +540,19 @@ of its start and more than 15 K warmer than the one in glass, which is more than
 block put up in the air falls to the floor, a stone block on an oak fence stands, analysed with the fence and still
 there 40 ticks later, taking the foot out of a cobblestone pillar three blocks high lets the two above fall into its
 place, and a placed block is still built when its section is written into its chunk and brought in again, while the
-floor under it is still natural. The game tests load the mod from the build directories, so CI also installs a NeoForge
-server the way players do, starts it with the released jar and checks that the mod loads, its self-test passes, heat
-runs and can be paused and resumed, snapshots can be listed and are refused where heat does not run, experiments can be
-listed and are not built where heat does not run, the server stops cleanly and nothing is logged as an error
-(`.github/scripts/smoke_test.py`). Last, CI starts the game itself under a virtual display with software drawing.
-Started with `-Danchor.renderTest=true`, the mod's `RenderTest` creates a laboratory world and checks that its floor's
-top is light grey concrete at y = −1, that its game rules hold time and weather and stop spawning and random ticks, that
-its clock stands at noon with clear weather, that heat there follows no sun and that the player was given a thermometer
-and a thermal camera. It then builds a dark room with two iron blocks in it, heats them to 1100 K and 1600 K,
-photographs them, cools them and photographs them again, and checks that the laboratory's clock did not move meanwhile;
-`.github/scripts/render_check.py` checks that both blocks glowed where they are, red to orange, the hotter one brighter
-and yellower, and that the glow was gone once they cooled.
+floor under it is still natural. In a test of its own, which sends heat 900 steps ahead, stone and glass walls put up
+around lava crack through: the stone turns to cobblestone that keeps its heat, and the glass shatters. The game tests
+load the mod from the build directories, so CI also installs a NeoForge server the way players do, starts it with the
+released jar and checks that the mod loads, its self-test passes, heat runs and can be paused and resumed, snapshots can
+be listed and are refused where heat does not run, experiments can be listed and are not built where heat does not run,
+the server stops cleanly and nothing is logged as an error (`.github/scripts/smoke_test.py`). Last, CI starts the game
+itself under a virtual display with software drawing. Started with `-Danchor.renderTest=true`, the mod's `RenderTest`
+creates a laboratory world and checks that its floor's top is light grey concrete at y = −1, that its game rules hold
+time and weather and stop spawning and random ticks, that its clock stands at noon with clear weather, that heat there
+follows no sun and that the player was given a thermometer and a thermal camera. It then builds a dark room with two
+iron blocks in it, heats them to 1100 K and 1600 K, photographs them, cools them and photographs them again, and checks
+that the laboratory's clock did not move meanwhile; `.github/scripts/render_check.py` checks that both blocks glowed
+where they are, red to orange, the hotter one brighter and yellower, and that the glow was gone once they cooled.
 
 ## Requests
 
@@ -546,7 +585,8 @@ moving, the sun and the night sky warm and cool the land, probes record temperat
 operators can pause heat, step it, run it faster or slower, send it ahead, and save an experiment as a snapshot to
 rewind it to, hot blocks glow in the colours of a black body, and the Laboratory world type gives experiments steady
 surroundings, with ready-made experiments to build there. Phase 2, structure and fracture, has begun: materials
-have mechanical properties that heat softens, and what players build stands or falls by the strength of its blocks,
-cracking where it is overloaded. Next, thermal stress, buckling and fracture inside blocks. After
+have mechanical properties that heat softens, what players build stands or falls by the strength of its blocks,
+cracking where it is overloaded, and uneven heat cracks brittle blocks from within. Next, expansion held back by a
+structure, buckling and fracture inside blocks. After
 that come rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.

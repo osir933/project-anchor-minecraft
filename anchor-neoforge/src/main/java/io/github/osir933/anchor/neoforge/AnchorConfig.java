@@ -25,6 +25,7 @@ final class AnchorConfig {
     static final ModConfigSpec.BooleanValue SUN_AND_SKY;
     static final ModConfigSpec.BooleanValue STRUCTURES_ENABLED;
     static final ModConfigSpec.IntValue STRUCTURE_BLOCKS;
+    static final ModConfigSpec.BooleanValue THERMAL_SHOCK;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -91,6 +92,12 @@ final class AnchorConfig {
                         + "the change that called for it, with the rest of it held still; larger values are truer "
                         + "for big buildings and cost more. Takes effect at once.")
                 .defineInRange("maxBlocks", 4096, 64, 65536);
+        THERMAL_SHOCK = b.comment("Whether built blocks of brittle matter, such as stone and glass, crack through "
+                        + "when uneven heat strains them past their strength, as stone and glass put beside lava do: "
+                        + "stone turns to cobblestone, stone bricks to cracked stone bricks, and glass shatters. The "
+                        + "world as it was found does not crack. Works whether or not structures stand or fall by "
+                        + "their strength; where they do, what a cracked block held up may fall. Takes effect at once.")
+                .define("thermalShock", true);
         b.pop();
         SPEC = b.build();
     }

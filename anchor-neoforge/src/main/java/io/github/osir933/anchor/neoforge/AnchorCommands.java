@@ -128,7 +128,7 @@ final class AnchorCommands {
             return 0;
         }
         String block = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString();
-        send(source, HeatText.describe(found.get(), block));
+        send(source, HeatText.describe(found.get(), block, AnchorConfig.get(AnchorConfig.THERMAL_SHOCK)));
         return 1;
     }
 
