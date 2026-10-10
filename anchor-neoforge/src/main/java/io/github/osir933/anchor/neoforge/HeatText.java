@@ -323,18 +323,33 @@ final class HeatText {
         return lines;
     }
 
-    /** Describes in one line what a level's structures have done. */
-    private static String structures(LevelStructures.Report r) {
+    /**
+     * Describes in one line what a level's structures have done.
+     *
+     * @param r what they have done
+     * @return the line
+     */
+    static String structures(LevelStructures.Report r) {
         if (r.failure() != null) {
-            return "Structures stopped after an error: " + r.failure();
+            return "Structures stopped after an error, while heat carries on: " + r.failure();
         }
         if (!r.enabled()) {
             return "Structures do not stand or fall by their strength: switched off in Anchor's settings";
         }
-        return String.format(Locale.ROOT, "Structures: %d analysed, %d of them in the background%s; the largest had "
-                + "%d blocks, the last took %.1f ms; %d joints cracked and %d blocks fell; %d built blocks wait to be "
-                + "checked", r.analyses(), r.inBackground(), r.analysing() ? ", one now" : "", r.largest(),
-                r.lastMillis(), r.cracks(), r.fallen(), r.waiting());
+        String waiting = r.waiting() == 0 ? "" : "; " + count(r.waiting(), "built block waits", "built blocks wait")
+                + " to be checked";
+        if (r.analyses() == 0) {
+            return "Structures: none analysed yet" + waiting;
+        }
+        return String.format(Locale.ROOT, "Structures: %s analysed, %d in the background%s; the largest had %s and "
+                + "the last took %.1f ms; %s cracked and %s fell%s", count(r.analyses(), "structure", "structures"),
+                r.inBackground(), r.analysing() ? ", one of them now" : "", count(r.largest(), "block", "blocks"),
+                r.lastMillis(), count(r.cracks(), "joint", "joints"), count(r.fallen(), "block", "blocks"), waiting);
+    }
+
+    /** Counts things, as "1 block" or "3 blocks". */
+    private static String count(long n, String one, String many) {
+        return n + " " + (n == 1 ? one : many);
     }
 
     private static String provenance(Provenance p) {

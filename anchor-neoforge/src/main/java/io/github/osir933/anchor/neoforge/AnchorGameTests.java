@@ -978,7 +978,6 @@ final class AnchorGameTests {
         return message.getContents() instanceof TranslatableContents t ? t.getKey() : "";
     }
 
-    /** Builds a one-block pool of still water in stone and returns where the water is. */
     /** A stone block put up in the air falls, and lands on the floor. */
     private static void unsupportedBlockFalls(GameTestHelper helper) {
         BlockPos floating = new BlockPos(2, 3, 2);
@@ -1080,6 +1079,7 @@ final class AnchorGameTests {
                 () -> helper.assertionException(Component.literal(relative + " is not simulated")));
     }
 
+    /** Builds a one-block pool of still water in stone and returns where the water is. */
     private static BlockPos pool(GameTestHelper helper) {
         BlockPos water = new BlockPos(2, 1, 2);
         for (BlockPos wall : List.of(water.north(), water.south(), water.east(), water.west())) {

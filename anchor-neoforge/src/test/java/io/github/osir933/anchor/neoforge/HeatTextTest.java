@@ -23,6 +23,10 @@ class HeatTextTest {
     /** A world running at normal speed. */
     private static final Pacer.Status NORMAL = new Pacer(4, 20.0).status();
 
+    /** Structures that have done nothing yet. */
+    private static final LevelStructures.Report STRUCTURES = new LevelStructures.Report(true, 0L, 0L, 0L, 0L, 0, 0.0,
+            0, false, null);
+
     @Test
     void numbersReadNaturally() {
         assertEquals("21.4 °C", HeatText.celsius(294.55));
@@ -96,7 +100,7 @@ class HeatTextTest {
 
         HostedWorld.Status status = hosted.status();
         List<String> summary = HeatText.status("minecraft:overworld",
-                new HeatReport(status, 14.4, 1.0, 1.0, 0L, 0L, 0, null, NORMAL, 4, false));
+                new HeatReport(status, 14.4, 1.0, 1.0, 0L, 0L, 0, null, NORMAL, 4, false, STRUCTURES));
         assertTrue(summary.contains("  " + status.refinedBlocks() + " blocks refined into " + status.refinedCells()
                 + " smaller cells where temperatures change steeply"), summary.toString());
     }
@@ -164,7 +168,7 @@ class HeatTextTest {
                 HostedWorld.Settings.defaults());
         hosted.tick();
         List<String> lines = HeatText.status("minecraft:overworld",
-                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, 1200L, 3, null, NORMAL, 4, false));
+                new HeatReport(hosted.status(), 14.4, 1.25, 0.8, 0L, 1200L, 3, null, NORMAL, 4, false, STRUCTURES));
         assertEquals("Heat in minecraft:overworld", lines.get(0));
         assertTrue(lines.get(2).contains(" steps of 14 s"), lines.get(2));
         assertTrue(lines.get(2).contains("1.25 ms"), lines.get(2));
@@ -172,10 +176,24 @@ class HeatTextTest {
         assertEquals("  Running at normal speed, a step of 14 s every 4 game ticks", lines.get(3));
         List<String> stopped = HeatText.status("minecraft:the_nether",
                 new HeatReport(hosted.status(), 14.4, 0.0, 0.0, 0L, 0L, 0, "java.lang.IllegalStateException: boom",
-                        NORMAL, 4, false));
+                        NORMAL, 4, false, STRUCTURES));
         assertEquals("Heat in minecraft:the_nether: stopped after an error", stopped.get(0));
         assertEquals("  java.lang.IllegalStateException: boom", stopped.get(1));
         assertTrue(stopped.stream().noneMatch(l -> l.contains("came back")), "nothing restored, nothing said");
+    }
+
+    @Test
+    void theStatusSaysWhatStructuresHaveDone() {
+        assertEquals("Structures: none analysed yet", HeatText.structures(STRUCTURES));
+        assertEquals("Structures: 12 structures analysed, 1 in the background, one of them now; the largest had 300 "
+                + "blocks and the last took 2.5 ms; 1 joint cracked and 2 blocks fell; 1 built block waits to be "
+                + "checked", HeatText.structures(new LevelStructures.Report(true, 12L, 1L, 1L, 2L, 1, 2.5, 300, true,
+                        null)));
+        assertTrue(HeatText.structures(new LevelStructures.Report(false, 12L, 1L, 1L, 2L, 1, 2.5, 300, false, null))
+                .contains("switched off"));
+        assertEquals("Structures stopped after an error, while heat carries on: java.lang.IllegalStateException: boom",
+                HeatText.structures(new LevelStructures.Report(true, 0L, 0L, 0L, 0L, 0, 0.0, 0, false,
+                        "java.lang.IllegalStateException: boom")));
     }
 
     @Test
@@ -217,7 +235,7 @@ class HeatTextTest {
                 HostedWorld.Settings.defaults());
         hosted.tick();
         List<String> lines = HeatText.status("minecraft:overworld", new HeatReport(hosted.status(), 14.4, 1.0, 1.0,
-                0L, 0L, 0, null, NORMAL, 4, true));
+                0L, 0L, 0, null, NORMAL, 4, true, STRUCTURES));
         assertTrue(lines.contains("  A laboratory: no sun or night sky, so what nothing heats or cools settles at the "
                 + "air's temperature"), lines.toString());
         assertTrue(lines.stream().noneMatch(l -> l.contains("No sun or night sky here")), lines.toString());
@@ -225,6 +243,6 @@ class HeatTextTest {
 
     private static List<String> status(HostedWorld hosted) {
         return HeatText.status("minecraft:overworld", new HeatReport(hosted.status(), 14.4, 1.0, 1.0, 0L, 0L, 0, null,
-                NORMAL, 4, false));
+                NORMAL, 4, false, STRUCTURES));
     }
 }

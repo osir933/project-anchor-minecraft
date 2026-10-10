@@ -832,8 +832,8 @@ public final class HostedWorld {
     }
 
     /**
-     * Tells whether a block carries loads: its matter has mechanics and is mostly solid, and its shape reaches a face
-     * of its cube, where it can touch a neighbour.
+     * Tells whether a block carries loads: its matter, or its frame's, has mechanics and is not all molten, and its
+     * shape reaches a face of its cube, where it can touch a neighbour.
      */
     private boolean carries(Resolved r, CellState cell) {
         return bearing(r, cell.material(), cell.mass(), cell.enthalpy()) != null;
