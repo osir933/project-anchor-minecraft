@@ -38,6 +38,10 @@ class HostedStructuresTest {
     private static final int IRON = 6;
     private static final int WATER = 7;
     private static final int FENCE = 8;
+    private static final int ICE = 9;
+    private static final int SNOW_LAYER = 10;
+    private static final int SNOW_LAYERS = 11;
+    private static final int BARRIER = 12;
 
     private static final BlockAppearance[] LOOKS = {
         BlockAppearance.of("anchor:air"),
@@ -50,6 +54,11 @@ class HostedStructuresTest {
         BlockAppearance.of("anchor:water").shownAs(Phase.LIQUID),
         BlockAppearance.of("anchor:air").withShape(Shape.of(new double[] {0.375, 0, 0.375, 0.625, 1, 0.625}))
                 .framedIn("anchor:hardwood"),
+        BlockAppearance.of("anchor:water").shownAs(Phase.SOLID),
+        // One layer of snow is nothing to stand on; more are.
+        BlockAppearance.of("anchor:powder_snow").withFill(0.125).withShape(Shape.NONE),
+        BlockAppearance.of("anchor:powder_snow").withFill(0.25).withShape(Shape.bottom(0.125)),
+        BlockAppearance.of("anchor:granite").asImmovable(),
     };
 
     private static final long ORIGIN = SectionPos.pack(0, 0, 0);
@@ -100,6 +109,50 @@ class HostedStructuresTest {
         place(h, placed, AIR);
         assertFalse(h.isBuilt(placed));
         assertFalse(h.isBuilt(new GridPos(40, 8, 4)), "nothing is built where nothing is imported");
+    }
+
+    @Test
+    void waterThatFreezesAndSnowThatPilesUpStayGround() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, ground(Map.of()), CLIMATE);
+        // Ice shown where water was, frozen by the engine or by the host, is the same matter in another phase.
+        GridPos pond = new GridPos(4, 8, 4);
+        place(h, pond, WATER);
+        place(h, pond, ICE);
+        assertFalse(h.isBuilt(pond), "water that froze where it lay");
+        GridPos chilled = new GridPos(6, 8, 6);
+        place(h, chilled, WATER);
+        assertTrue(h.setTemperature(chilled, 250.0));
+        place(h, chilled, ICE);
+        assertEquals("anchor:water", h.inspect(chilled).orElseThrow().material());
+        assertFalse(h.isBuilt(chilled), "water the engine froze");
+        GridPos placed = new GridPos(8, 8, 8);
+        place(h, placed, ICE);
+        assertTrue(h.isBuilt(placed), "ice brought into the air");
+        // Snow piling up on a layer that carried nothing.
+        GridPos snow = new GridPos(10, 8, 10);
+        place(h, snow, SNOW_LAYER);
+        assertFalse(h.isBuilt(snow));
+        place(h, snow, SNOW_LAYERS);
+        assertFalse(h.isBuilt(snow), "the snow was not brought, it fell");
+        assertEquals(1, h.uncheckedStructures(), "only the placed ice waits to be checked");
+    }
+
+    @Test
+    void blocksThatHoldStillAreNeverBuiltAndHoldUpWhatHangsFromThem() {
+        HostedWorld h = hosted();
+        h.importSection(ORIGIN, ground(Map.of()), CLIMATE);
+        GridPos barrier = new GridPos(4, 12, 4);
+        place(h, barrier, BARRIER);
+        assertFalse(h.isBuilt(barrier), "put in the air, it still holds still");
+        assertEquals(0, h.setBuilt(barrier, barrier, true), "it cannot be made built");
+        GridPos hanging = barrier.offset(Direction.DOWN);
+        place(h, hanging, STONE);
+        assertTrue(h.isBuilt(hanging));
+        StructureSurvey survey = h.survey(hanging, 100).orElseThrow();
+        assertEquals(1, survey.blocks());
+        assertTrue(survey.whole(), "the block it hangs from is ground, not the survey's edge");
+        assertTrue(StructuralAnalysis.analyse(survey.frame()).falling().isEmpty());
     }
 
     @Test

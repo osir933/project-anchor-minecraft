@@ -35,9 +35,12 @@ import java.util.Objects;
  * @param frame the id of the material that carries loads in a block whose matter counts as the air or water
  *     around it, as a fence's wood does, its mass that of its shape; {@code null} for a block whose own matter
  *     carries its loads
+ * @param immovable whether the block holds still as the ground does wherever it is put, as blocks the game makes
+ *     unbreakable do, so that it is never {@linkplain HostedWorld#isBuilt built} and built blocks can hang from it
  */
 public record BlockAppearance(String material, double fill, Phase phase, double temperatureK,
-        HeatSourceModel.Source source, Map<Phase, String> becomes, double albedo, Shape shape, String frame) {
+        HeatSourceModel.Source source, Map<Phase, String> becomes, double albedo, Shape shape, String frame,
+        boolean immovable) {
 
     /**
      * Validates the appearance and takes an unmodifiable copy of {@code becomes}.
@@ -51,6 +54,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @param albedo the albedo of the block's top, or NaN
      * @param shape the solid part of the block, or {@code null} to fill it from the bottom up to its fill
      * @param frame the material carrying loads in a block whose matter counts as its surroundings, or {@code null}
+     * @param immovable whether the block holds still wherever it is put
      */
     public BlockAppearance {
         Objects.requireNonNull(material, "material");
@@ -100,7 +104,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance(String material, double fill, Phase phase, double temperatureK,
             HeatSourceModel.Source source, Map<Phase, String> becomes) {
-        this(material, fill, phase, temperatureK, source, becomes, Double.NaN, null, null);
+        this(material, fill, phase, temperatureK, source, becomes, Double.NaN, null, null, false);
     }
 
     /**
@@ -121,7 +125,8 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance withFill(double newFill) {
         Shape kept = shape.equals(Shape.bottom(fill)) ? null : shape;
-        return new BlockAppearance(material, newFill, phase, temperatureK, source, becomes, albedo, kept, frame);
+        return new BlockAppearance(material, newFill, phase, temperatureK, source, becomes,
+                albedo, kept, frame, immovable);
     }
 
     /**
@@ -131,7 +136,8 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance shownAs(Phase newPhase) {
-        return new BlockAppearance(material, fill, newPhase, temperatureK, source, becomes, albedo, shape, frame);
+        return new BlockAppearance(material, fill, newPhase, temperatureK, source, becomes,
+                albedo, shape, frame, immovable);
     }
 
     /**
@@ -141,7 +147,8 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance startingAt(double newTemperatureK) {
-        return new BlockAppearance(material, fill, phase, newTemperatureK, source, becomes, albedo, shape, frame);
+        return new BlockAppearance(material, fill, phase, newTemperatureK, source, becomes,
+                albedo, shape, frame, immovable);
     }
 
     /**
@@ -151,7 +158,8 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance heatedBy(HeatSourceModel.Source newSource) {
-        return new BlockAppearance(material, fill, phase, temperatureK, newSource, becomes, albedo, shape, frame);
+        return new BlockAppearance(material, fill, phase, temperatureK, newSource, becomes,
+                albedo, shape, frame, immovable);
     }
 
     /**
@@ -165,7 +173,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
         EnumMap<Phase, String> map = new EnumMap<>(Phase.class);
         map.putAll(becomes);
         map.put(newPhase, hostBlock);
-        return new BlockAppearance(material, fill, phase, temperatureK, source, map, albedo, shape, frame);
+        return new BlockAppearance(material, fill, phase, temperatureK, source, map, albedo, shape, frame, immovable);
     }
 
     /**
@@ -175,7 +183,7 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      */
     public BlockAppearance withoutReplacements() {
         return new BlockAppearance(material, fill, phase, temperatureK, source, new EnumMap<>(Phase.class), albedo,
-                shape, frame);
+                shape, frame, immovable);
     }
 
     /**
@@ -186,7 +194,8 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance withAlbedo(double newAlbedo) {
-        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, newAlbedo, shape, frame);
+        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes,
+                newAlbedo, shape, frame, immovable);
     }
 
     /**
@@ -196,7 +205,8 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance withShape(Shape newShape) {
-        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, albedo, newShape, frame);
+        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes,
+                albedo, newShape, frame, immovable);
     }
 
     /**
@@ -207,7 +217,18 @@ public record BlockAppearance(String material, double fill, Phase phase, double 
      * @return the new appearance
      */
     public BlockAppearance framedIn(String newFrame) {
-        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, albedo, shape, newFrame);
+        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes,
+                albedo, shape, newFrame, immovable);
+    }
+
+    /**
+     * Returns this appearance holding still wherever it is put, as the ground does, for a block the game makes
+     * unbreakable.
+     *
+     * @return the new appearance
+     */
+    public BlockAppearance asImmovable() {
+        return new BlockAppearance(material, fill, phase, temperatureK, source, becomes, albedo, shape, frame, true);
     }
 
     /**

@@ -580,8 +580,8 @@ public final class HostedWorld {
             for (int k = 0; k < blocks.length; k++) {
                 // A block that no longer carries loads, having changed while the section was away, is not built.
                 int i = blocks[k];
-                boolean carries = carries(resolve(ids.get(i)), cells[i]);
-                ids.setFlags(i, carries ? flags[k] : flags[k] & ~StructureFlags.BUILT);
+                boolean buildable = buildable(resolve(ids.get(i)), cells[i]);
+                ids.setFlags(i, buildable ? flags[k] : flags[k] & ~StructureFlags.BUILT);
             }
         }
         if (restored > 0) {
@@ -752,10 +752,12 @@ public final class HostedWorld {
      * read when its section is imported. A change between two ids that look the same, such as redstone dust
      * changing its power, only records the new id: it neither touches the block's state nor wakes its section.
      *
-     * <p>New matter that carries loads in a block that held none, as a placed block's does, is {@linkplain
-     * #isBuilt built}, and so is new matter in a built block; matter that replaces ground where it lies, as moss
-     * spreading over stone does, stays ground. Every joint of a block with new matter starts intact, and the built
-     * blocks around a change that touches loads wait to have their structure {@linkplain #nextStructure checked}.
+     * <p>Matter brought into a block that carried no load, as a placed block's is, is {@linkplain #isBuilt built}
+     * once it carries one, and so is new matter in a built block. Matter that replaces ground where it lies, as moss
+     * spreading over stone does, stays ground, and so does matter that only changes its phase or form, as water
+     * freezing into ice or snow piling up does: brought matter is another material, or a frame put up in the block,
+     * as for a fence. Every joint of a block with new matter starts intact, and the built blocks around a change that
+     * touches loads wait to have their structure {@linkplain #nextStructure checked}.
      *
      * @param pos the block
      * @param hostId the host's id for the block now
@@ -779,9 +781,10 @@ public final class HostedWorld {
             // Only the host's id changed, as when redstone dust changes its power: the physics is untouched.
             return true;
         }
+        Resolved before = resolve(previousId);
         Resolved after = resolve(hostId);
         CellState now = world.readBlock(pos);
-        boolean carried = carries(resolve(previousId), now);
+        boolean carried = carries(before, now);
         boolean replaced = !keeps(now, after);
         if (replaced) {
             double surroundings = temperatureHintK > 0 && Double.isFinite(temperatureHintK)
@@ -792,7 +795,10 @@ public final class HostedWorld {
         boolean carries = carries(after, now);
         if (replaced || carries != carried) {
             // New matter, or the same matter now carrying loads or no longer, as when a fence is put up in air.
-            renewStructure(pos, carries && ((ids.flags(index) & StructureFlags.BUILT) != 0 || !carried));
+            boolean brought = after.material() != before.material()
+                    || (after.frame() >= 0 && after.frame() != before.frame());
+            boolean built = (ids.flags(index) & StructureFlags.BUILT) != 0 || (!carried && brought);
+            renewStructure(pos, built && buildable(after, now));
         }
         if (carried || carries) {
             // Its joints may differ even with the same matter, in a block of another shape.
@@ -828,6 +834,11 @@ public final class HostedWorld {
      */
     private boolean carries(Resolved r, CellState cell) {
         return bearing(r, cell.material(), cell.mass(), cell.enthalpy()) != null;
+    }
+
+    /** Tells whether a block can be built: it carries loads, and is not one that holds still wherever it is put. */
+    private boolean buildable(Resolved r, CellState cell) {
+        return !r.appearance().immovable() && carries(r, cell);
     }
 
     /**
@@ -1114,7 +1125,7 @@ public final class HostedWorld {
                     int flags = snapshot.structureAt(box++);
                     Hosted ids = hosted.get(pos.sectionKey());
                     int i = pos.indexInSection();
-                    if (!carries(resolve(ids.get(i)), world.readBlock(pos))) {
+                    if (!buildable(resolve(ids.get(i)), world.readBlock(pos))) {
                         flags &= ~StructureFlags.BUILT;
                     }
                     ids.setFlags(i, flags);
@@ -1176,8 +1187,9 @@ public final class HostedWorld {
 
     /**
      * Makes the blocks of a box built, so that they stand or fall by their structure, or ground, so that they hold
-     * still whatever happens around them. Only blocks that carry loads can be built. The blocks that change, and
-     * the built blocks around them, wait to have their structure checked.
+     * still whatever happens around them. Only blocks that carry loads, and that do not {@linkplain
+     * BlockAppearance#immovable hold still wherever they are put}, can be built. The blocks that change, and the
+     * built blocks around them, wait to have their structure checked.
      *
      * @param min the box's lowest corner, inclusive
      * @param max the box's highest corner, inclusive
@@ -1195,7 +1207,7 @@ public final class HostedWorld {
                     Hosted ids = hosted.get(pos.sectionKey());
                     int i = pos.indexInSection();
                     int flags = ids.flags(i);
-                    boolean now = built && carries(resolve(ids.get(i)), world.readBlock(pos));
+                    boolean now = built && buildable(resolve(ids.get(i)), world.readBlock(pos));
                     int next = now ? flags | StructureFlags.BUILT : flags & ~StructureFlags.BUILT;
                     if (next != flags) {
                         ids.setFlags(i, next);
