@@ -107,6 +107,13 @@ its blocks. Anchor needs Minecraft 26.3 with NeoForge 26.3 and Java 25, on both 
   about 95 blocks tall, and heat that presses a long stone span can buckle it, though metal yields instead.
   `/anchor structure inspect` says how many times its loads a slender structure could carry before it buckles, and
   the `buckling` setting turns it off.
+- **Cracked spans stand as arches.** A joint cracked through pivots on the edge it presses instead of letting go,
+  and keeps pressing, so a span cracked at its ends sags until it pushes on what holds them and stands on them as an
+  arch. Twelve blocks of netherrack between two walls crack at both ends and stand, and a granite floor 36 blocks
+  square held on all sides cracks along its edges and stands on them, where it would otherwise fall whole. An arch
+  too flat for its span still sags through, as a granite span 60 blocks long does, and a cracked span too short for
+  its depth slides off its ends. `/anchor structure inspect` says which joints pivot, and the `arching` setting turns
+  it off.
 
 Known limits of this alpha:
 
@@ -130,8 +137,8 @@ Known limits of this alpha:
 - The glow is drawn as an eye used to the dark sees it, so in bright daylight it shows more than a real glow
   would, and glowing blocks do not light up what is around them.
 - Structures carry only the weight of their blocks and the strain of heat, not the players, animals or items on
-  them. Steel that yields gives way at once instead of bending, cracked blocks do not wedge into arches and the
-  ground does not give, however soft it is.
+  them. Steel that yields gives way at once instead of bending, and the ground does not give, however soft it is
+  or however hard an arch pushes on it.
 - Blocks crack from heat only where they are refined into smaller cells, where neighbouring temperatures differ by
   50 K or more, and a 25 cm cell blurs the steep fall in temperature at a quenched face, so hot glass doused with
   water does not crack.
