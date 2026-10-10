@@ -353,6 +353,36 @@ class StructuralAnalysisTest {
     }
 
     @Test
+    void sharingAnAnalysisAmongThreadsChangesNoBit() {
+        // A floor of netherrack 20 blocks square, held on all four sides, cracks along its edges round after round
+        // and stands on them as an arch. It is large enough for its solver to share the work, and comes out the
+        // same to the bit on four threads as on one.
+        Frame floor = ArchingTest.floor(MaterialLibrary.NETHERRACK, 20);
+        Result alone = StructuralAnalysis.analyse(floor);
+        Result shared = StructuralAnalysis.analyse(floor, StructuralAnalysis.Settings.defaults(), 4);
+        assertTrue(alone.rounds() > 10, () -> "rounds " + alone.rounds());
+        assertFalse(alone.cracks().isEmpty());
+        assertEquals(alone.bonds(), shared.bonds());
+        assertEquals(alone.cracks(), shared.cracks());
+        assertEquals(alone.falling(), shared.falling());
+        assertEquals(alone.rounds(), shared.rounds());
+        assertEquals(alone.buckling(), shared.buckling());
+        assertEquals(alone.notes(), shared.notes());
+        assertEquals(alone.blocks().size(), shared.blocks().size());
+        for (int i = 0; i < alone.blocks().size(); i++) {
+            StructuralAnalysis.BlockResult a = alone.blocks().get(i);
+            StructuralAnalysis.BlockResult b = shared.blocks().get(i);
+            assertEquals(a.pos(), b.pos());
+            assertEquals(a.fell(), b.fell());
+            assertEquals(a.load(), b.load());
+            assertArrayEquals(a.displacement(), b.displacement());
+            assertArrayEquals(a.rotation(), b.rotation());
+        }
+        assertThrows(IllegalArgumentException.class,
+                () -> StructuralAnalysis.analyse(floor, StructuralAnalysis.Settings.defaults(), 0));
+    }
+
+    @Test
     void rejectsSettingsThatMakeNoSense() {
         assertThrows(IllegalArgumentException.class,
                 () -> new StructuralAnalysis.Settings(-1, 64, 0.02, 1e-4, true, true));

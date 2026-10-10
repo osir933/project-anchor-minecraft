@@ -219,8 +219,8 @@ file into the `serverconfig` folder in that world's folder. The settings are: `e
 `gameTicksPerStep` (4), `stepBudgetMillis` (20), `radius` and `verticalRadius` (2 sections), `sectionsLoadedPerStep`
 (8), `calmKelvinPerHour` (1.0), `refinementLevels` (2, for 25 cm cells; 0 turns refinement off), `maxRefinedCells`
 (16384 in each dimension), `showPhaseChanges` (true) and `sunAndSky` (true) under `[heat]`, and `enabled` (true),
-`maxBlocks` (4096), `thermalShock` (true), `thermalExpansion` (true), `buckling` (true) and `arching` (true) under
-`[structures]`.
+`maxBlocks` (4096), `threads` (0, for half the processors, up to 4), `thermalShock` (true), `thermalExpansion`
+(true), `buckling` (true) and `arching` (true) under `[structures]`.
 
 ### Describing blocks in a data pack
 
@@ -299,9 +299,11 @@ material's measured strength, stiffness and friction (see [Structure](docs/archi
 buckling and which of its cracked joints pivot as an arch's do, and operators can make a box of blocks built or
 natural with `/anchor structure mark`, for instance to let a village that came with the
 world stand or fall by its strength. Structures are checked where heat runs, near players. Small ones are analysed
-at once; a big building is analysed in the background and falls a moment later, at the same moment on every machine.
-Up to 4096 built blocks are analysed together, or what the `maxBlocks` setting says; in a larger building, the part
-around a change is analysed with the rest held still.
+at once; a big building is analysed in the background, shared among a few threads as the `threads` setting says, and
+falls a moment later, at the same moment on every machine that keeps up and as soon as the analysis is done on one
+that does not. What stands and what falls is the same to the bit however many threads share the work. Up to 4096
+built blocks are analysed together, or what the `maxBlocks` setting says; in a larger building, the part around a
+change is analysed with the rest held still.
 
 What this alpha leaves out: steel that yields gives way at once instead of bending, the ground does not give
 however soft it is, even under the push of an arch, and only the weight of blocks and the strain of heat load a

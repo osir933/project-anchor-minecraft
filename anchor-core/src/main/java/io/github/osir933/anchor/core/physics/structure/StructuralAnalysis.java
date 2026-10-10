@@ -343,13 +343,31 @@ public final class StructuralAnalysis {
      * @return the outcome
      */
     public static Result analyse(Frame frame, Settings settings) {
-        return new Run(frame, settings).run();
+        return analyse(frame, settings, 1);
+    }
+
+    /**
+     * Analyses a frame, sharing the work of solving a large one among threads. The outcome is the same to the bit
+     * however many threads share it.
+     *
+     * @param frame the frame
+     * @param settings how to run
+     * @param threads how many threads may share the work, at least 1
+     * @return the outcome
+     */
+    public static Result analyse(Frame frame, Settings settings, int threads) {
+        if (threads < 1) {
+            throw new IllegalArgumentException("at least one thread is needed: " + threads);
+        }
+        return new Run(frame, settings, threads).run();
     }
 
     /** One analysis, with its working arrays. */
     private static final class Run {
 
         private final Settings settings;
+        /** How many threads may share solving. */
+        private final int threads;
         private final List<Frame.Block> free = new ArrayList<>();
         private final TreeMap<GridPos, Integer> nodeAt = new TreeMap<>();
         private final TreeMap<GridPos, Frame.Block> groundAt = new TreeMap<>();
@@ -425,8 +443,9 @@ public final class StructuralAnalysis {
          */
         private final boolean[] snapped;
 
-        Run(Frame frame, Settings settings) {
+        Run(Frame frame, Settings settings, int threads) {
             this.settings = settings;
+            this.threads = threads;
             double weight = 0;
             for (Frame.Block b : frame.blocks()) {
                 if (b.ground()) {
@@ -732,7 +751,7 @@ public final class StructuralAnalysis {
             }
             BlockCholesky factor;
             try {
-                factor = BlockCholesky.factor(assemble(e -> stiffness[e]), xs, ys, zs);
+                factor = BlockCholesky.factor(assemble(e -> stiffness[e]), xs, ys, zs, threads);
             } catch (BlockCholesky.SingularException e) {
                 return false;
             }
@@ -881,7 +900,7 @@ public final class StructuralAnalysis {
                 BlockCholesky bowed = null;
                 try {
                     bowed = BlockCholesky.factor(assemble(e -> geometric[e] == null ? stiffness[e]
-                            : sum(stiffness[e], geometric[e])), xs, ys, zs);
+                            : sum(stiffness[e], geometric[e])), xs, ys, zs, threads);
                 } catch (BlockCholesky.SingularException ex) {
                     // The estimate came out a little high: the frame cannot carry its loads after all.
                 }

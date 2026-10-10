@@ -81,7 +81,9 @@ its blocks. Anchor needs Minecraft 26.3 with NeoForge 26.3 and Java 25, on both 
   Trees, crops and the stone lava makes where it meets water grow natural. `/anchor structure inspect` tells
   whether a block is built and how loaded its structure is, operators can mark a box of blocks built or natural
   with `/anchor structure mark`, and the `[structures]` settings switch it off or bound how many blocks are
-  analysed together. Big buildings are analysed in the background and fall at the same moment on every machine.
+  analysed together. Big buildings are analysed in the background, shared among a few threads, and fall at the same
+  moment on every machine that keeps up; a slower one lets them fall when it is done rather than holding up the
+  game. What falls is the same to the bit however many threads share the work.
 - **Uneven heat cracks blocks.** Built blocks of brittle matter crack through when the side that warms or cools first
   strains against the rest, as a cold glass cracks under hot water: from the temperatures of a refined block's cells,
   Anchor works out the stress at which the rest of the block holds each part and checks it against the material's
