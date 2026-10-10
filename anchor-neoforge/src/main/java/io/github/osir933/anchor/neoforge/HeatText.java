@@ -435,10 +435,12 @@ final class HeatText {
         if (r.analyses() == 0) {
             return "Structures: none analysed yet" + waiting;
         }
+        String sunk = r.sunk() == 0 ? "" : "; footings sank into " + count(r.sunk(), "block", "blocks") + " of ground";
         return String.format(Locale.ROOT, "Structures: %s analysed, %d in the background%s; the largest had %s and "
-                + "the last took %.1f ms; %s cracked and %s fell%s", count(r.analyses(), "structure", "structures"),
+                + "the last took %.1f ms; %s cracked and %s fell%s%s", count(r.analyses(), "structure", "structures"),
                 r.inBackground(), r.analysing() ? ", one of them now" : "", count(r.largest(), "block", "blocks"),
-                r.lastMillis(), count(r.cracks(), "joint", "joints"), count(r.fallen(), "block", "blocks"), waiting);
+                r.lastMillis(), count(r.cracks(), "joint", "joints"), count(r.fallen(), "block", "blocks"), sunk,
+                waiting);
     }
 
     /** Counts things, as "1 block" or "3 blocks". */

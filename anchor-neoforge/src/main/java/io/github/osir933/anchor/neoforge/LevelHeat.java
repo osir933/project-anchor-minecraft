@@ -190,7 +190,7 @@ final class LevelHeat {
                 ThermalActivity.DEFAULT_CALM_STEPS, AUDIT_INTERVAL, refinement);
         this.hosted = new HostedWorld(world, mapper::forStateId, settings);
         this.glow = new GlowSender(level, hosted);
-        this.structures = new LevelStructures(level, hosted);
+        this.structures = new LevelStructures(level, hosted, this::grown);
         this.planner = new ImportPlanner(AnchorConfig.get(AnchorConfig.RADIUS),
                 AnchorConfig.get(AnchorConfig.VERTICAL_RADIUS), MARGIN);
         DimensionType type = level.dimensionType();

@@ -310,8 +310,11 @@ public final class HostedWorld {
      *     settled and the structure waits to be checked again
      * @param cracks the joints that cracked, in the order they gave way
      * @param falling the blocks left with nothing to hold them up, in position order, for the host to let fall
+     * @param sunk the blocks of ground that footings pressed harder than they bear and sank into, in position order,
+     *     for the host to push aside before it lets the blocks above fall
      */
-    public record Settled(boolean stale, List<StructuralAnalysis.Crack> cracks, List<GridPos> falling) {
+    public record Settled(boolean stale, List<StructuralAnalysis.Crack> cracks, List<GridPos> falling,
+            List<GridPos> sunk) {
 
         /**
          * Takes unmodifiable copies of the lists.
@@ -319,10 +322,12 @@ public final class HostedWorld {
          * @param stale whether the survey was stale
          * @param cracks the cracks
          * @param falling the falling blocks
+         * @param sunk the blocks of ground footings sank into
          */
         public Settled {
             cracks = List.copyOf(cracks);
             falling = List.copyOf(falling);
+            sunk = List.copyOf(sunk);
         }
     }
 
@@ -1384,7 +1389,7 @@ public final class HostedWorld {
                         edge++;
                     } else {
                         there.role = Examined.GROUND;
-                        frame.ground(q, there.mechanics, there.temperatureK, there.solidFraction);
+                        frame.ground(q, there.mechanics, there.temperatureK, there.solidFraction, there.massKg);
                     }
                 }
                 Examined negative = d.isPositive() ? here : there;
@@ -1470,8 +1475,9 @@ public final class HostedWorld {
 
     /**
      * Settles the analysis of a structure into the world: its joints that cracked or let go are cracked from now
-     * on, and the blocks it left with nothing to hold them up are handed back for the host to let fall. If any block
-     * the survey looked at has changed since, nothing is settled and the structure waits to be checked again.
+     * on, and the blocks it left with nothing to hold them up are handed back for the host to let fall, with the
+     * blocks of ground its footings sank into, for the host to push aside. If any block the survey looked at has
+     * changed since, nothing is settled and the structure waits to be checked again.
      *
      * @param survey the survey the analysis worked from, made by this hosted world
      * @param result the analysis of the survey's frame
@@ -1490,15 +1496,17 @@ public final class HostedWorld {
                             && ids.flags(pos.indexInSection()) == survey.flags(k);
             if (!same) {
                 uncheck(survey.start());
-                return new Settled(true, List.of(), List.of());
+                return new Settled(true, List.of(), List.of(), List.of());
             }
         }
         List<GridPos> falling = result.falling();
         for (StructuralAnalysis.BondResult b : result.bonds()) {
             // A joint that let go between blocks that still stand is cracked from now on; one that only stopped
-            // holding because a block it joins fell goes with that block.
+            // holding because a block it joins fell goes with that block, and one whose ground gave way under it
+            // goes with the ground.
             boolean goes = Collections.binarySearch(falling, b.pos()) >= 0
-                    || Collections.binarySearch(falling, b.pos().offset(Direction.POSITIVE.get(b.axis()))) >= 0;
+                    || Collections.binarySearch(falling, b.pos().offset(Direction.POSITIVE.get(b.axis()))) >= 0
+                    || b.mode() == StructuralAnalysis.Mode.SINKING;
             if (b.state() == Frame.Joint.CRACKED || (!b.holds() && !goes)) {
                 Hosted ids = hosted.get(b.pos().sectionKey());
                 if (ids != null) {
@@ -1507,7 +1515,7 @@ public final class HostedWorld {
                 }
             }
         }
-        return new Settled(false, result.cracks(), falling);
+        return new Settled(false, result.cracks(), falling, result.sunk());
     }
 
     /**

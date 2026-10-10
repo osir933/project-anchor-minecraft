@@ -60,12 +60,14 @@ class HostedExpansionTest {
     private static Settled settleAll(HostedWorld h) {
         List<StructuralAnalysis.Crack> cracks = new ArrayList<>();
         List<GridPos> falling = new ArrayList<>();
+        List<GridPos> sunk = new ArrayList<>();
         for (Optional<StructureSurvey> s = h.nextStructure(4096); s.isPresent(); s = h.nextStructure(4096)) {
             Settled settled = h.settle(s.get(), StructuralAnalysis.analyse(s.get().frame()));
             cracks.addAll(settled.cracks());
             falling.addAll(settled.falling());
+            sunk.addAll(settled.sunk());
         }
-        return new Settled(false, cracks, falling);
+        return new Settled(false, cracks, falling, sunk);
     }
 
     /** Takes every structure that waits to be checked off the queue. */

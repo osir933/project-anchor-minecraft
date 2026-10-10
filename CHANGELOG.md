@@ -116,6 +116,16 @@ its blocks. Anchor needs Minecraft 26.3 with NeoForge 26.3 and Java 25, on both 
   too flat for its span still sags through, as a granite span 60 blocks long does, and a cracked span too short for
   its depth slides off its ends. `/anchor structure inspect` says which joints pivot, and the `arching` setting turns
   it off.
+- **The ground gives.** Natural ground squeezes under what is built on it as elastic ground of its matter's measured
+  stiffness does, from the stiffnesses engineers use for footings, and bears what Eurocode 7 works out from its
+  strength, its friction and the ground heaped around the footing. A block of granite settles 2 mm into soil, and a
+  footing pressed harder than its ground can bear sinks: the ground under it heaps up beside it, with the sound of
+  its block breaking, and what stood on it drops into the hole. Sand bears six granite blocks stacked on one block of
+  it but not seven, and an iron block but not an iron block with a gold one on top. A tall, thin tower on soft ground
+  leans over as a whole once its weight turns it harder than the ground turns it back, so a granite tower one block
+  wide stands 13 blocks tall on soil and leans over and falls at 14, while rock gives next to nothing.
+  `/anchor structure inspect` says how hard a structure's most loaded footing presses its ground and how far it has
+  settled, and the `softGround` setting turns it off.
 
 Known limits of this alpha:
 
@@ -139,8 +149,10 @@ Known limits of this alpha:
 - The glow is drawn as an eye used to the dark sees it, so in bright daylight it shows more than a real glow
   would, and glowing blocks do not light up what is around them.
 - Structures carry only the weight of their blocks and the strain of heat, not the players, animals or items on
-  them. Steel that yields gives way at once instead of bending, and the ground does not give, however soft it is
-  or however hard an arch pushes on it.
+  them, and steel that yields gives way at once instead of bending. The ground gives as though the block under a
+  footing went down for ever, so a layer of sand on stone gives way as deep sand would; it gives way only under what
+  presses down on it, not beside what pushes it sideways, as an arch's end does; and clay settles at once rather
+  than over months.
 - Blocks crack from heat only where they are refined into smaller cells, where neighbouring temperatures differ by
   50 K or more, and a 25 cm cell blurs the steep fall in temperature at a quenched face, so hot glass doused with
   water does not crack.

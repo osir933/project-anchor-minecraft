@@ -30,6 +30,7 @@ final class AnchorConfig {
     static final ModConfigSpec.BooleanValue THERMAL_EXPANSION;
     static final ModConfigSpec.BooleanValue BUCKLING;
     static final ModConfigSpec.BooleanValue ARCHING;
+    static final ModConfigSpec.BooleanValue SOFT_GROUND;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -127,6 +128,14 @@ final class AnchorConfig {
                         + "for its span still sags through, and a short one slides off its ends. Only matters where "
                         + "structures stand or fall by their strength. Takes effect at once.")
                 .define("arching", true);
+        SOFT_GROUND = b.comment("Whether the ground gives under what stands on it, as soil does: a building settles "
+                        + "a little into it, a tall thin tower on soft ground can lean over, and a footing pressed "
+                        + "harder than its ground bears sinks into it, pushing the ground aside, as a heavy pillar "
+                        + "sinks into sand. Ground bears more where more of it is heaped around a footing, so what is "
+                        + "built into the ground holds better than what stands on top of it. Rock gives next to "
+                        + "nothing. Only matters where structures stand or fall by their strength. Takes effect at "
+                        + "once.")
+                .define("softGround", true);
         b.pop();
         SPEC = b.build();
     }

@@ -17,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.BlockParticleOption;
 import net.minecraft.core.particles.ParticleTypes;
@@ -24,6 +25,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -36,6 +38,8 @@ import org.slf4j.Logger;
  * can take crack, with the sound of the block breaking and a puff of its dust, and blocks left with nothing to hold
  * them up fall as falling blocks do, or break where they stand if they cannot fall whole, such as chests, doors and
  * beds. Blocks the game itself would break for want of support, such as torches and bamboo, are left to the game.
+ * Where a footing presses its ground harder than the ground bears, the ground gives way: it is pushed aside, heaving
+ * up beside the footing, and what stood on it sinks into the hole it leaves.
  *
  * <p>Small structures are analysed in the tick that asks, up to a few milliseconds of each tick. A larger one is
  * analysed on a thread of its own, which threads of a pool help with a big one, and settled a fixed number of ticks
@@ -65,6 +69,9 @@ final class LevelStructures {
     /** The most cracks shown per settled analysis. */
     private static final int CRACKS_SHOWN = 32;
 
+    /** Where a block of ground pushed aside by a footing may go, beside the footing: west, east, north and south. */
+    private static final int[][] ASIDE = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+
     /** A falling block hurts what it lands on by this much for each block it fell, as a pointed dripstone does... */
     private static final float DAMAGE_PER_BLOCK = 1.0f;
 
@@ -87,6 +94,7 @@ final class LevelStructures {
      * @param inBackground how many of them were large enough to be analysed in the background
      * @param cracks how many joints cracked
      * @param fallen how many blocks fell, or broke for want of support
+     * @param sunk how many blocks of ground footings sank into
      * @param waiting how many built blocks wait to have their structure checked
      * @param lastMillis how long the last analysis took, in milliseconds
      * @param largest the most built blocks analysed together
@@ -94,7 +102,7 @@ final class LevelStructures {
      * @param failure the error that stopped structures in this level, or {@code null}
      */
     record Report(boolean enabled, boolean thermalShock, long analyses, long inBackground, long cracks, long fallen,
-            int waiting, double lastMillis, int largest, boolean analysing, String failure) {
+            long sunk, int waiting, double lastMillis, int largest, boolean analysing, String failure) {
     }
 
     /**
@@ -112,6 +120,8 @@ final class LevelStructures {
      * @param buckling how many times its loads the structure could carry before it buckles; infinite if it is too
      *     stocky to bow under them, or if slender structures do not buckle
      * @param hinges how many of the structure's cracked joints pivot on an edge, as the joints of an arch do
+     * @param footing how the ground holds up the structure's footing that presses it hardest, or {@code null} if it
+     *     stands on no ground that gives
      * @param pivotsToward the directions in which the block's own joints pivot on an edge
      * @param thermalStress the thermal stress in the block's most loaded cell, for a refined block of brittle
      *     matter, or {@code null}
@@ -124,8 +134,8 @@ final class LevelStructures {
      */
     record Look(boolean built, List<Direction> crackedToward, int blocks, int edge, boolean falls, int falling,
             double load, StructuralAnalysis.BondResult worst, boolean settled, double buckling, int hinges,
-            List<Direction> pivotsToward, ThermalShock.Result thermalStress, boolean fractured, boolean thermalShock,
-            Frame.Expansion expansion, double unstrainedK) {
+            StructuralAnalysis.Footing footing, List<Direction> pivotsToward, ThermalShock.Result thermalStress,
+            boolean fractured, boolean thermalShock, Frame.Expansion expansion, double unstrainedK) {
     }
 
     /** An analysis running in the background, and the game tick it is settled at. */
@@ -138,12 +148,15 @@ final class LevelStructures {
 
     private final ServerLevel level;
     private final HostedWorld hosted;
+    /** Notes a block the game puts in itself, so that it comes in natural. */
+    private final Consumer<BlockPos> putByGame;
     private final ArrayDeque<Fall> falls = new ArrayDeque<>();
     private Pending pending;
     private long analyses;
     private long inBackground;
     private long cracks;
     private long fallen;
+    private long sunk;
     /** Written by the thread that analysed last. */
     private volatile double lastMillis;
     private int largest;
@@ -156,10 +169,12 @@ final class LevelStructures {
      *
      * @param level the level
      * @param hosted the level's simulation
+     * @param putByGame notes a block the game puts in itself, as ground pushed aside, so that it comes in natural
      */
-    LevelStructures(ServerLevel level, HostedWorld hosted) {
+    LevelStructures(ServerLevel level, HostedWorld hosted, Consumer<BlockPos> putByGame) {
         this.level = level;
         this.hosted = hosted;
+        this.putByGame = putByGame;
         this.checked = settings();
     }
 
@@ -225,12 +240,13 @@ final class LevelStructures {
     }
 
     /**
-     * Returns how structures are analysed now: by default, with slender ones buckling and cracked spans standing as
-     * arches unless those are off.
+     * Returns how structures are analysed now: by default, with slender ones buckling, cracked spans standing as
+     * arches and the ground giving under them, unless those are off.
      */
     private static StructuralAnalysis.Settings settings() {
         return StructuralAnalysis.Settings.defaults().withBuckling(AnchorConfig.get(AnchorConfig.BUCKLING))
-                .withArching(AnchorConfig.get(AnchorConfig.ARCHING));
+                .withArching(AnchorConfig.get(AnchorConfig.ARCHING))
+                .withSoftGround(AnchorConfig.get(AnchorConfig.SOFT_GROUND));
     }
 
     /**
@@ -251,7 +267,10 @@ final class LevelStructures {
         return result;
     }
 
-    /** Settles an analysis into the world: shows its cracks and lines up the blocks it left unsupported to fall. */
+    /**
+     * Settles an analysis into the world: shows its cracks, pushes aside the ground its footings sank into and lines
+     * up the blocks it left unsupported to fall.
+     */
     private void settle(StructureSurvey survey, StructuralAnalysis.Result result) {
         analyses++;
         HostedWorld.Settled settled = hosted.settle(survey, result);
@@ -261,6 +280,11 @@ final class LevelStructures {
         cracks += settled.cracks().size();
         for (int k = 0; k < Math.min(CRACKS_SHOWN, settled.cracks().size()); k++) {
             showCrack(settled.cracks().get(k));
+        }
+        for (GridPos g : settled.sunk()) {
+            if (pushAside(new BlockPos(g.x(), g.y(), g.z()))) {
+                sunk++;
+            }
         }
         List<GridPos> falling = new ArrayList<>(settled.falling());
         falling.sort(Comparator.comparingInt(GridPos::y).thenComparing(Comparator.<GridPos>naturalOrder()));
@@ -292,6 +316,59 @@ final class LevelStructures {
             }
             fallen++;
         }
+    }
+
+    /**
+     * Pushes aside a block of ground that a footing above it sank into, as ground that gives way heaves up beside
+     * the footing: the block moves to the first spot beside the footing, at its level or one higher, that is free and
+     * has something firm under it, or breaks, dropping what it would, if there is none. What it moves to comes in
+     * natural, as the ground it came from was. Ground that holds a block entity breaks rather than moves, and ground
+     * that cannot be broken stays. Returns whether the ground gave way.
+     */
+    private boolean pushAside(BlockPos pos) {
+        if (!level.isLoaded(pos)) {
+            return false;
+        }
+        BlockState state = level.getBlockState(pos);
+        if (state.isAir() || state.getDestroySpeed(level, pos) < 0) {
+            return false;
+        }
+        showSinking(pos, state);
+        if (!state.hasBlockEntity()) {
+            BlockPos footing = pos.above();
+            for (int up = 0; up <= 1; up++) {
+                for (int[] d : ASIDE) {
+                    BlockPos to = footing.offset(d[0], up, d[1]);
+                    BlockPos below = to.below();
+                    if (!level.isLoaded(to) || !level.isLoaded(below)) {
+                        continue;
+                    }
+                    BlockState there = level.getBlockState(to);
+                    if (there.canBeReplaced() && there.getFluidState().isEmpty()
+                            && level.getBlockState(below).isFaceSturdy(level, below, net.minecraft.core.Direction.UP)) {
+                        level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL);
+                        level.setBlock(to, state, Block.UPDATE_ALL);
+                        putByGame.accept(to);
+                        return true;
+                    }
+                }
+            }
+        }
+        level.destroyBlock(pos, true);
+        return true;
+    }
+
+    /** Shows ground giving way: the sound of its block breaking, low, and its dust where the footing presses it. */
+    // The sound without a position is deprecated for the sound at one; the block's own sound is the one wanted.
+    @SuppressWarnings("deprecation")
+    private void showSinking(BlockPos pos, BlockState state) {
+        double x = pos.getX() + 0.5;
+        double y = pos.getY() + 1.0;
+        double z = pos.getZ() + 0.5;
+        SoundType sound = state.getSoundType();
+        level.playSound(null, x, y, z, sound.getBreakSound(), SoundSource.BLOCKS, sound.getVolume(),
+                sound.getPitch() * 0.5f);
+        level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK, state), x, y, z, 24, 0.4, 0.05, 0.4, 0.05);
     }
 
     /** Shows a joint cracking: the sound of the block breaking, lower, and its dust where the two blocks meet. */
@@ -343,7 +420,7 @@ final class LevelStructures {
         Optional<StructureSurvey> survey = hosted.survey(g, AnchorConfig.get(AnchorConfig.STRUCTURE_BLOCKS));
         if (survey.isEmpty()) {
             return Optional.of(new Look(false, cracked, 0, 0, false, 0, 0.0, null, true, Double.POSITIVE_INFINITY,
-                    0, List.of(), seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(),
+                    0, null, List.of(), seen.thermalStress(), seen.fractured(), thermalShock, seen.expansion(),
                     seen.environmentK()));
         }
         StructuralAnalysis.Result result = StructuralAnalysis.analyse(survey.get().frame(), settings(), threads());
@@ -365,9 +442,15 @@ final class LevelStructures {
                 }
             }
         }
+        StructuralAnalysis.Footing footing = null;
+        for (StructuralAnalysis.Footing f : result.footings()) {
+            if (footing == null || f.load() > footing.load()) {
+                footing = f;
+            }
+        }
         return Optional.of(new Look(true, cracked, survey.get().blocks(), survey.get().edge(),
                 block == null || block.fell(), result.falling().size(), block == null ? 0.0 : block.load(), worst,
-                result.settled(), result.buckling(), hinges, pivots, seen.thermalStress(), seen.fractured(),
+                result.settled(), result.buckling(), hinges, footing, pivots, seen.thermalStress(), seen.fractured(),
                 thermalShock, seen.expansion(), seen.environmentK()));
     }
 
@@ -378,7 +461,7 @@ final class LevelStructures {
      */
     Report report() {
         return new Report(AnchorConfig.get(AnchorConfig.STRUCTURES_ENABLED),
-                AnchorConfig.get(AnchorConfig.THERMAL_SHOCK), analyses, inBackground, cracks, fallen,
+                AnchorConfig.get(AnchorConfig.THERMAL_SHOCK), analyses, inBackground, cracks, fallen, sunk,
                 hosted.uncheckedStructures(), lastMillis, largest, pending != null, failure);
     }
 
