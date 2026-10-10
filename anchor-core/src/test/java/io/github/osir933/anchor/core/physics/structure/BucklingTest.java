@@ -41,7 +41,7 @@ class BucklingTest {
     private static final double EI = 50e9 / 12;
 
     private static final StructuralAnalysis.Settings WEIGHTLESS =
-            new StructuralAnalysis.Settings(0, 64, 0.02, 1e-4, true);
+            new StructuralAnalysis.Settings(0, 64, 0.02, 1e-4, true, true);
 
     /** A post the width of a fence, a quarter of a metre square, in the middle of a face. */
     private static final Contact POST = Contact.rectangle(0.375, 0.375, 0.625, 0.625);

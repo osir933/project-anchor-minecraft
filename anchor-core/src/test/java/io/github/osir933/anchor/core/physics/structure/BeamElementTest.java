@@ -1,7 +1,9 @@
 package io.github.osir933.anchor.core.physics.structure;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class BeamElementTest {
@@ -81,6 +83,119 @@ class BeamElementTest {
         double deflection = d / det;
         double expected = length * length * length / (3 * e / 12.0) + length / (g * 5.0 / 6.0);
         assertEquals(expected, deflection, 1e-12 * expected);
+    }
+
+    @Test
+    void aHingeTurnsFreelyButCarriesEveryOtherForce() {
+        double[] k = BeamElement.stiffness(new double[] {0.5}, new double[] {5e10}, new double[] {2e10}, Contact.FULL);
+        // A hinge where a half beam meets the ground, near the bottom edge of the face, its line tilted a little.
+        double[] mode = BeamElement.hingeMode(0.5, 0.0, -0.45, 0.02, 0.1, Math.sqrt(0.99));
+        double softness = 1e-6;
+        double[] hinged = BeamElement.released(k, mode, softness);
+        double scale = Math.abs(k[N + 1]);
+        for (int r = 0; r < N; r++) {
+            for (int c = 0; c < N; c++) {
+                assertEquals(hinged[r * N + c], hinged[c * N + r], 1e-9 * scale);
+            }
+        }
+        assertEquals(1 / (1 + softness), BeamElement.hingeTurn(k, mode, softness, mode), 1e-15);
+        Random random = new Random(7);
+        for (int trial = 0; trial < 5; trial++) {
+            double[] d = new double[N];
+            for (int i = 0; i < N; i++) {
+                d[i] = random.nextGaussian() * 1e-4;
+            }
+            // Whatever the ends do, the forces leave next to no moment about the hinge line: the work they would do
+            // turning the far end about it.
+            double free = dot(mode, times(k, d));
+            double held = dot(mode, times(hinged, d));
+            assertTrue(Math.abs(held) <= 2 * softness * Math.abs(free) + 1e-12 * scale, held + " against " + free);
+        }
+        // The hinge turns without straining the beam, and moving both ends alike still strains nothing.
+        double[] turned = times(hinged, mode);
+        for (int r = 0; r < N; r++) {
+            assertEquals(0.0, turned[r], 2 * softness * scale);
+        }
+        double[] shifted = new double[N];
+        shifted[1] = 1;
+        shifted[7] = 1;
+        for (double f : times(hinged, shifted)) {
+            assertEquals(0.0, f, 1e-9 * scale);
+        }
+    }
+
+    @Test
+    void aHingedBeamsGeometricStiffnessIsTheEnergyOfItsKinkedShape() {
+        double length = 1.0;
+        double at = 0.5;
+        double axial = -3e6;
+        double ay = 0.28;
+        double az = -0.96;
+        double softness = 1e-6;
+        double[] k = BeamElement.stiffness(new double[] {0.5, 0.5}, new double[] {5e10, 5e10},
+                new double[] {2e10, 2e10}, Contact.FULL);
+        double[] mode = BeamElement.hingeMode(length, at, 0.4, -0.1, ay, az);
+        double[] kg = BeamElement.geometric(length, axial, Contact.FULL);
+        double[] hinged = BeamElement.releasedGeometric(kg, k, mode, softness, length, at, axial, ay, az);
+        double[] kmode = times(k, mode);
+        double turnScale = dot(mode, kmode) * (1 + softness);
+        Random random = new Random(11);
+        for (int trial = 0; trial < 5; trial++) {
+            double[] d = new double[N];
+            for (int i = 0; i < N; i++) {
+                d[i] = i == 3 || i == 9 ? 0 : random.nextGaussian() * 1e-3;
+            }
+            // The hinge turns by theta; the rest bends as cubic shapes, and beyond the hinge the beam tilts by theta.
+            double theta = dot(kmode, d) / turnScale;
+            double[] bent = new double[N];
+            for (int i = 0; i < N; i++) {
+                bent[i] = d[i] - mode[i] * theta;
+            }
+            // N times the integral of the slope squared, by Gauss's rule on each side of the kink.
+            double energy = 0;
+            double[] nodes = {-0.9061798459386640, -0.5384693101056831, 0, 0.5384693101056831, 0.9061798459386640};
+            double[] weights = {0.2369268850561891, 0.4786286704993665, 0.5688888888888889, 0.4786286704993665,
+                0.2369268850561891};
+            for (double[] piece : new double[][] {{0, at}, {at, length}}) {
+                double half = (piece[1] - piece[0]) / 2;
+                for (int q = 0; q < nodes.length; q++) {
+                    double x = piece[0] + half * (1 + nodes[q]);
+                    double xi = x / length;
+                    double h1 = (-6 * xi + 6 * xi * xi) / length;
+                    double h2 = 1 - 4 * xi + 3 * xi * xi;
+                    double h3 = (6 * xi - 6 * xi * xi) / length;
+                    double h4 = 3 * xi * xi - 2 * xi;
+                    // Slopes: v' takes the turns about z, w' minus the turns about y.
+                    double v = h1 * bent[1] + h2 * bent[5] + h3 * bent[7] + h4 * bent[11];
+                    double w = h1 * bent[2] - h2 * bent[4] + h3 * bent[8] - h4 * bent[10];
+                    if (x > at) {
+                        v += theta * az;
+                        w -= theta * ay;
+                    }
+                    energy += weights[q] * half * axial * (v * v + w * w);
+                }
+            }
+            double matrix = dot(d, times(hinged, d));
+            assertEquals(energy, matrix, 1e-9 * Math.abs(energy));
+        }
+    }
+
+    private static double[] times(double[] m, double[] v) {
+        double[] out = new double[N];
+        for (int r = 0; r < N; r++) {
+            for (int c = 0; c < N; c++) {
+                out[r] += m[r * N + c] * v[c];
+            }
+        }
+        return out;
+    }
+
+    private static double dot(double[] a, double[] b) {
+        double sum = 0;
+        for (int i = 0; i < a.length; i++) {
+            sum += a[i] * b[i];
+        }
+        return sum;
     }
 
     @Test

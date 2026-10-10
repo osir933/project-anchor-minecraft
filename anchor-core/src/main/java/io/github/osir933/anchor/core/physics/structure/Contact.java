@@ -38,6 +38,10 @@ public final class Contact {
     private final double reachS;
     private final double reachT;
     private final double plasticTorque;
+    private final double lowS;
+    private final double highS;
+    private final double lowT;
+    private final double highT;
 
     private Contact(double[] rectangles) {
         this.rectangles = rectangles;
@@ -104,6 +108,10 @@ public final class Contact {
         this.reachS = n > 0 ? Math.max(-minS, maxS) : 0;
         this.reachT = n > 0 ? Math.max(-minT, maxT) : 0;
         this.plasticTorque = tp;
+        this.lowS = centreS + minS;
+        this.highS = centreS + maxS;
+        this.lowT = centreT + minT;
+        this.highT = centreT + maxT;
     }
 
     /**
@@ -337,6 +345,232 @@ public final class Contact {
     double frictionRadius() {
         // A square of side a under even pressure resists turning as if all its friction acted 0.383 a out.
         return 0.383 * Math.sqrt(area);
+    }
+
+    /**
+     * Returns where the patch's centroid lies along the first face axis, in metres from the line between the block
+     * centres, which crosses the face at its middle.
+     *
+     * @return the offset in metres
+     */
+    double centroidY() {
+        return centreS - 0.5;
+    }
+
+    /**
+     * Returns where the patch's centroid lies along the second face axis, in metres from the line between the block
+     * centres.
+     *
+     * @return the offset in metres
+     */
+    double centroidZ() {
+        return centreT - 0.5;
+    }
+
+    /**
+     * Returns how far toward the patch's edge a point lies, seen from its centroid: along each face axis, its
+     * distance from the centroid over the distance from the centroid to the patch's farthest reach on that side, the
+     * larger of the two. A pressing force acting at a point beyond 1 acts beyond the patch, so the blocks tip.
+     *
+     * @param y the point along the first face axis, in metres from the line between the block centres
+     * @param z the point along the second face axis, in metres from that line
+     * @return 0 at the centroid, 1 at the patch's reach, more beyond it
+     */
+    double reach(double y, double z) {
+        double ds = y + 0.5 - centreS;
+        double dt = z + 0.5 - centreT;
+        double s = ds >= 0 ? ds / (highS - centreS) : -ds / (centreS - lowS);
+        double t = dt >= 0 ? dt / (highT - centreT) : -dt / (centreT - lowT);
+        return Math.max(s, t);
+    }
+
+    /**
+     * Returns the area over which a pressing force acting at a point can spread evenly: the largest part of the patch
+     * centred on the point, where the patch overlaps its own mirror image through it. That is how Meyerhof took a
+     * footing loaded off centre to bear, and how masonry codes take a joint (EN 1996-1-1 6.1.2.2): the area shrinks
+     * as the point nears the edge and is gone at it, so a joint pressed off centre crushes at its edge sooner, and one
+     * pressed beyond its edge tips.
+     *
+     * @param y the point along the first face axis, in metres from the line between the block centres
+     * @param z the point along the second face axis, in metres from that line
+     * @return the area in square metres
+     */
+    double effectiveArea(double y, double z) {
+        double s = y + 0.5;
+        double t = z + 0.5;
+        int n = rectangles.length / 4;
+        double area = 0;
+        for (int i = 0; i < n; i++) {
+            for (int k = 0; k < n; k++) {
+                double along = overlap(rectangles[4 * i], rectangles[4 * i + 2], 2 * s - rectangles[4 * k + 2],
+                        2 * s - rectangles[4 * k]);
+                double across = overlap(rectangles[4 * i + 1], rectangles[4 * i + 3], 2 * t - rectangles[4 * k + 3],
+                        2 * t - rectangles[4 * k + 1]);
+                area += along * across;
+            }
+        }
+        return area;
+    }
+
+    /**
+     * Returns how far toward a point a pressing force may act and still be borne: the fraction of the way from the
+     * patch's centroid to the point at which the {@linkplain #effectiveArea effective area} falls to what the force
+     * needs. A force acting farther out than that has too little of the patch to spread over.
+     *
+     * @param y the point along the first face axis, in metres from the line between the block centres
+     * @param z the point along the second face axis, in metres from that line
+     * @param need the area the force needs, in square metres
+     * @return the fraction: 0 if not even the centroid has that much of the patch around it, infinite if the point is
+     *     the centroid and it has
+     */
+    double bearable(double y, double z, double need) {
+        double cy = centroidY();
+        double cz = centroidZ();
+        if (!(effectiveArea(cy, cz) > need)) {
+            return 0;
+        }
+        double dy = y - cy;
+        double dz = z - cz;
+        if (dy == 0 && dz == 0) {
+            return Double.POSITIVE_INFINITY;
+        }
+        if (rectangles.length == 4) {
+            // A rectangle is centred on its centroid, and the area around a point u of the way out is
+            // (w - 2u|dy|)(h - 2u|dz|): the smaller root of that less the need.
+            double ay = Math.abs(dy);
+            double az = Math.abs(dz);
+            double b = (rectangles[2] - rectangles[0]) * az + (rectangles[3] - rectangles[1]) * ay;
+            double c = area - need;
+            return c / (b + Math.sqrt(b * b - 4 * ay * az * c));
+        }
+        // Otherwise by halving, out to where the line leaves the patch's reach and no area is left.
+        double lo = 0;
+        double hi = 1 / reach(y, z);
+        for (int i = 0; i < 60; i++) {
+            double mid = 0.5 * (lo + hi);
+            if (effectiveArea(cy + mid * dy, cz + mid * dz) > need) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    /**
+     * Returns how far a point must move along a direction for a pressing force acting there to be borne: the least
+     * distance at which the {@linkplain #effectiveArea effective area} grows to what the force needs, looking no
+     * farther than where the way passes nearest the patch's centroid.
+     *
+     * @param y the point along the first face axis, in metres from the line between the block centres
+     * @param z the point along the second face axis, in metres from that line
+     * @param dy the direction to move in along the first face axis, a unit vector with {@code dz}
+     * @param dz the direction along the second
+     * @param need the area the force needs, in square metres
+     * @return the distance in metres, 0 if the point already has that much of the patch around it, or not a number
+     *     if no point on the way has
+     */
+    double inward(double y, double z, double dy, double dz, double need) {
+        if (effectiveArea(y, z) >= need) {
+            return 0;
+        }
+        double far = (centroidY() - y) * dy + (centroidZ() - z) * dz;
+        if (!(far > 0) || !(effectiveArea(y + far * dy, z + far * dz) >= need)) {
+            return Double.NaN;
+        }
+        double lo = 0;
+        double hi = far;
+        for (int i = 0; i < 60; i++) {
+            double mid = 0.5 * (lo + hi);
+            if (effectiveArea(y + mid * dy, z + mid * dz) >= need) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        return hi;
+    }
+
+    /**
+     * Returns how the {@linkplain #effectiveArea effective area} changes as the point moves: its gradient, which
+     * points away from the edge the point is nearest to.
+     *
+     * @param y the point along the first face axis, in metres from the line between the block centres
+     * @param z the point along the second face axis, in metres from that line
+     * @return the change of area per metre along the first face axis and along the second, in square metres per
+     *     metre
+     */
+    double[] effectiveAreaGradient(double y, double z) {
+        double s = y + 0.5;
+        double t = z + 0.5;
+        int n = rectangles.length / 4;
+        double dy = 0;
+        double dz = 0;
+        for (int i = 0; i < n; i++) {
+            for (int k = 0; k < n; k++) {
+                double s0 = rectangles[4 * i];
+                double s1 = rectangles[4 * i + 2];
+                double t0 = rectangles[4 * i + 1];
+                double t1 = rectangles[4 * i + 3];
+                double ms0 = 2 * s - rectangles[4 * k + 2];
+                double ms1 = 2 * s - rectangles[4 * k];
+                double mt0 = 2 * t - rectangles[4 * k + 3];
+                double mt1 = 2 * t - rectangles[4 * k + 1];
+                double along = overlap(s0, s1, ms0, ms1);
+                double across = overlap(t0, t1, mt0, mt1);
+                if (along <= 0 || across <= 0) {
+                    continue;
+                }
+                // Moving the point moves the mirror image twice as far: the overlap grows where the image's edge
+                // bounds it from above and shrinks where it bounds it from below.
+                dy += across * ((ms1 < s1 ? 2 : 0) - (ms0 > s0 ? 2 : 0));
+                dz += along * ((mt1 < t1 ? 2 : 0) - (mt0 > t0 ? 2 : 0));
+            }
+        }
+        return new double[] {dy, dz};
+    }
+
+    /**
+     * Returns how long a straight line on the face runs within the patch.
+     *
+     * @param y a point on the line along the first face axis, in metres from the line between the block centres
+     * @param z the point along the second face axis
+     * @param dy the line's direction along the first face axis, a unit vector with {@code dz}
+     * @param dz its direction along the second
+     * @return the length in metres
+     */
+    double chord(double y, double z, double dy, double dz) {
+        double s = y + 0.5;
+        double t = z + 0.5;
+        int n = rectangles.length / 4;
+        double length = 0;
+        for (int i = 0; i < n; i++) {
+            double lo = Double.NEGATIVE_INFINITY;
+            double hi = Double.POSITIVE_INFINITY;
+            double[] from = {s, t};
+            double[] step = {dy, dz};
+            for (int a = 0; a < 2; a++) {
+                double low = rectangles[4 * i + a];
+                double high = rectangles[4 * i + 2 + a];
+                if (Math.abs(step[a]) < 1e-12) {
+                    if (from[a] < low || from[a] > high) {
+                        hi = lo;
+                    }
+                    continue;
+                }
+                double u0 = (low - from[a]) / step[a];
+                double u1 = (high - from[a]) / step[a];
+                lo = Math.max(lo, Math.min(u0, u1));
+                hi = Math.min(hi, Math.max(u0, u1));
+            }
+            length += Math.max(0, hi - lo);
+        }
+        return length;
+    }
+
+    /** Returns how far two intervals overlap, or zero if they do not. */
+    private static double overlap(double a0, double a1, double b0, double b1) {
+        return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
     }
 
     /** Saint-Venant's torsion constant of a solid rectangle, after Roark's series. */
