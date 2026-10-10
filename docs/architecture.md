@@ -292,6 +292,29 @@ and afresh otherwise, as one exchange declared to the ledger and one event; a co
 its budget of cells comes back as its totals. It wakes every section the box touches and makes the sky forget the
 temperatures of the surfaces in the box, which then follow the restored blocks.
 
+A block's appearance also gives its **shape** (`physics.structure.Shape`), boxes inside its cube that say where it
+touches its neighbours, so a slab touches the block beside it over half a face and a fence only where its post is.
+A block too thin to count for heat, such as a fence, may name a **frame**, the material that carries its loads, at
+the temperature of the air or water around it and with the mass its shape holds. A block **carries** loads when its
+matter, or its frame's, has mechanics and is not all molten, and its shape reaches a face of its cube. The world as
+it was found is **ground**, which holds still. Matter brought into a block that carried no load, as a placed block's
+is, is **built**, and so is new matter in a built block. Brought matter is another material, or a frame put up in
+the block, so water freezing into ice, snow piling up and moss spreading over stone stay ground. Blocks the game marks
+**immovable**, as Minecraft's unbreakable blocks are, are never built and hold up whatever hangs from them. Each
+block keeps whether it is built and which of its joints have cracked (`host.StructureFlags`), and section and region
+snapshots save both.
+
+A change that touches loads marks the built blocks around it to be checked, and so do imports, restores and heat that
+changes a built block's strength or stiffness by more than 2 % since it was last checked, which each section looks
+for once in 8 steps. `nextStructure` takes the next block waiting, in a fixed order, and **surveys** the structure it
+belongs to (`host.StructureSurvey`): the survey spreads through the built blocks joined to it, nearest first, up to a
+limit, and takes the natural blocks that carry loads as the ground it stands on. Built blocks beyond the limit, and
+blocks in sections that are not imported, hold still, so a large structure is analysed around the change that
+called for it. The game analyses the survey's frame when and where it likes, then **settles** the result: joints that
+cracked or let go stay cracked, and the blocks left with nothing to hold them up are handed back for the game to let
+fall. If a block the survey looked at changed meanwhile, nothing is settled and the structure waits to be checked
+again, as it does when the game drops an analysis (`checkLater`).
+
 When a hosted world steps is up to `host.Pacer`. At normal speed it steps every few ticks of the game's clock;
 it can also be paused, take steps asked for by hand, run at a speed given in hundredths of normal, or work
 through a number of steps as fast as it may. What a speed is owed is counted in whole hundredths of a tick, so
@@ -329,8 +352,12 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   campfires and lit furnaces. Everything else is guessed from its name (`MaterialGuess`) or its sound, with
   its fill from its collision shape. A block filling less than a fifth of its space counts as the air or
   water around it, so a torch is a heat source in air. Lava and magma never cool in Minecraft, so their
-  sources outrun what they radiate even with every face open. Reloading tags or data packs describes every
-  block again.
+  sources outrun what they radiate even with every face open. A block's shape comes from its collision boxes,
+  with sides within 2/16 of a face taken out to it, so a chest, soul sand or mud holds up what stands on it; a
+  block with no collision, such as a fluid, a flower or one layer of snow, touches nothing, and one of more than 32
+  boxes is taken as its bounding box. A thin block is framed in the material its name suggests when that material
+  carries loads, so a fence is a post of wood and iron bars a lattice of iron. Blocks that cannot be broken, such
+  as bedrock and barriers, are immovable. Reloading tags or data packs describes every block again.
 - **Dimensions.** `LevelHeat` runs one hosted world per dimension, started when the dimension first ticks.
   Block changes arrive through NeoForge's neighbour notifications and are taken in, in sorted order, at the
   start of the next tick. Every few game ticks it imports the sections players have come near, lets go of
@@ -343,6 +370,21 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   holds the same matter as water, so the block keeps its exact state: water frozen at −5 °C becomes ice at
   −5 °C. Steam leaves in a puff of cloud, and the air that takes its place starts at the steam's
   temperature.
+- **Structures.** Each game tick `LevelStructures` takes the built blocks waiting to be checked and analyses the
+  structure each belongs to, up to `maxBlocks` (4096) built blocks at a time. Structures of up to 256 blocks are
+  analysed in the tick, as many as fit into 5 ms; a larger one is analysed on a thread shared by every level and
+  settled exactly max(10, n/64) game ticks after its survey, n being its blocks, waiting for the analysis if it is
+  late, so it falls at the same tick on any machine. Nothing else is analysed meanwhile. A joint that cracks makes
+  its block's breaking sound, lower, and a puff of its dust where the two blocks meet. Blocks left with nothing to
+  hold them up fall as falling blocks, lowest first and at most 256 a tick, and hurt what they land on as pointed
+  dripstone does; blocks that cannot fall whole, such as chests, doors and beds, break where they stand, and blocks
+  the game itself breaks for want of support, such as torches, are left to it. What grows is natural: blocks that
+  change in the tick a tree or another feature grows, up to 16 blocks to its sides, 8 below and 48 above, crops and
+  the blocks around them, and the stone, cobblestone and obsidian lava makes where it meets water. `StructureCommands`
+  holds `/anchor structure inspect`, which tells whether a block is built, how loaded its structure is and which of
+  its joints have cracked, and `/anchor structure mark`, with which operators make a box of blocks built or natural.
+  The structures section of the config switches structures off or bounds one analysis. An error stops structures in
+  that dimension, logs it and shows it in `/anchor heat status`, and heat carries on.
 - **Weather.** A section's surroundings are the base temperature of the biome at its centre. Minecraft's
   snow line (0.15) maps to 0 °C at 23 °C per unit, it cools by 0.05 units per 40 blocks above y = 80 as
   vanilla does, and the result is held between −30 and 45 °C (`Climate`). Its air has a relative humidity of
@@ -369,15 +411,15 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   death. On the client, `LaboratoryScreen` switches the Create New World screen to Creative with commands allowed
   when the world type changes to the Laboratory.
 - **Experiments.** `Experiments` holds the ready-made experiments, each a plan in its own frame: blocks right, up and
-  ahead of the middle of its near edge, turned to the way the player faces, with the blocks it places, the
-  temperatures it starts them at and the probes it leaves. Building one checks that its space fits in the world,
-  that heat runs in all of it and that it is clear (air or plants above the bench, nothing with contents where the
-  bench goes, and solid ground under any liquid poured into the bench), then clears the space from the top down,
-  lays a bench of smooth stone, places solids before liquids, sets the starting temperatures through
-  `LevelHeat.setTemperature`, adds the probes under free names and saves the box as the snapshot
-  `experiment-<name>`. `ExperimentCommands` holds `/anchor experiment list` and `build`, which gives the builder a
-  chart of the probes and offers the speed the experiment was sized for. The experiments were sized by running the
-  engine on the same blocks in 20 °C air until each showed its result within minutes.
+  ahead of the middle of its near edge, turned to the way the player faces, with the blocks it places, the temperatures
+  it starts them at and the probes it leaves. Building one checks that its space fits in the world, that heat runs in
+  all of it and that it is clear (air or plants above the bench, nothing with contents where the bench goes, and solid
+  ground under any liquid poured into the bench), then clears the space from the top down, lays a bench of smooth stone,
+  places solids before liquids, marks it all natural so that nothing of it falls, sets the starting temperatures through
+  `LevelHeat.setTemperature`, adds the probes under free names and saves the box as the snapshot `experiment-<name>`.
+  `ExperimentCommands` holds `/anchor experiment list` and `build`, which gives the builder a chart of the probes and
+  offers the speed the experiment was sized for. The experiments were sized by running the engine on the same blocks in
+  20 °C air until each showed its result within minutes.
 - **Time.** Each game tick is 3.6 simulated seconds, so a Minecraft day lasts 24 simulated hours, and the
   simulation steps every four game ticks. Both are settings. `TimeCommands` holds the `/anchor time` commands,
   with which operators pause a dimension's heat, step it by hand, run it from 0.01 to 1000 times as fast, or
@@ -389,18 +431,20 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
 - **Saving.** `ChunkHeat` holds the snapshots of a chunk's sections as a NeoForge data attachment, so they
   are written and read with the chunk: a short palette per section, then each saved block's position and
   palette index packed in an int array, and masses and enthalpies as the raw bits of their doubles in long
-  arrays. A section is written into its chunk when it is let go, when its chunk unloads (before the chunk
+  arrays, with each built or cracked block's position and flags packed in one more int array. A section is
+  written into its chunk when it is let go, when its chunk unloads (before the chunk
   is saved), when the level saves, when the server stops, and every minute in between, and only if it
   changed. Land nobody is near is paused: brought in again, it carries on from its saved state without
   catching up on the time that passed.
 - **Snapshots.** `Snapshots` keeps a box of up to 64 blocks a side as one compressed NBT file in
-  `anchor/snapshots/<dimension>` in the world's folder: its blocks as a vanilla structure template, marked with
-  the game's data version so a later game can bring them up to date, and its heat as a region snapshot, masses and
-  enthalpies as the raw bits of their doubles. A file is written beside the old one and then moved over it, so a
-  crash never leaves half a snapshot. A restore places the template without updating neighbours, dropping items
-  or setting off the blocks' reactions, as vanilla's structure blocks do, takes the placed blocks into the
-  simulation and gives them their heat, all in one tick. Saving and restoring need every section the box touches
-  simulated; entities are not kept. `SnapshotCommands` holds the `/anchor snapshot` commands.
+  `anchor/snapshots/<dimension>` in the world's folder: its blocks as a vanilla structure template, marked with the
+  game's data version so a later game can bring them up to date, and its heat as a region snapshot, masses and
+  enthalpies as the raw bits of their doubles, with which blocks are built and which joints have cracked. A file is
+  written beside the old one and then moved over it, so a crash never leaves half a snapshot. A restore places the
+  template without updating neighbours, dropping items or setting off the blocks' reactions, as vanilla's structure
+  blocks do, takes the placed blocks into the simulation and gives them their heat, all in one tick. Saving and
+  restoring need every section the box touches simulated; entities are not kept. `SnapshotCommands` holds the `/anchor
+  snapshot` commands.
 - **Failure.** An error stops heat in that dimension, logs it and shows it in `/anchor heat status`; the game
   carries on.
 - **Probes and charts.** `LevelProbes` holds a dimension's probes and charts as a NeoForge data attachment on the
@@ -430,45 +474,46 @@ written in a 3 by 5 pixel font. `instrument.Sparkline` draws a recording as a li
   colour with the glow level as its alpha, added to what is drawn behind it as lightning is.
 
 The adapter's plain-Java parts have unit tests. Everything that needs Minecraft is covered by game tests
-(`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled below
-it becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes the
-temperature, a torch warms the air above it, a section written into its chunk and brought in again comes back
-exactly, the save format keeps every number, a thermal camera reads a hot iron block at its crosshair and shows it
-among the cold floor, its air view shows the warm air above the iron and none of the still air, its tooltip says
-how to use it, an iron block at 1500 K warms a stone block across two blocks of air, the stone walls of a lava pool
-are refined so that their faces read hotter than the stone behind, on the thermometer too, an iron block at 1300 K
-glows with oxidised iron's emissivity on every face but the one on the floor and the one against a stone block,
-and no longer once cooled to 300 K, while a lava pool beside it is left out, and in a noon sun black
-wool takes in more than three times the sunlight of white wool beside it, grows more than 10 K hotter on top, and
-reads so on the thermometer. A probe in a hot iron block records it cooling and a thermometer names the probe, a
-chart of it is a locked map with its line on white paper, a thermometer used while sneaking leaves a probe where it
-touches and takes it away again, the format probes are saved in keeps every reading, and the thermometer's tooltip
-says how to use it. Paused, heat holds a hot iron block's temperature while the game runs on and a thermometer
-says heat is paused; it then takes exactly the three steps asked for and stays paused, sent 60 steps ahead it
-takes several a tick, and at twice normal speed it takes twice the steps. Packed ice saved in a snapshot at
-−23 °C and then melted comes back from it as packed ice with exactly the heat it had, and the water that spread
-from it is gone; the snapshot file keeps every number, those of a refined block's cells too, and damaged files are
-refused. The laboratory's biome gives air at 20 °C and 50 % humidity with no rain, the Laboratory world type is
-there, and the game test world is no laboratory, so heat there follows the sun. Each ready-made experiment is
-built on a bench of stone, in an environment of its own since it asks heat for the steps it needs, and after them
-its probes show what it promises: after 300 steps the cooling iron's top is below 900 °C and more than 100 K
-cooler than its middle, and its snapshot brings the iron back at 1500 K; after 2400 steps the top of the copper rod
-is more than 30 K warmer than the iron's, the iron's 5 K warmer than the stone's and the stone's 1.5 K warmer than
-the brick's; after 3500 steps the ice is at 0 °C and still ice while the stone beside it is past 4 °C; and after
-1200 steps the iron in wool is within 5 K of its start and more than 15 K warmer than the one in glass, which is
-more than 5 K warmer than the bare one. The game tests load the mod from the build directories, so CI also
-installs a NeoForge server the way players do, starts it with the released jar and checks that the mod loads, its
-self-test passes, heat runs and can be paused and resumed, snapshots can be listed and are refused where heat does
-not run, experiments can be listed and are not built where heat does not run, the server stops cleanly and nothing
-is logged as an error (`.github/scripts/smoke_test.py`). Last, CI starts the game itself under a
-virtual display with software drawing. Started with `-Danchor.renderTest=true`, the mod's `RenderTest` creates a
-laboratory world and checks that its floor's top is light grey concrete at y = −1, that its game rules hold time
-and weather and stop spawning and random ticks, that its clock stands at noon with clear weather, that heat there
-follows no sun and that the player was given a thermometer and a thermal camera. It then builds a dark room with
-two iron blocks in it, heats them to 1100 K and 1600 K, photographs them, cools them and photographs them again,
-and checks that the laboratory's clock did not move meanwhile; `.github/scripts/render_check.py` checks that both
-blocks glowed where they are, red to orange, the hotter one brighter and yellower, and that the glow was gone once
-they cooled.
+(`AnchorGameTests`) that run on a real server in CI: packed ice warmed past 0 °C becomes water, water chilled below it
+becomes ice, water heated past boiling leaves air, a block placed and heated in the same tick takes the temperature, a
+torch warms the air above it, a section written into its chunk and brought in again comes back exactly, the save format
+keeps every number, a thermal camera reads a hot iron block at its crosshair and shows it among the cold floor, its air
+view shows the warm air above the iron and none of the still air, its tooltip says how to use it, an iron block at 1500
+K warms a stone block across two blocks of air, the stone walls of a lava pool are refined so that their faces read
+hotter than the stone behind, on the thermometer too, an iron block at 1300 K glows with oxidised iron's emissivity on
+every face but the one on the floor and the one against a stone block, and no longer once cooled to 300 K, while a lava
+pool beside it is left out, and in a noon sun black wool takes in more than three times the sunlight of white wool
+beside it, grows more than 10 K hotter on top, and reads so on the thermometer. A probe in a hot iron block records it
+cooling and a thermometer names the probe, a chart of it is a locked map with its line on white paper, a thermometer
+used while sneaking leaves a probe where it touches and takes it away again, the format probes are saved in keeps every
+reading, and the thermometer's tooltip says how to use it. Paused, heat holds a hot iron block's temperature while the
+game runs on and a thermometer says heat is paused; it then takes exactly the three steps asked for and stays paused,
+sent 60 steps ahead it takes several a tick, and at twice normal speed it takes twice the steps. Packed ice saved in a
+snapshot at −23 °C and then melted comes back from it as packed ice with exactly the heat it had, and the water that
+spread from it is gone; the snapshot file keeps every number, those of a refined block's cells too, and damaged files
+are refused. The laboratory's biome gives air at 20 °C and 50 % humidity with no rain, the Laboratory world type is
+there, and the game test world is no laboratory, so heat there follows the sun. Each ready-made experiment is built on a
+bench of stone, in an environment of its own since it asks heat for the steps it needs, and after them its probes show
+what it promises: after 300 steps the cooling iron's top is below 900 °C and more than 100 K cooler than its middle, and
+its snapshot brings the iron back at 1500 K; after 2400 steps the top of the copper rod is more than 30 K warmer than
+the iron's, the iron's 5 K warmer than the stone's and the stone's 1.5 K warmer than the brick's; after 3500 steps the
+ice is at 0 °C and still ice while the stone beside it is past 4 °C; and after 1200 steps the iron in wool is within 5 K
+of its start and more than 15 K warmer than the one in glass, which is more than 5 K warmer than the bare one. A stone
+block put up in the air falls to the floor, a stone block on an oak fence stands, analysed with the fence and still
+there 40 ticks later, taking the foot out of a cobblestone pillar three blocks high lets the two above fall into its
+place, and a placed block is still built when its section is written into its chunk and brought in again, while the
+floor under it is still natural. The game tests load the mod from the build directories, so CI also installs a NeoForge
+server the way players do, starts it with the released jar and checks that the mod loads, its self-test passes, heat
+runs and can be paused and resumed, snapshots can be listed and are refused where heat does not run, experiments can be
+listed and are not built where heat does not run, the server stops cleanly and nothing is logged as an error
+(`.github/scripts/smoke_test.py`). Last, CI starts the game itself under a virtual display with software drawing.
+Started with `-Danchor.renderTest=true`, the mod's `RenderTest` creates a laboratory world and checks that its floor's
+top is light grey concrete at y = −1, that its game rules hold time and weather and stop spawning and random ticks, that
+its clock stands at noon with clear weather, that heat there follows no sun and that the player was given a thermometer
+and a thermal camera. It then builds a dark room with two iron blocks in it, heats them to 1100 K and 1600 K,
+photographs them, cools them and photographs them again, and checks that the laboratory's clock did not move meanwhile;
+`.github/scripts/render_check.py` checks that both blocks glowed where they are, red to orange, the hotter one brighter
+and yellower, and that the glow was gone once they cooled.
 
 ## Requests
 
@@ -501,7 +546,7 @@ moving, the sun and the night sky warm and cool the land, probes record temperat
 operators can pause heat, step it, run it faster or slower, send it ahead, and save an experiment as a snapshot to
 rewind it to, hot blocks glow in the colours of a black body, and the Laboratory world type gives experiments steady
 surroundings, with ready-made experiments to build there. Phase 2, structure and fracture, has begun: materials
-have mechanical properties that heat softens, and the engine works out whether a structure of blocks stands and what
-breaks if it does not. Next, structures in the game, then thermal stress, buckling and fracture inside blocks. After
+have mechanical properties that heat softens, and what players build stands or falls by the strength of its blocks,
+cracking where it is overloaded. Next, thermal stress, buckling and fracture inside blocks. After
 that come rigid bodies, contact and emergent tools; materials processing and microstructure; fluids and chemistry;
 electricity and control; causal targeting and molecular dynamics; and finally life and society, on the way to 1.0.
